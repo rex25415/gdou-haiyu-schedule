@@ -352,5 +352,20 @@ class AppUpdateManagerTest {
         assertTrue(syncJs.contains("classifyNonJsonHtml"))
         assertTrue(syncJs.contains("需先在上方教务页确认通知或完成评教"))
         assertTrue(syncJs.contains("queryExamsOnce(workingEp, \"\", \"\")"))
+        assertTrue(syncJs.contains("scrapeExamsFromCurrentDom"))
+        assertTrue(syncJs.contains("scrapeGradesFromCurrentDom"))
+        assertTrue(syncJs.contains("sjkList"))
+        assertTrue(syncJs.contains("syncLevelExamsGentle"))
+
+        val roomJs = GdouSyncScript.buildQueryEmptyClassroomsScript("海滨", 13, 1, 1, 2, "实验")
+        assertTrue(roomJs.contains("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155"))
+        assertTrue(roomJs.contains("onEmptyClassroomsLoaded"))
+
+        val domJs = GdouSyncScript.buildScrapeCurrentPageDomScript()
+        assertTrue(domJs.contains("已从当前网页表格直接提取"))
+        assertTrue(decoded.practiceCourses.isEmpty())
+        assertTrue(decoded.levelExams.isEmpty())
+        assertEquals(160.0, decoded.settings.creditTargets.totalRequired, 0.01)
+        assertFalse(decoded.settings.compactScheduleBanner)
     }
 }

@@ -56,12 +56,28 @@ data class CourseItem(
     val weeks: List<Int>,
     val colorIndex: Int = -1,
     val credit: String = "",
+    val courseType: String = "", // 必修 / 限选 / 任选
+    val examMethod: String = "", // 考试 / 考查
+    val classGroup: String = "", // 教学班名称
+    val totalHours: String = "", // 总学时
     val note: String = "",
     val absenceCount: Int = 0,
     val bonusCount: Int = 0,
     val customStartTime: String? = null,
     val customEndTime: String? = null,
     val isManual: Boolean = false
+)
+
+@Serializable
+data class PracticeCourseItem(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val teacher: String = "",
+    val weeksText: String = "",
+    val weeks: List<Int> = emptyList(),
+    val credit: String = "",
+    val courseType: String = "实践环节",
+    val note: String = ""
 )
 
 @Serializable
@@ -76,8 +92,36 @@ data class GradeItem(
     val courseType: String = "", // 必修 / 选修 / 公选
     val examNature: String = "正常考试",
     val teacher: String = "",
+    val breakdown: String = "", // 平时/实验/期末分项明细
     val isSimulated: Boolean = false,
     val isDemo: Boolean = false
+)
+
+@Serializable
+data class LevelExamItem(
+    val id: String = UUID.randomUUID().toString(),
+    val examName: String,
+    val score: String,
+    val examDate: String = "",
+    val detail: String = ""
+)
+
+@Serializable
+data class GraduationCreditTargets(
+    val totalRequired: Double = 160.0,
+    val compulsoryRequired: Double = 105.0,
+    val electiveRequired: Double = 30.0,
+    val generalRequired: Double = 10.0,
+    val practiceRequired: Double = 15.0
+)
+
+@Serializable
+data class EmptyClassroomItem(
+    val roomName: String,
+    val building: String = "",
+    val roomType: String = "",
+    val seats: String = "",
+    val campus: String = ""
 )
 
 @Serializable
@@ -133,15 +177,19 @@ data class AppSettings(
     val courseCardAlpha: Float = 0.92f,
     val gridRowDensity: GridRowDensity = GridRowDensity.STANDARD,
     val showExamsOnTimetable: Boolean = true,
+    val compactScheduleBanner: Boolean = false,
     val legacyCleanupDismissed: Boolean = false,
     val savedPartnerName: String = "",
-    val savedPartnerCode: String = ""
+    val savedPartnerCode: String = "",
+    val creditTargets: GraduationCreditTargets = GraduationCreditTargets()
 )
 
 @Serializable
 data class AppDataSnapshot(
     val courses: List<CourseItem> = emptyList(),
+    val practiceCourses: List<PracticeCourseItem> = emptyList(),
     val grades: List<GradeItem> = emptyList(),
+    val levelExams: List<LevelExamItem> = emptyList(),
     val exams: List<ExamItem> = emptyList(),
     val tasks: List<TodoTaskItem> = emptyList(),
     val settings: AppSettings = AppSettings()

@@ -13,6 +13,8 @@ import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.GradeItem
+import io.github.rex25415.haiyu.schedule.model.LevelExamItem
+import io.github.rex25415.haiyu.schedule.model.PracticeCourseItem
 import io.github.rex25415.haiyu.schedule.model.ScheduleShareBundle
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -297,7 +299,8 @@ class AppRepository(context: Context) {
         academicYearLabel: String?,
         yearCode: String? = null,
         semesterCode: String? = null,
-        detectedCampusId: String? = null
+        detectedCampusId: String? = null,
+        practiceCourses: List<PracticeCourseItem> = emptyList()
     ): GdouCampus? {
         val current = _state.value
         val manualCourses = current.courses.filter { it.isManual }
@@ -313,6 +316,10 @@ class AppRepository(context: Context) {
                 ?: prevByName[c.name.trim()]
             if (matched != null) {
                 c.copy(
+                    courseType = c.courseType.ifBlank { matched.courseType },
+                    examMethod = c.examMethod.ifBlank { matched.examMethod },
+                    classGroup = c.classGroup.ifBlank { matched.classGroup },
+                    totalHours = c.totalHours.ifBlank { matched.totalHours },
                     note = c.note.ifBlank { matched.note },
                     absenceCount = if (c.absenceCount > 0) c.absenceCount else matched.absenceCount,
                     bonusCount = if (c.bonusCount > 0) c.bonusCount else matched.bonusCount
@@ -338,6 +345,7 @@ class AppRepository(context: Context) {
         persist(
             current.copy(
                 courses = coloredCourses + manualCourses,
+                practiceCourses = practiceCourses,
                 tasks = cleanedTasks,
                 grades = cleanedGrades,
                 exams = cleanedExams,
@@ -528,13 +536,23 @@ class AppRepository(context: Context) {
 
     // ==================== 成绩与考试 ====================
 
-    fun replaceSyncedGrades(grades: List<GradeItem>) {
+    fun replaceSyncedGrades(grades: List<GradeItem>, levelExams: List<LevelExamItem> = emptyList()) {
         val current = _state.value
         val simulated = current.grades.filter { it.isSimulated }
+        val prevBreakdowns = current.grades
+            .filter { !it.isSimulated && it.breakdown.isNotBlank() }
+            .associate { "${it.academicYear}|${it.semester}|${it.courseName}" to it.breakdown }
+        val merged = grades.map { g ->
+            val key = "${g.academicYear}|${g.semester}|${g.courseName}"
+            if (g.breakdown.isBlank() && prevBreakdowns[key] != null) {
+                g.copy(breakdown = prevBreakdowns[key].orEmpty())
+            } else g
+        }
         val nowLabel = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         persist(
             current.copy(
-                grades = grades + simulated,
+                grades = merged + simulated,
+                levelExams = if (levelExams.isNotEmpty()) levelExams else current.levelExams,
                 settings = current.settings.copy(lastSyncTime = nowLabel)
             )
         )
@@ -700,7 +718,9 @@ class AppRepository(context: Context) {
         persist(
             current.copy(
                 courses = emptyList(),
+                practiceCourses = emptyList(),
                 grades = emptyList(),
+                levelExams = emptyList(),
                 exams = emptyList(),
                 tasks = emptyList()
             )

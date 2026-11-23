@@ -88,8 +88,10 @@ object GdouSyncScript {
                     HaiyuBridge.onSyncProgress("正在拉取广海课表与校历数据...");
                     const courseResult = await syncCoursesAndCalendar(XNM, XQM);
                     if (courseResult.ok) {
+                        const pList = courseResult.practiceCourses || [];
                         HaiyuBridge.onCoursesSynced(JSON.stringify({
                             courses: courseResult.courses,
+                            practiceCourses: pList,
                             semesterStartDate: courseResult.startDate || "",
                             totalWeeks: courseResult.totalWeeks || 20,
                             termLabel: TERM_LABEL,
@@ -97,7 +99,7 @@ object GdouSyncScript {
                             semesterCode: XQM,
                             detectedCampus: courseResult.detectedCampus || ""
                         }));
-                        summary.push("课表 " + courseResult.courses.length + " 条");
+                        summary.push("课表 " + courseResult.courses.length + " 条" + (pList.length > 0 ? ("(含实践 " + pList.length + " 门)") : ""));
                     } else if (MODE === "courses") {
                         HaiyuBridge.onSyncError(courseResult.error);
                         return;
@@ -110,8 +112,12 @@ object GdouSyncScript {
                     HaiyuBridge.onSyncProgress("正在拉取全部历史成绩与绩点...");
                     const gradeResult = await syncGrades();
                     if (gradeResult.ok) {
-                        HaiyuBridge.onGradesSynced(JSON.stringify({ grades: gradeResult.grades }));
-                        summary.push("成绩 " + gradeResult.grades.length + " 门");
+                        const lvList = gradeResult.levelExams || [];
+                        HaiyuBridge.onGradesSynced(JSON.stringify({
+                            grades: gradeResult.grades,
+                            levelExams: lvList
+                        }));
+                        summary.push("成绩 " + gradeResult.grades.length + " 门" + (lvList.length > 0 ? (" · 等级考 " + lvList.length + " 项") : ""));
                     } else if (MODE === "grades") {
                         HaiyuBridge.onSyncError(gradeResult.error);
                         return;
@@ -185,8 +191,10 @@ object GdouSyncScript {
                 }
                 const courseResult = await syncCoursesAndCalendar(targetYear, targetSem);
                 if (courseResult.ok) {
+                    const pList = courseResult.practiceCourses || [];
                     HaiyuBridge.onCoursesSynced(JSON.stringify({
                         courses: courseResult.courses,
+                        practiceCourses: pList,
                         semesterStartDate: courseResult.startDate || "",
                         totalWeeks: courseResult.totalWeeks || 20,
                         termLabel: targetLabel,
@@ -220,6 +228,146 @@ object GdouSyncScript {
             $BASE_PREFIX_HELPER
             const target = window.location.origin + getJwBasePrefix() + "/$safePath";
             window.location.href = target;
+        })();
+        """.trimIndent()
+    }
+
+    /**
+     * 一键从当前正方网页已展示的表格（DOM #tabGrid）直接提取成绩或考试数据（100% 绕过接口拦截兜底）
+     */
+    fun buildScrapeCurrentPageDomScript(): String = """
+        (function() {
+            $COMMON_HELPERS
+            try {
+                if (!checkOnJwDomain()) {
+                    HaiyuBridge.onSyncError("请先登录并进入正方教务成绩或考试查询页");
+                    return;
+                }
+                const domExams = scrapeExamsFromCurrentDom();
+                if (domExams.length > 0) {
+                    HaiyuBridge.onExamsSynced(JSON.stringify({ exams: domExams }));
+                    HaiyuBridge.onSyncComplete("已从当前网页表格直接提取考试 " + domExams.length + " 场");
+                    return;
+                }
+                const domGrades = scrapeGradesFromCurrentDom();
+                if (domGrades.length > 0) {
+                    HaiyuBridge.onGradesSynced(JSON.stringify({ grades: domGrades, levelExams: [] }));
+                    HaiyuBridge.onSyncComplete("已从当前网页表格直接提取成绩 " + domGrades.length + " 门");
+                    return;
+                }
+                HaiyuBridge.onSyncError("当前网页未检测到已加载的考试或成绩表格（请先在网页中点击「查询」展开表格后再试）");
+            } catch (err) {
+                HaiyuBridge.onSyncError("网页表格提取异常：" + (err && err.message ? err.message : String(err)));
+            }
+        })();
+    """.trimIndent()
+
+    /**
+     * 原生级自习空教室只读查询（直接在当前登录态内调用正方场地查询接口，无需在手机小屏网页上戳下拉框）
+     */
+    fun buildQueryEmptyClassroomsScript(
+        campusKeyword: String,
+        weekNumber: Int,
+        dayOfWeek: Int,
+        startSection: Int,
+        endSection: Int,
+        buildingKeyword: String
+    ): String {
+        val safeCampus = campusKeyword.replace("\"", "")
+        val safeBuilding = buildingKeyword.replace("\"", "")
+        val w = weekNumber.coerceIn(1, 25)
+        val d = dayOfWeek.coerceIn(1, 7)
+        val s1 = startSection.coerceIn(1, 12)
+        val s2 = endSection.coerceIn(s1, 12)
+        return """
+        (async function() {
+            $COMMON_HELPERS
+            try {
+                if (!checkOnJwDomain()) {
+                    HaiyuBridge.onSyncError("请先完成广海教务系统登录，再查询空教室");
+                    return;
+                }
+                HaiyuBridge.onSyncProgress("正在连接正方场地系统查询空教室...");
+                await ensureWfwJwSessionIfNeeded();
+
+                let xnm = getDefaultAcademicYear();
+                let xqm = (new Date().getMonth() >= 7 || new Date().getMonth() === 0) ? "3" : "12";
+                let xqhId = "";
+
+                // 1) Pre-warm empty classroom page and discover campus xqh_id & term codes
+                try {
+                    const pageResp = await fetchJwWithFallback("/cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", {
+                        method: "GET",
+                        credentials: "include"
+                    });
+                    if (pageResp.ok) {
+                        const html = await pageResp.text();
+                        const doc = new DOMParser().parseFromString(html, "text/html");
+                        const xnmEl = doc.querySelector("#xnm");
+                        const xqmEl = doc.querySelector("#xqm");
+                        if (xnmEl && xnmEl.value) xnm = String(xnmEl.value).trim();
+                        if (xqmEl && xqmEl.value) xqm = String(xqmEl.value).trim();
+
+                        const xqSelect = doc.querySelector("#xqh_id, select[name='xqh_id']");
+                        if (xqSelect) {
+                            const opts = Array.from(xqSelect.querySelectorAll("option"));
+                            const matched = opts.find(o => o.value && String(o.textContent || "").includes("$safeCampus"));
+                            const firstValid = opts.find(o => o.value && String(o.value).trim().length > 0);
+                            if (matched) xqhId = String(matched.value).trim();
+                            else if (firstValid) xqhId = String(firstValid.value).trim();
+                        }
+                    }
+                } catch (_) {}
+
+                const zcdMask = Math.pow(2, $w - 1);
+                let jcdMask = 0;
+                for (let sec = $s1; sec <= $s2; sec++) {
+                    jcdMask += Math.pow(2, sec - 1);
+                }
+
+                const form = "fwzt=cx&xqh_id=" + encodeURIComponent(xqhId) +
+                    "&xnm=" + encodeURIComponent(xnm) +
+                    "&xqm=" + encodeURIComponent(xqm) +
+                    "&cdlb_id=&cdejlb_id=&qszws=&jszws=&cdmc=" + encodeURIComponent("$safeBuilding") +
+                    "&lh=&jyfs=0&cdjylx=&zcd=" + encodeURIComponent(String(zcdMask)) +
+                    "&xqj=" + encodeURIComponent(String($d)) +
+                    "&jcd=" + encodeURIComponent(String(jcdMask)) +
+                    "&_search=false&nd=" + Date.now() +
+                    "&queryModel.showCount=80&queryModel.currentPage=1&queryModel.sortName=cdbh&queryModel.sortOrder=asc&time=0";
+
+                const resp = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                        "x-requested-with": "XMLHttpRequest"
+                    },
+                    body: form,
+                    credentials: "include"
+                });
+
+                if (!resp.ok) {
+                    HaiyuBridge.onSyncError("空教室接口暂未返回数据（可在教务页点「进入原网页查空教室」查看）");
+                    return;
+                }
+
+                const json = JSON.parse(await resp.text());
+                const rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                const bKw = "$safeBuilding".trim();
+                const rooms = rawItems.map(it => ({
+                    roomName: String(it.cdmc || it.cdbh || "").trim(),
+                    building: String(it.jxlmc || it.lh || "").trim(),
+                    roomType: String(it.cdlbmc || "普通教室").trim(),
+                    seats: String(it.kwzws || it.zws || "").trim(),
+                    campus: String(it.xqmc || "$safeCampus").trim()
+                })).filter(r => r.roomName.length > 0 && (!bKw || r.roomName.includes(bKw) || r.building.includes(bKw)));
+
+                HaiyuBridge.onEmptyClassroomsLoaded(JSON.stringify({
+                    rooms,
+                    summary: "查询到 " + rooms.length + " 间空闲教室"
+                }));
+            } catch (err) {
+                HaiyuBridge.onSyncError("查询空教室失败：" + (err && err.message ? err.message : String(err)));
+            }
         })();
         """.trimIndent()
     }
@@ -655,6 +803,7 @@ object GdouSyncScript {
                 return { ok: false, error: "登录态可能已过期，请刷新教务页面重新登录后再点同步" };
             }
             const kbList = Array.isArray(data && data.kbList) ? data.kbList : [];
+            const sjkList = Array.isArray(data && data.sjkList) ? data.sjkList : [];
             const rawCourses = [];
             for (const raw of kbList) {
                 if (!raw || !raw.kcmc || raw.xqj == null || raw.jcs == null || raw.zcd == null) continue;
@@ -670,21 +819,151 @@ object GdouSyncScript {
                     startSection: sec.startSection,
                     endSection: sec.endSection,
                     weeks,
-                    credit: String(raw.xf || "").trim()
+                    credit: String(raw.xf || "").trim(),
+                    courseType: String(raw.kcxzmc || "").trim(),
+                    examMethod: String(raw.khfsmc || "").trim(),
+                    classGroup: String(raw.jxbmc || "").trim(),
+                    totalHours: String(raw.zxs || "").trim()
+                });
+            }
+            const practiceCourses = [];
+            for (const raw of sjkList) {
+                if (!raw) continue;
+                const pName = normalizeCourseName(raw.kcmc || raw.sjkcgs || "");
+                if (!pName) continue;
+                const wTxt = String(raw.qsjsz || raw.zcd || "").trim();
+                practiceCourses.push({
+                    name: pName,
+                    teacher: String(raw.jsxm || raw.xm || "").trim(),
+                    weeksText: wTxt,
+                    weeks: parseWeeks(wTxt),
+                    credit: String(raw.xf || "").trim(),
+                    courseType: String(raw.kcxzmc || "实践环节").trim(),
+                    note: String(raw.sjkcgs && raw.kcmc ? raw.sjkcgs : "").trim()
                 });
             }
             const merged = mergeAndDistinctCourses(rawCourses);
-            if (merged.length === 0) {
+            if (merged.length === 0 && practiceCourses.length === 0) {
                 return { ok: false, error: "该学年学期未查询到课程，请核对学年学期选择" };
             }
             const maxWeek = merged.reduce((m, c) => Math.max(m, ...c.weeks), 16);
             return {
                 ok: true,
                 courses: merged,
+                practiceCourses,
                 startDate: semInfo ? semInfo.startDate : null,
                 totalWeeks: Math.max(maxWeek, semInfo ? semInfo.totalWeeks : 20),
                 detectedCampus: detectCampusFromKbList(kbList)
             };
+        }
+
+        function readCellByCol(row, colSuffixes) {
+            for (const sfx of colSuffixes) {
+                const cell = row.querySelector("td[aria-describedby$='_" + sfx + "'], td[aria-describedby*='" + sfx + "']");
+                if (cell) {
+                    const txt = String(cell.textContent || "").replace(/\u00a0/g, " ").trim();
+                    if (txt) return txt;
+                }
+            }
+            return "";
+        }
+
+        function scrapeGradesFromCurrentDom() {
+            const rows = Array.from(document.querySelectorAll("#tabGrid tr.jqgrow, table.ui-jqgrid-btable tr.jqgrow"));
+            const out = [];
+            for (const row of rows) {
+                const courseName = readCellByCol(row, ["kcmc"]);
+                if (!courseName) continue;
+                const xnmText = readCellByCol(row, ["xnmmc", "xnm"]) || "未知学年";
+                const rawXq = readCellByCol(row, ["xqmmc", "xqm"]);
+                const semText = (rawXq === "1" || rawXq === "3") ? "第一学期"
+                    : ((rawXq === "2" || rawXq === "12") ? "第二学期" : (rawXq || "第一学期"));
+                const score = readCellByCol(row, ["cj", "bfzcj"]);
+                const jd = parseFloat(readCellByCol(row, ["jd"]));
+                const xf = parseFloat(readCellByCol(row, ["xf"]));
+                const courseType = readCellByCol(row, ["kcxzmc", "kclbmc"]);
+                const examNature = readCellByCol(row, ["ksxz"]) || "正常考试";
+                const teacher = readCellByCol(row, ["jsxm"]);
+                out.push({
+                    academicYear: xnmText,
+                    semester: semText,
+                    courseName,
+                    score,
+                    gradePoint: isNaN(jd) ? 0.0 : jd,
+                    credit: isNaN(xf) ? 0.0 : xf,
+                    courseType,
+                    examNature,
+                    teacher,
+                    breakdown: ""
+                });
+            }
+            return out;
+        }
+
+        function scrapeExamsFromCurrentDom() {
+            const rows = Array.from(document.querySelectorAll("#tabGrid tr.jqgrow, table.ui-jqgrid-btable tr.jqgrow"));
+            const out = [];
+            for (const row of rows) {
+                const courseName = readCellByCol(row, ["kcmc"]);
+                const examTimeRaw = readCellByCol(row, ["kssj"]);
+                if (!courseName || !examTimeRaw) continue;
+                const academicYear = readCellByCol(row, ["xnmc", "xnmmc", "xnm"]);
+                const semester = readCellByCol(row, ["xqmmc", "xqm"]);
+                const location = readCellByCol(row, ["cdmc", "ksmc"]);
+                const seatNumber = readCellByCol(row, ["zwh"]);
+                const ksmc = readCellByCol(row, ["ksmc"]);
+                const ksfs = readCellByCol(row, ["ksfs", "khfs"]);
+                const examType = [ksmc, ksfs].filter(Boolean).join(" · ") || "期末考试";
+                const campus = readCellByCol(row, ["cdxqmc"]);
+                out.push({
+                    academicYear,
+                    semester,
+                    courseName,
+                    examTimeRaw,
+                    location,
+                    seatNumber,
+                    examType,
+                    campus
+                });
+            }
+            return out;
+        }
+
+        async function syncLevelExamsGentle() {
+            const eps = [
+                "/cjcx/djkscx_cxXsDjksxxIndex.html?doType=query&gnmkdm=N305010",
+                "/cjcx/djkscx_cxXsDjksxxIndex.html?doType=query&gnmkdm=N358115"
+            ];
+            const form = "_search=false&nd=" + Date.now() + "&queryModel.showCount=100&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+            for (const ep of eps) {
+                try {
+                    const resp = await fetchJwJsonWithFallback(ep, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                            "x-requested-with": "XMLHttpRequest"
+                        },
+                        body: form,
+                        credentials: "include"
+                    });
+                    if (!resp.ok) continue;
+                    const json = JSON.parse(await resp.text());
+                    const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                    const mapped = items.map(it => {
+                        const examName = String(it.djksmc || it.ksmc || "").trim();
+                        const score = String(it.cj || it.zcj || it.dj || "").trim();
+                        const examDate = String(it.ksrq || it.xnmc || "").trim();
+                        const parts = [];
+                        if (it.tlcj) parts.push("听力:" + it.tlcj);
+                        if (it.ydcj) parts.push("阅读:" + it.ydcj);
+                        if (it.xzcj) parts.push("写作:" + it.xzcj);
+                        if (it.zhcj) parts.push("综合:" + it.zhcj);
+                        return { examName, score, examDate, detail: parts.join(" · ") };
+                    }).filter(x => x.examName.length > 0 && x.score.length > 0);
+                    if (mapped.length > 0) return mapped;
+                } catch (_) {}
+            }
+            return [];
         }
 
         async function syncGrades() {
@@ -733,6 +1012,11 @@ object GdouSyncScript {
                         : (rawXq === "2" || rawXq === "12" ? "第二学期" : (rawXq || "第一学期"));
                     const jd = parseFloat(it.jd);
                     const xf = parseFloat(it.xf);
+                    const subParts = [];
+                    if (it.pscj) subParts.push("平时:" + it.pscj);
+                    if (it.qzcj) subParts.push("期中:" + it.qzcj);
+                    if (it.sycj) subParts.push("实验:" + it.sycj);
+                    if (it.qmcj) subParts.push("期末:" + it.qmcj);
                     return {
                         academicYear: xnmText || "未知学年",
                         semester: semText,
@@ -742,10 +1026,13 @@ object GdouSyncScript {
                         credit: isNaN(xf) ? 0.0 : xf,
                         courseType: String(it.kcxzmc || it.kclbmc || "").trim(),
                         examNature: String(it.ksxz || "正常考试").trim(),
-                        teacher: String(it.jsxm || "").trim()
+                        teacher: String(it.jsxm || "").trim(),
+                        breakdown: subParts.join(" · ")
                     };
                 }).filter(g => g.courseName.length > 0);
             }
+
+            const levelExams = await syncLevelExamsGentle();
 
             async function queryGradesOnce(ep, xnmVal, xqmVal) {
                 const form = "xnm=" + encodeURIComponent(xnmVal) +
@@ -775,7 +1062,7 @@ object GdouSyncScript {
                     workingEps.push(ep);
                     const mapped = mapGradeItems(items);
                     if (mapped.length > 0) {
-                        return { ok: true, grades: mapped };
+                        return { ok: true, grades: mapped, levelExams };
                     }
                 } catch (e) {
                     // Try next endpoint
@@ -804,9 +1091,15 @@ object GdouSyncScript {
                         } catch (_) {}
                     }
                     if (collected.length > 0) {
-                        return { ok: true, grades: collected };
+                        return { ok: true, grades: collected, levelExams };
                     }
                 }
+            }
+
+            // DOM Table Fallback: if user already opened the grade query page in WebView, scrape #tabGrid directly!
+            const domGrades = scrapeGradesFromCurrentDom();
+            if (domGrades.length > 0) {
+                return { ok: true, grades: domGrades, levelExams };
             }
 
             return { ok: false, error: "暂未获取到成绩（可能当前未出分或需先在教务页确认学业通知）" };
@@ -828,6 +1121,13 @@ object GdouSyncScript {
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105",
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358110"
             ]));
+
+            function formatExamTypeLabel(it) {
+                const name = String(it.ksmc || "").trim();
+                const mode = String(it.ksfs || it.khfs || "").trim();
+                if (name && mode && !name.includes(mode)) return name + " · " + mode;
+                return name || mode || "期末考试";
+            }
 
             async function queryExamsOnce(ep, qXnm, qXqm) {
                 const form = "xnm=" + encodeURIComponent(qXnm) + "&xqm=" + encodeURIComponent(qXqm) +
@@ -852,7 +1152,7 @@ object GdouSyncScript {
                     examTimeRaw: String(it.kssj || "").trim(),
                     location: String(it.cdmc || it.ksmc || "").trim(),
                     seatNumber: String(it.zwh || "").trim(),
-                    examType: String(it.ksmc || it.ksfs || "期末考试").trim(),
+                    examType: formatExamTypeLabel(it),
                     campus: String(it.cdxqmc || "").trim()
                 })).filter(ex => ex.courseName.length > 0);
             }
@@ -909,7 +1209,7 @@ object GdouSyncScript {
                         examTimeRaw: String(it.kssj || "").trim(),
                         location: String(it.cdmc || it.ksmc || "").trim(),
                         seatNumber: String(it.zwh || "").trim(),
-                        examType: String(it.ksmc || it.ksfs || "期末考试").trim(),
+                        examType: formatExamTypeLabel(it),
                         campus: String(it.cdxqmc || "").trim()
                     })).filter(ex => ex.courseName.length > 0);
                     if (!workingEp) workingEp = ep;
@@ -939,6 +1239,15 @@ object GdouSyncScript {
                         return { ok: true, exams: allExams };
                     }
                 } catch (_) {}
+            }
+
+            // Fallback 3: DOM Table Fallback — if user is already viewing the exam table in WebView, scrape #tabGrid directly!
+            const domExams = scrapeExamsFromCurrentDom();
+            if (domExams.length > 0) {
+                return { ok: true, exams: domExams };
+            }
+
+            if (workingEp) {
                 return { ok: false, error: "教务已联通，当前学期暂未公布考场安排" };
             }
 

@@ -41,25 +41,24 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -70,8 +69,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -137,6 +134,7 @@ import io.github.rex25415.haiyu.schedule.ui.components.BellScheduleReferenceDial
 import io.github.rex25415.haiyu.schedule.ui.components.FreeSlotMatcherBottomSheet
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
 import io.github.rex25415.haiyu.schedule.ui.components.ScheduleShareCodeDialog
+import io.github.rex25415.haiyu.schedule.ui.components.ScheduleToolboxBottomSheet
 import io.github.rex25415.haiyu.schedule.ui.theme.coursePaletteFor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -174,7 +172,9 @@ fun ScheduleScreen(
     onParsePartnerShareCode: (String) -> Result<ScheduleShareBundle>,
     onSavePartnerProfile: (name: String, code: String) -> Unit,
     onShowMessage: (String) -> Unit,
-    onApplyHolidayShift: (sourceWeek: Int, sourceDay: Int, targetWeek: Int, targetDay: Int, move: Boolean) -> Unit
+    onApplyHolidayShift: (sourceWeek: Int, sourceDay: Int, targetWeek: Int, targetDay: Int, move: Boolean) -> Unit,
+    onOpenEmptyClassroom: () -> Unit = {},
+    onToggleCompactBanner: () -> Unit = {}
 ) {
     val settings = snapshot.settings
     // Live 30s clock ticker + immediate ON_RESUME refresh so overnight transitions update instantly!
@@ -238,6 +238,11 @@ fun ScheduleScreen(
     var showFreeSlotMatcher by remember { mutableStateOf(false) }
     var selectedExamDetail by remember { mutableStateOf<ResolvedExamGridBlock?>(null) }
     var showAllWeekExamsSheet by remember { mutableStateOf(false) }
+    var showPracticeCoursesDialog by remember { mutableStateOf(false) }
+
+    val weekPracticeCourses = remember(snapshot.practiceCourses, selectedWeek) {
+        snapshot.practiceCourses.filter { it.weeks.isEmpty() || selectedWeek in it.weeks }
+    }
 
     val pinnedKeys = remember(settings.pinnedConflictKeys) { settings.pinnedConflictKeys.toSet() }
     val resolvedTimeMap = remember(snapshot.courses, settings.campus) {
@@ -377,7 +382,7 @@ fun ScheduleScreen(
                                     }
                             ) {
                                 Text(
-                                    text = "回到本周",
+                                    text = "↩ 回第${actualCurrentWeek}周",
                                     fontSize = 10.sp,
                                     lineHeight = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -436,90 +441,16 @@ fun ScheduleScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Box {
-                        IconButton(
-                            onClick = { showToolsMenu = true },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.MoreVert,
-                                contentDescription = "课表更多工具",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showToolsMenu,
-                            onDismissRequest = { showToolsMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("本学期课程检索") },
-                                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showCourseSearchSheet = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("手动添加课程") },
-                                leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    addPrefillDay = selectedDayOfWeek
-                                    addPrefillSection = 1
-                                    editingCourse = null
-                                    showAddCourseSheet = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("生成本周高清课表图") },
-                                leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    onExportWeekImage(selectedWeek)
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("节假日一键调休") },
-                                leadingIcon = { Icon(Icons.Rounded.SwapHoriz, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showHolidayShiftDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("广海作息时间速查表") },
-                                leadingIcon = { Icon(Icons.Rounded.Schedule, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showBellRefDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("同班课表分享码（互传）") },
-                                leadingIcon = { Icon(Icons.Rounded.Share, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showShareCodeDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("空课交集对比（室友/搭子）") },
-                                leadingIcon = { Icon(Icons.Rounded.Group, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    showFreeSlotMatcher = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("复制本周课表文本") },
-                                leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
-                                onClick = {
-                                    showToolsMenu = false
-                                    onCopyWeekScheduleText(selectedWeek)
-                                }
-                            )
-                        }
+                    IconButton(
+                        onClick = { showToolsMenu = true },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Apps,
+                            contentDescription = "课表百宝箱",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
@@ -539,15 +470,19 @@ fun ScheduleScreen(
             )
         } else {
             val cfg = LocalConfiguration.current
-            val isCompactHeight = cfg.screenHeightDp < 600 ||
-                cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            val isViewportShort = cfg.screenHeightDp < 600 ||
+                cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE ||
+                settings.gridRowDensity == GridRowDensity.COMPACT
+            val isCompactBannerActive = isViewportShort || settings.compactScheduleBanner
             NextClassHeroBanner(
                 termWeekInfo = termWeekInfo,
                 todayStatuses = todayStatuses,
                 tomorrowCourses = tomorrowCourses,
                 todayDayOfWeek = today.dayOfWeek.value,
                 tomorrowDayOfWeek = today.plusDays(1).dayOfWeek.value,
-                isCompactHeight = isCompactHeight,
+                isCompactHeight = isCompactBannerActive,
+                isBannerCollapsed = settings.compactScheduleBanner,
+                onToggleBannerCollapse = if (!isViewportShort) onToggleCompactBanner else null,
                 isDark = isDark,
                 onCourseClick = { detailCourse = it },
                 onConflictClick = { dayOfWeek, overlapped ->
@@ -555,8 +490,8 @@ fun ScheduleScreen(
                 }
             )
 
-            // Unified Smart Status Pill Row (compact side-by-side Exam + Conflict + DDL chips, zero vertical bloat!)
-            if (selectedWeekExams.isNotEmpty() || urgentTasks.isNotEmpty() || weekConflictClusters.isNotEmpty()) {
+            // Unified Smart Status Pill Row (compact side-by-side Exam + Practice + Conflict + DDL chips, zero vertical bloat!)
+            if (selectedWeekExams.isNotEmpty() || urgentTasks.isNotEmpty() || weekConflictClusters.isNotEmpty() || weekPracticeCourses.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -565,6 +500,40 @@ fun ScheduleScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (weekPracticeCourses.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(999.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { showPracticeCoursesDialog = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.School,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (weekPracticeCourses.size == 1) {
+                                        "实践课：${weekPracticeCourses.first().name.take(8)}"
+                                    } else {
+                                        "本周 ${weekPracticeCourses.size} 门整周实践课"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
                     if (selectedWeekExams.isNotEmpty()) {
                         Surface(
                             color = if (isDark) Color(0xFF472C10) else Color(0xFFFFF0DB),
@@ -1039,6 +1008,38 @@ fun ScheduleScreen(
                         label = "课程学分",
                         value = "${currentDetail.credit} 学分"
                     )
+                }
+                val officialTags = remember(currentDetail) {
+                    buildList {
+                        if (currentDetail.courseType.isNotBlank()) add(currentDetail.courseType)
+                        if (currentDetail.examMethod.isNotBlank()) add("考核：${currentDetail.examMethod}")
+                        if (currentDetail.totalHours.isNotBlank()) add("${currentDetail.totalHours}学时")
+                        if (currentDetail.classGroup.isNotBlank()) add("教学班：${currentDetail.classGroup}")
+                    }
+                }
+                if (officialTags.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(top = 2.dp, bottom = 4.dp)
+                    ) {
+                        officialTags.forEach { tag ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = tag,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.5.dp)
+                                )
+                            }
+                        }
+                    }
                 }
                 val linkedTasks = remember(snapshot.tasks, currentDetail.name) {
                     snapshot.tasks.filter {
@@ -1543,6 +1544,30 @@ fun ScheduleScreen(
         }
     }
 
+    if (showToolsMenu) {
+        ScheduleToolboxBottomSheet(
+            selectedWeek = selectedWeek,
+            campusLabel = settings.campus.label,
+            practiceCount = snapshot.practiceCourses.size,
+            onOpenEmptyClassroom = onOpenEmptyClassroom,
+            onOpenCourseSearch = { showCourseSearchSheet = true },
+            onOpenFreeSlotMatcher = { showFreeSlotMatcher = true },
+            onOpenBellSchedule = { showBellRefDialog = true },
+            onOpenAddCourse = {
+                addPrefillDay = selectedDayOfWeek
+                addPrefillSection = 1
+                editingCourse = null
+                showAddCourseSheet = true
+            },
+            onExportWeekImage = { onExportWeekImage(selectedWeek) },
+            onOpenHolidayShift = { showHolidayShiftDialog = true },
+            onOpenShareCode = { showShareCodeDialog = true },
+            onOpenPracticeCourses = { showPracticeCoursesDialog = true },
+            onCopyWeekText = { onCopyWeekScheduleText(selectedWeek) },
+            onDismiss = { showToolsMenu = false }
+        )
+    }
+
     // Full Semester Course Search & Credit Summary BottomSheet (with grouped/expanded toggle & 1-tap jump to week!)
     if (showCourseSearchSheet) {
         CourseSearchBottomSheet(
@@ -1649,6 +1674,55 @@ fun ScheduleScreen(
             onSavePartnerProfile = onSavePartnerProfile,
             onShowMessage = onShowMessage,
             onDismiss = { showFreeSlotMatcher = false }
+        )
+    }
+
+    if (showPracticeCoursesDialog && snapshot.practiceCourses.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showPracticeCoursesDialog = false },
+            title = { Text("本学期整周实践 / 实训课程") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "以下为正方教务返回的整周实践、课程设计或实习安排（不占常规具体节次）：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    snapshot.practiceCourses.forEach { pc ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = pc.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = buildString {
+                                        if (pc.weeksText.isNotBlank()) append("周次：${pc.weeksText}  ")
+                                        if (pc.teacher.isNotBlank()) append("指导教师：${pc.teacher}  ")
+                                        if (pc.credit.isNotBlank()) append("${pc.credit}学分")
+                                    }.ifBlank { "整周实践环节" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showPracticeCoursesDialog = false }) { Text("知道了") }
+            }
         )
     }
 
@@ -2070,6 +2144,8 @@ private fun NextClassHeroBanner(
     todayDayOfWeek: Int,
     tomorrowDayOfWeek: Int,
     isCompactHeight: Boolean,
+    isBannerCollapsed: Boolean = false,
+    onToggleBannerCollapse: (() -> Unit)? = null,
     isDark: Boolean,
     onCourseClick: (CourseItem) -> Unit,
     onConflictClick: (Int, List<CourseItem>) -> Unit
@@ -2177,6 +2253,23 @@ private fun NextClassHeroBanner(
                     maxLines = 1,
                     softWrap = false
                 )
+                if (onToggleBannerCollapse != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(fgColor.copy(alpha = 0.18f))
+                            .clickable(onClick = onToggleBannerCollapse)
+                            .padding(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isBannerCollapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
+                            contentDescription = if (isBannerCollapsed) "展开预告卡片" else "收起预告卡片",
+                            tint = fgColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
             }
             return@Box
         }
@@ -2295,6 +2388,23 @@ private fun NextClassHeroBanner(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                if (onToggleBannerCollapse != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(fgColor.copy(alpha = 0.16f))
+                            .clickable(onClick = onToggleBannerCollapse)
+                            .padding(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ExpandLess,
+                            contentDescription = "收起为极简预告条",
+                            tint = fgColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
             }
         } else {
             val activeNow = active!!
@@ -2385,6 +2495,23 @@ private fun NextClassHeroBanner(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                if (onToggleBannerCollapse != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(fgColor.copy(alpha = 0.16f))
+                            .clickable(onClick = onToggleBannerCollapse)
+                            .padding(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ExpandLess,
+                            contentDescription = "收起为极简预告条",
+                            tint = fgColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
         }
@@ -3037,22 +3164,8 @@ private fun WeekGridScheduleView(
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
     val baseTimeW = if (dayCount == 7) 36f else 42f
     val timeColumnWidth = (baseTimeW * (1f + (fontScale - 1f) * 0.65f)).dp
-    val rowHeight = (rowDensity.baseRowDp * (1f + (fontScale - 1f) * 0.45f)).dp
     val breakGap = (rowDensity.breakGapDp * (1f + (fontScale - 1f) * 0.35f)).dp
-
-    fun yOffsetForSection(section: Int): Dp {
-        val breaksBefore = (if (section > 4) 1 else 0) + (if (section > 8) 1 else 0)
-        return rowHeight * (section - 1) + breakGap * breaksBefore
-    }
-
-    fun heightForSpan(startSection: Int, endSection: Int): Dp {
-        val top = yOffsetForSection(startSection)
-        val bottom = yOffsetForSection(endSection) + rowHeight
-        return bottom - top
-    }
-
     val totalBreaks = (if (slots.size > 4) 1 else 0) + (if (slots.size > 8) 1 else 0)
-    val totalGridHeight = rowHeight * slots.size + breakGap * totalBreaks
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Sleek Day-of-Week Header Row (clear 周一–周日 labels & integrated Today circle!)
@@ -3114,8 +3227,29 @@ private fun WeekGridScheduleView(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
-        // Scrollable Grid Body (with optional zero-permission custom wallpaper + readability scrim!)
-        Box(modifier = Modifier.fillMaxSize()) {
+        // Scrollable Grid Body (with optional zero-permission custom wallpaper + viewport-adaptive COMPACT fit!)
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val viewportHeightDp = maxHeight.value
+            val rowHeight = if (rowDensity == GridRowDensity.COMPACT && viewportHeightDp > 200f) {
+                val availableForSlots = viewportHeightDp - breakGap.value * totalBreaks - 4f
+                (availableForSlots / slots.size.coerceAtLeast(1)).coerceIn(33f, 48f).dp
+            } else {
+                (rowDensity.baseRowDp * (1f + (fontScale - 1f) * 0.45f)).dp
+            }
+            val totalGridHeight = rowHeight * slots.size + breakGap * totalBreaks
+            val isTightRow = rowHeight < 46.dp
+
+            fun yOffsetForSection(section: Int): Dp {
+                val breaksBefore = (if (section > 4) 1 else 0) + (if (section > 8) 1 else 0)
+                return rowHeight * (section - 1) + breakGap * breaksBefore
+            }
+
+            fun heightForSpan(startSection: Int, endSection: Int): Dp {
+                val top = yOffsetForSection(startSection)
+                val bottom = yOffsetForSection(endSection) + rowHeight
+                return bottom - top
+            }
+
             if (backgroundBitmap != null) {
                 Image(
                     bitmap = backgroundBitmap,
@@ -3136,7 +3270,7 @@ private fun WeekGridScheduleView(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(end = 3.dp, bottom = 20.dp)
+                    .padding(end = 3.dp, bottom = if (rowDensity == GridRowDensity.COMPACT) 4.dp else 20.dp)
             ) {
             // Left Time Slots Column (highlights current section cleanly — zero line slashing over course cards!)
             val tightTimeStyle = LocalTextStyle.current.copy(
@@ -3180,26 +3314,28 @@ private fun WeekGridScheduleView(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        Spacer(modifier = Modifier.height(1.5.dp))
+                        Spacer(modifier = Modifier.height(if (isTightRow) 0.5.dp else 1.5.dp))
                         Text(
                             text = slot.startTime,
-                            fontSize = 8.5.sp,
-                            lineHeight = 10.sp,
+                            fontSize = if (isTightRow) 8.sp else 8.5.sp,
+                            lineHeight = if (isTightRow) 9.sp else 10.sp,
                             style = tightTimeStyle,
                             maxLines = 1,
                             softWrap = false,
                             fontWeight = if (isCurrentSlot) FontWeight.SemiBold else FontWeight.Normal,
                             color = if (isCurrentSlot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = slot.endTime,
-                            fontSize = 8.5.sp,
-                            lineHeight = 10.sp,
-                            style = tightTimeStyle,
-                            maxLines = 1,
-                            softWrap = false,
-                            color = if (isCurrentSlot) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                        )
+                        if (rowHeight >= 37.dp) {
+                            Text(
+                                text = slot.endTime,
+                                fontSize = if (isTightRow) 8.sp else 8.5.sp,
+                                lineHeight = if (isTightRow) 9.sp else 10.sp,
+                                style = tightTimeStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = if (isCurrentSlot) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                            )
+                        }
                     }
                     if (slot.number == 4 || slot.number == 8) {
                         Box(
@@ -3224,9 +3360,8 @@ private fun WeekGridScheduleView(
                 }
             }
 
-            // Day Columns (with Today tint, live time bar, hairline grid, & Overlap Clustering!)
+            // Day Columns (clean uniform empty grid; Today is clearly anchored by the top date circle!)
             for (day in 1..dayCount) {
-                val isTodayCol = weekDates[day - 1] == today
                 val dayData = remember(courses, day, selectedWeek, showNonCurrentWeek, pinnedKeys) {
                     val allDay = courses.filter { it.dayOfWeek == day }
                     val inWeek = allDay.filter { selectedWeek in it.weeks }
@@ -3256,10 +3391,6 @@ private fun WeekGridScheduleView(
                     modifier = Modifier
                         .weight(1f)
                         .height(totalGridHeight)
-                        .background(
-                            if (isTodayCol) MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.075f else 0.045f)
-                            else Color.Transparent
-                        )
                 ) {
                     val colWidth = maxWidth
                     val canSideBySide = colWidth >= 96.dp
@@ -3299,6 +3430,7 @@ private fun WeekGridScheduleView(
                         val blockHeight = heightForSpan(clampedStart, clampedEnd)
                         val resolved = resolvedTimeMap[course.id] ?: GdouTimeRules.resolveCourseTime(course, campus)
                         val palette = coursePaletteFor(course.colorIndex, isDark)
+                        val cardHorizMargin = if (dayCount == 5) 1.5.dp else 0.8.dp
                         WeekGridCourseCard(
                             course = course,
                             resolved = resolved,
@@ -3309,18 +3441,20 @@ private fun WeekGridScheduleView(
                             showInlineConflictTag = false,
                             dayCount = dayCount,
                             span = span,
+                            rowDensity = rowDensity,
                             fontScale = fontScale,
                             cardAlpha = cardAlpha,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(blockHeight)
                                 .offset(y = topOffset)
-                                .padding(horizontal = 1.5.dp, vertical = 1.5.dp),
+                                .padding(horizontal = cardHorizMargin, vertical = 1.5.dp),
                             onClick = { onCourseClick(course) }
                         )
                     }
 
                     // 2. Active week clusters (single cards OR overlap-adapted conflict stacks/splits!)
+                    val activeCardHorizMargin = if (dayCount == 5) 1.5.dp else 0.8.dp
                     activeClusters.forEach { cluster ->
                         if (!cluster.hasConflict) {
                             val course = cluster.courses.first()
@@ -3341,13 +3475,14 @@ private fun WeekGridScheduleView(
                                 showInlineConflictTag = false,
                                 dayCount = dayCount,
                                 span = span,
+                                rowDensity = rowDensity,
                                 fontScale = fontScale,
                                 cardAlpha = cardAlpha,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(blockHeight)
                                     .offset(y = topOffset)
-                                    .padding(horizontal = 1.5.dp, vertical = 1.5.dp),
+                                    .padding(horizontal = activeCardHorizMargin, vertical = 1.5.dp),
                                 onClick = { onCourseClick(course) }
                             )
                         } else if (canSideBySide) {
@@ -3372,6 +3507,7 @@ private fun WeekGridScheduleView(
                                     showInlineConflictTag = true,
                                     dayCount = 7,
                                     span = span,
+                                    rowDensity = rowDensity,
                                     fontScale = fontScale,
                                     cardAlpha = cardAlpha,
                                     modifier = Modifier
@@ -3420,6 +3556,7 @@ private fun WeekGridScheduleView(
                                     showInlineConflictTag = false,
                                     dayCount = dayCount,
                                     span = span,
+                                    rowDensity = rowDensity,
                                     fontScale = fontScale,
                                     cardAlpha = cardAlpha,
                                     modifier = Modifier
@@ -3475,8 +3612,16 @@ private fun WeekGridScheduleView(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = exBlock.exam.courseName,
-                                    fontSize = if (dayCount == 5) 11.sp else 10.sp,
-                                    lineHeight = 12.sp,
+                                    fontSize = when (rowDensity) {
+                                        GridRowDensity.COMPACT -> if (dayCount == 5) 10.5.sp else 9.5.sp
+                                        GridRowDensity.STANDARD -> if (dayCount == 5) 11.sp else 10.sp
+                                        GridRowDensity.COMFORTABLE -> if (dayCount == 5) 12.5.sp else 11.5.sp
+                                    },
+                                    lineHeight = when (rowDensity) {
+                                        GridRowDensity.COMPACT -> 11.sp
+                                        GridRowDensity.STANDARD -> 12.sp
+                                        GridRowDensity.COMFORTABLE -> 14.sp
+                                    },
                                     fontWeight = FontWeight.Bold,
                                     color = examFg,
                                     maxLines = 3,
@@ -3486,11 +3631,19 @@ private fun WeekGridScheduleView(
                                     append(exBlock.exam.location.ifBlank { "考场待定" })
                                     if (exBlock.exam.seatNumber.isNotBlank()) append("·${exBlock.exam.seatNumber}座")
                                 }
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.dp else 2.dp))
                                 Text(
                                     text = roomSeat,
-                                    fontSize = 8.2.sp,
-                                    lineHeight = 9.5.sp,
+                                    fontSize = when (rowDensity) {
+                                        GridRowDensity.COMPACT -> 7.8.sp
+                                        GridRowDensity.STANDARD -> 8.2.sp
+                                        GridRowDensity.COMFORTABLE -> 9.2.sp
+                                    },
+                                    lineHeight = when (rowDensity) {
+                                        GridRowDensity.COMPACT -> 9.sp
+                                        GridRowDensity.STANDARD -> 9.5.sp
+                                        GridRowDensity.COMFORTABLE -> 11.sp
+                                    },
                                     fontWeight = FontWeight.Medium,
                                     color = examFg.copy(alpha = 0.82f),
                                     maxLines = 2,
@@ -3517,12 +3670,38 @@ private fun WeekGridCourseCard(
     showInlineConflictTag: Boolean,
     dayCount: Int,
     span: Int,
+    rowDensity: GridRowDensity = GridRowDensity.STANDARD,
     fontScale: Float,
     cardAlpha: Float,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
     val isConflict = conflictCount > 1 || showInlineConflictTag
+    val verticalCardPad = when (rowDensity) {
+        GridRowDensity.COMPACT -> 2.5.dp
+        GridRowDensity.STANDARD -> 4.dp
+        GridRowDensity.COMFORTABLE -> 5.dp
+    }
+    val titleFontSize = when (rowDensity) {
+        GridRowDensity.COMPACT -> if (dayCount == 5) 10.8.sp else 9.8.sp
+        GridRowDensity.STANDARD -> if (dayCount == 5) 11.5.sp else 10.5.sp
+        GridRowDensity.COMFORTABLE -> if (dayCount == 5) 13.sp else 12.sp
+    }
+    val titleLineHeight = when (rowDensity) {
+        GridRowDensity.COMPACT -> if (dayCount == 5) 12.5.sp else 11.3.sp
+        GridRowDensity.STANDARD -> if (dayCount == 5) 14.sp else 12.5.sp
+        GridRowDensity.COMFORTABLE -> if (dayCount == 5) 16.sp else 14.5.sp
+    }
+    val locFontSize = when (rowDensity) {
+        GridRowDensity.COMPACT -> if (dayCount == 5) 8.8.sp else 8.2.sp
+        GridRowDensity.STANDARD -> if (dayCount == 5) 9.5.sp else 8.8.sp
+        GridRowDensity.COMFORTABLE -> if (dayCount == 5) 10.5.sp else 9.8.sp
+    }
+    val locLineHeight = when (rowDensity) {
+        GridRowDensity.COMPACT -> 9.6.sp
+        GridRowDensity.STANDARD -> 10.5.sp
+        GridRowDensity.COMFORTABLE -> 12.sp
+    }
     val bgColor = if (isInCurrentWeek) {
         palette.container.copy(alpha = cardAlpha)
     } else {
@@ -3549,7 +3728,7 @@ private fun WeekGridCourseCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = if (dayCount == 5) 5.5.dp else 3.5.dp, vertical = 4.dp),
+                .padding(horizontal = if (dayCount == 5) 5.dp else 2.2.dp, vertical = verticalCardPad),
             verticalArrangement = Arrangement.Top
         ) {
             if (conflictCount > 1) {
@@ -3574,7 +3753,7 @@ private fun WeekGridCourseCard(
                     )
                 }
                 if (resolved.isSpecialStaggered && (dayCount == 7 || fontScale > 1.15f)) {
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.dp else 2.dp))
                     Surface(
                         color = palette.accent,
                         shape = RoundedCornerShape(4.dp)
@@ -3591,7 +3770,7 @@ private fun WeekGridCourseCard(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.dp else 2.dp))
             } else if (showInlineConflictTag) {
                 Surface(
                     color = Color(0xFFD94A1E),
@@ -3638,10 +3817,15 @@ private fun WeekGridCourseCard(
                 Spacer(modifier = Modifier.height(2.dp))
             }
 
+            val compactCardTextStyle = LocalTextStyle.current.copy(
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            )
             Text(
                 text = course.name,
-                fontSize = if (dayCount == 5) 11.5.sp else 10.5.sp,
-                lineHeight = if (dayCount == 5) 14.sp else 12.5.sp,
+                fontSize = titleFontSize,
+                lineHeight = titleLineHeight,
+                letterSpacing = if (dayCount == 7) (-0.25).sp else 0.sp,
+                style = compactCardTextStyle,
                 fontWeight = FontWeight.Bold,
                 color = textColor,
                 maxLines = when {
@@ -3653,14 +3837,20 @@ private fun WeekGridCourseCard(
             )
 
             if (course.location.isNotBlank()) {
-                Spacer(modifier = Modifier.height(2.5.dp))
+                Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.5.dp else 2.5.dp))
                 Text(
                     text = course.location,
-                    fontSize = if (dayCount == 5) 9.5.sp else 8.8.sp,
-                    lineHeight = 10.5.sp,
+                    fontSize = locFontSize,
+                    lineHeight = locLineHeight,
+                    letterSpacing = if (dayCount == 7) (-0.2).sp else 0.sp,
+                    style = compactCardTextStyle,
                     fontWeight = FontWeight.Medium,
                     color = textColor.copy(alpha = 0.76f),
-                    maxLines = if (span <= 1) 1 else 2,
+                    maxLines = when {
+                        span <= 1 -> 1
+                        rowDensity == GridRowDensity.COMPACT && conflictCount > 1 && span <= 2 -> 1
+                        else -> 2
+                    },
                     overflow = TextOverflow.Ellipsis
                 )
             }

@@ -1,14 +1,11 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,8 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AssignmentTurnedIn
 import androidx.compose.material.icons.rounded.CalendarMonth
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -40,6 +37,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.School
@@ -51,9 +49,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -82,12 +80,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -99,8 +93,12 @@ import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GradeItem
+import io.github.rex25415.haiyu.schedule.model.GraduationCreditTargets
+import io.github.rex25415.haiyu.schedule.model.LevelExamItem
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
+import io.github.rex25415.haiyu.schedule.ui.components.AcademicAnalyticsBottomSheet
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
+import io.github.rex25415.haiyu.schedule.ui.components.parseScoreNumeric
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -113,25 +111,40 @@ import java.util.Locale
 @Composable
 fun AcademicScreen(
     snapshot: AppDataSnapshot,
-    requestedSubTab: Int = 0,
+    isDark: Boolean = false,
+    requestedSubTab: Int = -1,
     subTabRequestNonce: Int = 0,
     lastGradeSkipReason: String? = null,
+    onSubTabChanged: (Int) -> Unit = {},
     onJumpToSync: () -> Unit,
     onAddTask: (TodoTaskItem) -> Unit,
     onToggleTaskDone: (String) -> Unit,
     onDeleteTask: (String) -> Unit,
     onClearCompletedTasks: () -> Unit,
     onAddGrade: (GradeItem) -> Unit,
+    onUpdateGrade: (GradeItem) -> Unit = {},
+    onUpdateCreditTargets: (GraduationCreditTargets) -> Unit = {},
     onDeleteGrade: (String) -> Unit,
     onAddExam: (ExamItem) -> Unit,
     onDeleteExam: (String) -> Unit,
     onToggleExamPin: (String) -> Unit = {},
     onCopyExamsText: () -> Unit = {}
 ) {
-    var tabIndex by remember { mutableIntStateOf(requestedSubTab.coerceIn(0, 2)) } // 0 = Tasks DDL, 1 = Grades & GPA, 2 = Exams
+    val smartDefaultTab = remember(snapshot.tasks, snapshot.grades.size, snapshot.exams.size) {
+        val pending = snapshot.tasks.count { !it.isDone }
+        when {
+            pending > 0 -> 0
+            snapshot.grades.isNotEmpty() -> 1
+            snapshot.exams.isNotEmpty() -> 2
+            else -> 0
+        }
+    }
+    var tabIndex by remember {
+        mutableIntStateOf(if (requestedSubTab in 0..2) requestedSubTab else smartDefaultTab)
+    } // 0 = Tasks DDL, 1 = Grades & GPA, 2 = Exams
     LaunchedEffect(subTabRequestNonce) {
-        if (subTabRequestNonce > 0) {
-            tabIndex = requestedSubTab.coerceIn(0, 2)
+        if (subTabRequestNonce > 0 && requestedSubTab in 0..2) {
+            tabIndex = requestedSubTab
         }
     }
 
@@ -230,7 +243,7 @@ fun AcademicScreen(
                     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                         SegmentedButton(
                             selected = tabIndex == 0,
-                            onClick = { tabIndex = 0 },
+                            onClick = { tabIndex = 0; onSubTabChanged(0) },
                             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                         ) {
                             Text(
@@ -243,7 +256,7 @@ fun AcademicScreen(
                         }
                         SegmentedButton(
                             selected = tabIndex == 1,
-                            onClick = { tabIndex = 1 },
+                            onClick = { tabIndex = 1; onSubTabChanged(1) },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                         ) {
                             Text(
@@ -256,7 +269,7 @@ fun AcademicScreen(
                         }
                         SegmentedButton(
                             selected = tabIndex == 2,
-                            onClick = { tabIndex = 2 },
+                            onClick = { tabIndex = 2; onSubTabChanged(2) },
                             shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
                         ) {
                             Text(
@@ -290,8 +303,13 @@ fun AcademicScreen(
 
                 1 -> GradesContent(
                     grades = snapshot.grades,
+                    isDark = isDark,
+                    levelExams = snapshot.levelExams,
+                    creditTargets = snapshot.settings.creditTargets,
                     lastGradeSkipReason = lastGradeSkipReason,
                     onJumpToSync = onJumpToSync,
+                    onUpdateGrade = onUpdateGrade,
+                    onUpdateCreditTargets = onUpdateCreditTargets,
                     onDeleteGrade = onDeleteGrade
                 )
 
@@ -570,12 +588,16 @@ private fun TasksContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GradesContent(
     grades: List<GradeItem>,
+    isDark: Boolean = false,
+    levelExams: List<LevelExamItem> = emptyList(),
+    creditTargets: GraduationCreditTargets = GraduationCreditTargets(),
     lastGradeSkipReason: String?,
     onJumpToSync: () -> Unit,
+    onUpdateGrade: (GradeItem) -> Unit = {},
+    onUpdateCreditTargets: (GraduationCreditTargets) -> Unit = {},
     onDeleteGrade: (String) -> Unit
 ) {
     if (grades.isEmpty()) {
@@ -594,16 +616,37 @@ private fun GradesContent(
         listOf("全部学期") + grades.map { "${it.academicYear} ${it.semester}" }.distinct().sortedDescending()
     }
     var selectedTerm by remember(termTags) { mutableStateOf("全部学期") }
+    var selectedNatureFilter by remember { mutableStateOf("全部性质") }
     var searchQuery by remember { mutableStateOf("") }
+    var showSearchField by remember { mutableStateOf(false) }
+    var showTermDropdown by remember { mutableStateOf(false) }
+    var showAnalyticsSheet by remember { mutableStateOf(false) }
+    var collapsedTerms by remember { mutableStateOf(setOf<String>()) }
+    var selectedGradeDetail by remember { mutableStateOf<GradeItem?>(null) }
+    var showEditTargetsDialog by remember { mutableStateOf(false) }
 
-    val filtered = remember(grades, selectedTerm, searchQuery) {
+    val filtered = remember(grades, selectedTerm, selectedNatureFilter, searchQuery) {
         grades.filter { g ->
             val termMatch = selectedTerm == "全部学期" || "${g.academicYear} ${g.semester}" == selectedTerm
+            val natureMatch = when (selectedNatureFilter) {
+                "仅必修课" -> g.courseType.contains("必修")
+                "选修/公选" -> g.courseType.contains("选") || g.courseType.contains("通识")
+                "满绩 ≥90" -> g.gradePoint >= 4.0 || (parseScoreNumeric(g.score)?.let { it >= 90.0 } == true)
+                else -> true
+            }
             val queryMatch = searchQuery.isBlank() ||
                 g.courseName.contains(searchQuery.trim(), ignoreCase = true) ||
-                g.courseType.contains(searchQuery.trim(), ignoreCase = true)
-            termMatch && queryMatch
+                g.courseType.contains(searchQuery.trim(), ignoreCase = true) ||
+                g.teacher.contains(searchQuery.trim(), ignoreCase = true)
+            termMatch && natureMatch && queryMatch
         }
+    }
+
+    val groupedByTerm = remember(filtered) {
+        filtered
+            .groupBy { "${it.academicYear} ${it.semester}" }
+            .entries
+            .sortedByDescending { it.key }
     }
 
     val stats = remember(filtered) {
@@ -627,93 +670,71 @@ private fun GradesContent(
         Triple(gpa, avgScore, totalCredits)
     }
 
-    // Chronological per-term GPA trend & credit breakdown by course category (pure local math!)
-    val termGpaSeries = remember(grades) {
-        grades
-            .filter { it.credit > 0.0 }
-            .groupBy { "${it.academicYear} ${it.semester}" }
-            .entries
-            .sortedBy { (k, _) -> k }
-            .mapNotNull { (termKey, list) ->
-                val cr = list.sumOf { it.credit }
-                if (cr <= 0.0) null else {
-                    val gp = list.sumOf { it.gradePoint * it.credit } / cr
-                    val shortLabel = termKey
-                        .replace("20", "")
-                        .replace(" 第一学期", "①")
-                        .replace(" 第二学期", "②")
-                        .replace(" 第三学期", "③")
-                    shortLabel to gp
-                }
-            }
-    }
-    val creditByCategory = remember(filtered) {
-        filtered
-            .filter { it.credit > 0.0 }
-            .groupBy { g ->
-                val raw = g.courseType.trim()
-                when {
-                    raw.isBlank() -> "其他课程"
-                    raw.contains("必修") -> "必修课"
-                    raw.contains("选修") || raw.contains("任选") || raw.contains("限选") -> "选修课"
-                    raw.contains("实践") || raw.contains("实验") -> "实践环节"
-                    raw.contains("通识") || raw.contains("公选") -> "通识/公选"
-                    else -> raw.take(6)
-                }
-            }
-            .map { (cat, list) -> Triple(cat, list.sumOf { it.credit }, list.size) }
-            .sortedByDescending { it.second }
-    }
-    var showInsightsCard by remember { mutableStateOf(false) }
-    var targetGpaInput by remember { mutableStateOf("3.5") }
-    var futureCreditsInput by remember { mutableStateOf("20") }
-    var showLowScoreList by remember { mutableStateOf(false) }
-
-    val allTermStats = remember(grades) {
-        var totalCr = 0.0
-        var weightedGp = 0.0
-        grades.forEach { g ->
-            if (g.credit > 0.0) {
-                totalCr += g.credit
-                weightedGp += g.gradePoint * g.credit
-            }
-        }
-        val gpa = if (totalCr > 0.0) weightedGp / totalCr else 0.0
-        gpa to totalCr
-    }
-    val lowScoreCourses = remember(grades) {
-        grades.filter { g ->
-            g.credit > 0.0 && !g.isSimulated && (
-                g.gradePoint <= 0.0 || (parseScoreNumeric(g.score)?.let { it < 60.0 } == true)
-            )
-        }
-    }
-
     LazyColumn(
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 84.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        // GPA Gradient Summary Card
+        // GPA Gradient Summary Card + 1-tap Full Academic Analytics Report entry
         item {
+            val heroStart = if (isDark) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary
+            val heroEnd = if (isDark) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.tertiary
+            val heroFg = if (isDark) MaterialTheme.colorScheme.onPrimaryContainer else Color.White
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
-                        )
-                    )
+                    .background(Brush.linearGradient(listOf(heroStart, heroEnd)))
                     .padding(18.dp)
             ) {
                 Column {
-                    Text(
-                        text = if (selectedTerm == "全部学期") "累计加权平均绩点 (GPA)" else "$selectedTerm · GPA",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val scopeTitle = buildString {
+                            append(if (selectedTerm == "全部学期") "累计加权平均绩点 (GPA)" else "$selectedTerm · GPA")
+                            if (selectedNatureFilter != "全部性质") append(" · $selectedNatureFilter")
+                        }
+                        Text(
+                            text = scopeTitle,
+                            color = heroFg.copy(alpha = 0.88f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
+                        Surface(
+                            color = heroFg.copy(alpha = if (isDark) 0.14f else 0.22f),
+                            shape = RoundedCornerShape(999.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { showAnalyticsSheet = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Insights,
+                                    contentDescription = null,
+                                    tint = heroFg,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "学业分析报告 ↗",
+                                    color = heroFg,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -721,451 +742,502 @@ private fun GradesContent(
                     ) {
                         Text(
                             text = String.format(Locale.US, "%.2f", stats.first),
-                            color = Color.White,
+                            color = heroFg,
                             fontSize = 36.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            StatSmallColumn("加权均分", String.format(Locale.US, "%.1f", stats.second))
-                            StatSmallColumn("总学分", String.format(Locale.US, "%.1f", stats.third))
-                            StatSmallColumn("门数", "${filtered.size}")
+                            StatSmallColumn("加权均分", String.format(Locale.US, "%.1f", stats.second), heroFg)
+                            StatSmallColumn("总学分", String.format(Locale.US, "%.1f", stats.third), heroFg)
+                            StatSmallColumn("门数", "${filtered.size}", heroFg)
                         }
                     }
                 }
             }
         }
 
-        // Collapsible GPA Trend, Credit Breakdown & Target GPA Reverse Planner (clean & zero clutter by default!)
-        if (termGpaSeries.size >= 2 || creditByCategory.isNotEmpty() || allTermStats.second > 0.0) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                    modifier = Modifier.fillMaxWidth()
+        // Slim Term Scope Picker + Level Exams Pill + Search Toggle + Nature Recompute Pills
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Box {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showTermDropdown = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = selectedTerm,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = "切换统计学期",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showTermDropdown,
+                            onDismissRequest = { showTermDropdown = false }
+                        ) {
+                            termTags.forEach { tag ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = tag,
+                                            fontWeight = if (tag == selectedTerm) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (tag == selectedTerm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedTerm = tag
+                                        showTermDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (levelExams.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showAnalyticsSheet = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.School,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "等级考(${levelExams.size})",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    Surface(
+                        color = if (showSearchField || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                if (showSearchField) {
+                                    searchQuery = ""
+                                    showSearchField = false
+                                } else {
+                                    showSearchField = true
+                                }
+                            }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (showSearchField) Icons.Rounded.Close else Icons.Rounded.Search,
+                                contentDescription = "搜索课程成绩",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (showSearchField) "收起搜索" else "搜课程",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("全部性质", "仅必修课", "选修/公选", "满绩 ≥90").forEach { nat ->
+                        val sel = selectedNatureFilter == nat
+                        Surface(
+                            color = if (sel) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { selectedNatureFilter = nat }
+                        ) {
+                            Text(
+                                text = nat,
+                                fontSize = 11.sp,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                color = if (sel) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showSearchField || searchQuery.isNotBlank()) {
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("搜索课程名、教师或课程性质（点单科可记分项明细）...") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        groupedByTerm.forEach { (termKey, termGrades) ->
+            val isCollapsed = termKey in collapsedTerms
+            item(key = "header_$termKey") {
+                val termStat = remember(termGrades) {
+                    var cr = 0.0
+                    var gpSum = 0.0
+                    var scSum = 0.0
+                    var scCr = 0.0
+                    termGrades.forEach { g ->
+                        if (g.credit > 0.0) {
+                            cr += g.credit
+                            gpSum += g.gradePoint * g.credit
+                            val num = parseScoreNumeric(g.score)
+                            if (num != null) {
+                                scSum += num * g.credit
+                                scCr += g.credit
+                            }
+                        }
+                    }
+                    val gpa = if (cr > 0.0) gpSum / cr else 0.0
+                    val avg = if (scCr > 0.0) scSum / scCr else 0.0
+                    Triple(gpa, avg, cr)
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            collapsedTerms = if (isCollapsed) collapsedTerms - termKey else collapsedTerms + termKey
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "$termKey（${termGrades.size} 门）",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "学期 GPA ${String.format(Locale.US, "%.2f", termStat.first)} · 加权均分 ${String.format(Locale.US, "%.1f", termStat.second)} · 共 ${String.format(Locale.US, "%.1f", termStat.third)} 学分",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Icon(
+                            imageVector = if (isCollapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            if (!isCollapsed) {
+                items(termGrades, key = { it.id }) { grade ->
+                    val numeric = parseScoreNumeric(grade.score)
+                    val scoreColor = when {
+                        numeric == null -> MaterialTheme.colorScheme.primary
+                        numeric >= 90 -> if (isDark) Color(0xFF4ADE80) else Color(0xFF0E8A5F)
+                        numeric >= 80 -> if (isDark) Color(0xFF60A5FA) else Color(0xFF1A6FD4)
+                        numeric >= 60 -> MaterialTheme.colorScheme.onSurface
+                        else -> MaterialTheme.colorScheme.error
+                    }
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedGradeDetail = grade }
+                    ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { showInsightsCard = !showInsightsCard },
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                                .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Insights,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "学分分布、GPA 走势与目标反推",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = if (showInsightsCard) "收起" else "展开查看",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Icon(
-                                    imageVector = if (showInsightsCard) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-
-                        if (showInsightsCard) {
-                            if (termGpaSeries.size >= 2) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "各学期 GPA 趋势（共 ${termGpaSeries.size} 学期）",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                val lineColor = MaterialTheme.colorScheme.primary
-                                val dotFill = MaterialTheme.colorScheme.surface
-                                val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                                val minGpa = (termGpaSeries.minOf { it.second } - 0.35).coerceAtLeast(0.0)
-                                val maxGpa = (termGpaSeries.maxOf { it.second } + 0.35).coerceAtMost(5.0)
-                                val span = (maxGpa - minGpa).coerceAtLeast(0.5)
-
-                                Canvas(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(82.dp)
-                                        .padding(vertical = 8.dp)
-                                ) {
-                                    val w = size.width
-                                    val h = size.height
-                                    // Subtle baseline & midline
-                                    drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
-                                    drawLine(gridColor, Offset(0f, h * 0.5f), Offset(w, h * 0.5f), strokeWidth = 1f)
-
-                                    val colW = w / termGpaSeries.size.coerceAtLeast(1)
-                                    val pts = termGpaSeries.mapIndexed { idx, (_, gp) ->
-                                        val x = colW * (idx + 0.5f)
-                                        val ratio = ((gp - minGpa) / span).toFloat().coerceIn(0f, 1f)
-                                        val y = h * (1f - ratio)
-                                        Offset(x, y)
-                                    }
-                                    val path = Path().apply {
-                                        pts.forEachIndexed { idx, pt ->
-                                            if (idx == 0) moveTo(pt.x, pt.y) else lineTo(pt.x, pt.y)
-                                        }
-                                    }
-                                    drawPath(
-                                        path = path,
-                                        color = lineColor,
-                                        style = Stroke(width = 5f, cap = StrokeCap.Round)
-                                    )
-                                    pts.forEach { pt ->
-                                        drawCircle(color = lineColor, radius = 9f, center = pt)
-                                        drawCircle(color = dotFill, radius = 4.5f, center = pt)
-                                    }
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    termGpaSeries.forEach { (label, gp) ->
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text(
-                                                text = String.format(Locale.US, "%.2f", gp),
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
-                                            Text(
-                                                text = label,
-                                                fontSize = 9.5.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (creditByCategory.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                val creditedCount = remember(creditByCategory) { creditByCategory.sumOf { it.third } }
-                                Text(
-                                    text = "已修学分分类统计（计学分共 ${creditedCount} 门）",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    creditByCategory.forEach { (cat, cr, count) ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                text = "$cat ${String.format(Locale.US, "%.1f", cr)}分 · ${count}门",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Subtle low-score / retake reminder (only when present, collapsible, zero pressure)
-                            if (lowScoreCourses.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Surface(
-                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showLowScoreList = !showLowScoreList }
-                                ) {
-                                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "学业体检：${lowScoreCourses.size} 门课程成绩待留意（补考/重修参考）",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Text(
-                                                text = if (showLowScoreList) "收起" else "查看",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                        if (showLowScoreList) {
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = lowScoreCourses.joinToString(" · ") {
-                                                    "${it.courseName}(${it.score.ifBlank { "0" }}/${it.credit}分)"
-                                                },
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Target GPA Reverse Calculator (pure local offline math!)
-                            if (allTermStats.second > 0.0) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "目标 GPA 反推测算（按全部已修 ${String.format(Locale.US, "%.1f", allTermStats.second)} 学分）",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState())
-                                ) {
-                                    listOf("2.5", "3.0", "3.5", "3.8", "4.0").forEach { preset ->
-                                        val sel = targetGpaInput.trim() == preset
-                                        Surface(
-                                            color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { targetGpaInput = preset }
-                                        ) {
-                                            Text(
-                                                text = "目标 $preset",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    OutlinedTextField(
-                                        value = targetGpaInput,
-                                        onValueChange = { targetGpaInput = it.filter { ch -> ch.isDigit() || ch == '.' }.take(4) },
-                                        label = { Text("目标总绩点", fontSize = 11.sp) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = futureCreditsInput,
-                                        onValueChange = { futureCreditsInput = it.filter { ch -> ch.isDigit() || ch == '.' }.take(5) },
-                                        label = { Text("后续预计学分", fontSize = 11.sp) },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                val targetVal = targetGpaInput.toDoubleOrNull()
-                                val futureCrVal = futureCreditsInput.toDoubleOrNull()
-                                if (targetVal != null && futureCrVal != null && futureCrVal > 0.0) {
-                                    val plan = remember(allTermStats, targetVal, futureCrVal) {
-                                        GdouTimeRules.calculateTargetGpaPlan(
-                                            currentGpa = allTermStats.first,
-                                            currentCredits = allTermStats.second,
-                                            targetGpa = targetVal,
-                                            plannedFutureCredits = futureCrVal
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Surface(
-                                        color = if (plan.achievable) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-                                        else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = plan.summaryText,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (plan.achievable) MaterialTheme.colorScheme.onPrimaryContainer
-                                            else MaterialTheme.colorScheme.onTertiaryContainer,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Term filter chips
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                termTags.forEach { tag ->
-                    val selected = selectedTerm == tag
-                    FilterChip(
-                        selected = selected,
-                        onClick = { selectedTerm = tag },
-                        leadingIcon = if (selected) {
-                            { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                        } else null,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        label = {
-                            Text(
-                                tag,
-                                fontSize = 12.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    )
-                }
-            }
-        }
-
-        // Search Box
-        item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("搜索课程名或课程性质...") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        items(filtered, key = { it.id }) { grade ->
-            val numeric = parseScoreNumeric(grade.score)
-            val scoreColor = when {
-                numeric == null -> MaterialTheme.colorScheme.primary
-                numeric >= 90 -> Color(0xFF0E8A5F)
-                numeric >= 80 -> Color(0xFF1A6FD4)
-                numeric >= 60 -> MaterialTheme.colorScheme.onSurface
-                else -> MaterialTheme.colorScheme.error
-            }
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = grade.courseName,
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (grade.isSimulated) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "模拟",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        text = grade.courseName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    if (grade.isSimulated) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "模拟",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = listOfNotNull(
+                                        grade.courseType.takeIf { it.isNotBlank() && it != "无" },
+                                        grade.credit.takeIf { it > 0 }?.let { "${it}学分" },
+                                        grade.teacher.takeIf { it.isNotBlank() && it != "无" }
+                                    ).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (grade.breakdown.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "分项：${grade.breakdown}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = buildString {
-                                append("${grade.academicYear} ${grade.semester}")
-                                if (grade.courseType.isNotBlank()) append(" · ${grade.courseType}")
-                                if (grade.credit > 0) append(" · ${grade.credit}学分")
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = grade.score.ifBlank { "--" },
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = scoreColor
-                        )
-                        Text(
-                            text = "绩点 ${String.format(Locale.US, "%.2f", grade.gradePoint)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (grade.isSimulated) {
-                        IconButton(
-                            onClick = { onDeleteGrade(grade.id) },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Rounded.DeleteOutline,
-                                contentDescription = "删除模拟成绩",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = grade.score.ifBlank { "--" },
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = scoreColor
+                                )
+                                Text(
+                                    text = "绩点 ${String.format(Locale.US, "%.2f", grade.gradePoint)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (grade.isSimulated) {
+                                IconButton(
+                                    onClick = { onDeleteGrade(grade.id) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.DeleteOutline,
+                                        contentDescription = "删除模拟成绩",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+
+    if (showAnalyticsSheet) {
+        AcademicAnalyticsBottomSheet(
+            grades = grades,
+            levelExams = levelExams,
+            creditTargets = creditTargets,
+            onOpenEditTargets = {
+                showAnalyticsSheet = false
+                showEditTargetsDialog = true
+            },
+            onDismiss = { showAnalyticsSheet = false }
+        )
+    }
+
+    selectedGradeDetail?.let { g ->
+        var breakdownDraft by remember(g) { mutableStateOf(g.breakdown) }
+        AlertDialog(
+            onDismissRequest = { selectedGradeDetail = null },
+            title = { Text(g.courseName) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "${g.academicYear} ${g.semester} · ${g.courseType.ifBlank { "未分类" }} · ${g.examNature}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "总评成绩：${g.score.ifBlank { "--" }}   |   绩点：${String.format(Locale.US, "%.2f", g.gradePoint)}   |   学分：${g.credit}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (g.teacher.isNotBlank()) {
+                        Text("任课教师：${g.teacher}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = breakdownDraft,
+                        onValueChange = { breakdownDraft = it },
+                        label = { Text("平时/实验/期末分项成绩或备忘") },
+                        placeholder = { Text("如：平时95(30%) · 实验90(10%) · 期末85(60%)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdateGrade(g.copy(breakdown = breakdownDraft.trim()))
+                        selectedGradeDetail = null
+                    }
+                ) { Text("保存分项备忘") }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedGradeDetail = null }) { Text("关闭") }
+            }
+        )
+    }
+
+    if (showEditTargetsDialog) {
+        var totalStr by remember(creditTargets) { mutableStateOf(creditTargets.totalRequired.toString()) }
+        var compStr by remember(creditTargets) { mutableStateOf(creditTargets.compulsoryRequired.toString()) }
+        var elecStr by remember(creditTargets) { mutableStateOf(creditTargets.electiveRequired.toString()) }
+        var genStr by remember(creditTargets) { mutableStateOf(creditTargets.generalRequired.toString()) }
+        var pracStr by remember(creditTargets) { mutableStateOf(creditTargets.practiceRequired.toString()) }
+        AlertDialog(
+            onDismissRequest = { showEditTargetsDialog = false },
+            title = { Text("自定义专业毕业学分要求") },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "可对照教务系统「学生学业情况查询」或本专业培养方案填入要求学分：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = totalStr,
+                        onValueChange = { totalStr = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("毕业总学分要求") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = compStr,
+                            onValueChange = { compStr = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("必修要求") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = elecStr,
+                            onValueChange = { elecStr = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("专业选修要求") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = genStr,
+                            onValueChange = { genStr = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("通识/公选要求") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = pracStr,
+                            onValueChange = { pracStr = it.filter { c -> c.isDigit() || c == '.' } },
+                            label = { Text("实践环节要求") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdateCreditTargets(
+                            GraduationCreditTargets(
+                                totalRequired = totalStr.toDoubleOrNull() ?: 160.0,
+                                compulsoryRequired = compStr.toDoubleOrNull() ?: 105.0,
+                                electiveRequired = elecStr.toDoubleOrNull() ?: 30.0,
+                                generalRequired = genStr.toDoubleOrNull() ?: 10.0,
+                                practiceRequired = pracStr.toDoubleOrNull() ?: 15.0
+                            )
+                        )
+                        showEditTargetsDialog = false
+                    }
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditTargetsDialog = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @Composable
-private fun StatSmallColumn(label: String, value: String) {
+private fun StatSmallColumn(label: String, value: String, fgColor: Color = Color.White) {
     Column(horizontalAlignment = Alignment.End) {
-        Text(value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+        Text(value, color = fgColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(label, color = fgColor.copy(alpha = 0.82f), fontSize = 11.sp)
     }
 }
 
@@ -1693,17 +1765,5 @@ private fun AddExamDialog(
         ) {
             DatePicker(state = state)
         }
-    }
-}
-
-private fun parseScoreNumeric(score: String): Double? {
-    score.trim().toDoubleOrNull()?.let { return it }
-    return when (score.trim()) {
-        "优秀", "优" -> 95.0
-        "良好", "良" -> 85.0
-        "中等", "中" -> 75.0
-        "及格", "合格", "通过" -> 65.0
-        "不及格", "不合格", "缺考" -> 0.0
-        else -> null
     }
 }

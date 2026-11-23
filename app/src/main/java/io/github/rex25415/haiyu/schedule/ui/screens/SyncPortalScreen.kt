@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MeetingRoom
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
@@ -96,8 +97,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.rex25415.haiyu.schedule.model.AppSettings
 import io.github.rex25415.haiyu.schedule.model.CourseItem
+import io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem
 import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GradeItem
+import io.github.rex25415.haiyu.schedule.model.LevelExamItem
+import io.github.rex25415.haiyu.schedule.model.PracticeCourseItem
 import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
 import io.github.rex25415.haiyu.schedule.sync.GdouJsBridge
 import io.github.rex25415.haiyu.schedule.sync.GdouSyncCallback
@@ -105,6 +109,7 @@ import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
 import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import io.github.rex25415.haiyu.schedule.sync.NetworkProbeResult
 import io.github.rex25415.haiyu.schedule.sync.TermOptionsPayload
+import io.github.rex25415.haiyu.schedule.ui.components.EmptyClassroomPane
 import java.util.concurrent.atomic.AtomicReference
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -114,12 +119,14 @@ fun SyncPortalScreen(
     isVisible: Boolean,
     settings: AppSettings,
     quickRefreshTrigger: Int,
+    requestedMode: Int = 0,
+    modeRequestNonce: Int = 0,
     onLoginStateChanged: (Boolean) -> Unit,
     onSyncStateChanged: (Boolean) -> Unit,
     onQuickRefreshNeedsLogin: (String) -> Unit,
     onUpdateChannelPrefs: (preferOffCampus: Boolean, preferDesktopUa: Boolean) -> Unit,
-    onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String) -> Unit,
-    onGradesSynced: (List<GradeItem>) -> Unit,
+    onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String, List<PracticeCourseItem>) -> Unit,
+    onGradesSynced: (List<GradeItem>, List<LevelExamItem>) -> Unit,
     onExamsSynced: (List<ExamItem>) -> Unit,
     onShowMessage: (String) -> Unit,
     onNavigateBackToSchedule: () -> Unit = {},
@@ -171,6 +178,14 @@ fun SyncPortalScreen(
     var jsAlertDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var jsConfirmDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var diagnosticDialogText by remember { mutableStateOf<String?>(null) }
+    var activePortalMode by remember { mutableIntStateOf(requestedMode.coerceIn(0, 1)) }
+    LaunchedEffect(modeRequestNonce) {
+        if (modeRequestNonce > 0) {
+            activePortalMode = requestedMode.coerceIn(0, 1)
+        }
+    }
+    var emptyClassroomResults by remember { mutableStateOf<List<EmptyClassroomItem>?>(null) }
+    var emptyClassroomSummary by remember { mutableStateOf("") }
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
@@ -250,19 +265,30 @@ fun SyncPortalScreen(
                 termLabel: String,
                 yearCode: String,
                 semesterCode: String,
-                detectedCampusId: String
+                detectedCampusId: String,
+                practiceCourses: List<PracticeCourseItem>
             ) {
                 mainHandler.post {
-                    onCoursesSynced(courses, startDate, totalWeeks, termLabel, yearCode, semesterCode, detectedCampusId)
+                    onCoursesSynced(courses, startDate, totalWeeks, termLabel, yearCode, semesterCode, detectedCampusId, practiceCourses)
                 }
             }
 
-            override fun onGradesSynced(grades: List<GradeItem>) {
-                mainHandler.post { onGradesSynced(grades) }
+            override fun onGradesSynced(grades: List<GradeItem>, levelExams: List<LevelExamItem>) {
+                mainHandler.post { onGradesSynced(grades, levelExams) }
             }
 
             override fun onExamsSynced(exams: List<ExamItem>) {
                 mainHandler.post { onExamsSynced(exams) }
+            }
+
+            override fun onEmptyClassroomsLoaded(rooms: List<EmptyClassroomItem>, summary: String) {
+                mainHandler.post {
+                    isSyncing = false
+                    syncStatusText = null
+                    emptyClassroomResults = rooms
+                    emptyClassroomSummary = summary
+                    activePortalMode = 1
+                }
             }
 
             override fun onComplete(summary: String) {
@@ -402,11 +428,15 @@ fun SyncPortalScreen(
 
     // Android 16 Predictive-Back friendly handling inside Sync WebView
     BackHandler(enabled = isVisible) {
-        val wv = webViewRef
-        if (wv != null && wv.canGoBack()) {
-            wv.goBack()
+        if (activePortalMode == 1) {
+            activePortalMode = 0
         } else {
-            onNavigateBackToSchedule()
+            val wv = webViewRef
+            if (wv != null && wv.canGoBack()) {
+                wv.goBack()
+            } else {
+                onNavigateBackToSchedule()
+            }
         }
     }
 
@@ -416,7 +446,59 @@ fun SyncPortalScreen(
             .background(MaterialTheme.colorScheme.background)
             .imePadding()
     ) {
-        // Compact Top Browser Bar
+        // Primary Dual-Mode Switcher (Web Sync Station <-> Native Empty Classroom Finder)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(
+                    0 to (Icons.Rounded.Public to "教务登录与同步"),
+                    1 to (Icons.Rounded.MeetingRoom to "查空教室")
+                ).forEach { (idx, iconAndTitle) ->
+                    val sel = activePortalMode == idx
+                    Surface(
+                        color = if (sel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { activePortalMode = idx }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = iconAndTitle.first,
+                                contentDescription = null,
+                                tint = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = iconAndTitle.second,
+                                fontSize = 12.sp,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                color = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compact Top Browser Bar (only in Web Sync mode)
+        if (activePortalMode == 0) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp
@@ -809,8 +891,9 @@ fun SyncPortalScreen(
                 }
             }
         }
+        } // end if (activePortalMode == 0) header & helper banners
 
-        // Spacious WebView Area (clipToBounds prevents hardware WebView layer from overdrawing Top Bar)
+        // Spacious WebView / Native Empty-Classroom Area (WebView stays mounted to preserve cookies!)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -820,9 +903,9 @@ fun SyncPortalScreen(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
-                    view.visibility = if (isVisible) View.VISIBLE else View.GONE
-                    // Pause background WebView JS/rendering timers when user is on other tabs (saves battery & RAM!)
-                    if (isVisible || isSyncing) {
+                    view.visibility = if (isVisible && activePortalMode == 0) View.VISIBLE else View.GONE
+                    // Pause background WebView JS/rendering timers when hidden (saves battery & RAM!)
+                    if ((isVisible && activePortalMode == 0) || isSyncing) {
                         view.onResume()
                     } else {
                         view.onPause()
@@ -1176,9 +1259,48 @@ fun SyncPortalScreen(
                     }
                 }
             }
+
+            if (activePortalMode == 1) {
+                EmptyClassroomPane(
+                    settings = settings,
+                    isLoggedIntoJw = isLoggedIntoJw,
+                    isQuerying = isSyncing,
+                    results = emptyClassroomResults,
+                    summary = emptyClassroomSummary,
+                    onGoToWebLogin = { activePortalMode = 0 },
+                    onExecuteQuery = { campusKeyword, weekNumber, dayOfWeek, startSection, endSection, buildingKeyword ->
+                        isSyncing = true
+                        syncStatusText = "正在查询空闲教室..."
+                        webViewRef?.evaluateJavascript(
+                            GdouSyncScript.buildQueryEmptyClassroomsScript(
+                                campusKeyword = campusKeyword,
+                                weekNumber = weekNumber,
+                                dayOfWeek = dayOfWeek,
+                                startSection = startSection,
+                                endSection = endSection,
+                                buildingKeyword = buildingKeyword
+                            ),
+                            null
+                        )
+                    },
+                    onOpenOriginalWeb = {
+                        activePortalMode = 0
+                        if (!isLoggedIntoJw) {
+                            onShowMessage("请先登录教务系统")
+                        } else {
+                            webViewRef?.evaluateJavascript(
+                                GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default"),
+                                null
+                            )
+                        }
+                    },
+                    onShowMessage = onShowMessage
+                )
+            }
         }
 
-        // Sleek Single-Row Bottom Sync Action Dock
+        // Sleek Single-Row Bottom Sync Action Dock (only in Web Sync mode)
+        if (activePortalMode == 0) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 4.dp,
@@ -1270,15 +1392,17 @@ fun SyncPortalScreen(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("自习查空教室") },
-                            leadingIcon = { Icon(Icons.Rounded.MeetingRoom, contentDescription = null) },
+                            text = { Text("从当前网页表格直接提取") },
+                            leadingIcon = { Icon(Icons.Rounded.Explore, contentDescription = null) },
                             onClick = {
                                 showSingleSyncMenu = false
                                 if (!isLoggedIntoJw) {
-                                    onShowMessage("请先完成广海教务登录，再查询空教室")
+                                    onShowMessage("请先登录并进入正方成绩或考试查询表格页")
                                 } else {
+                                    isSyncing = true
+                                    syncStatusText = "正在从当前网页表格直接提取..."
                                     webViewRef?.evaluateJavascript(
-                                        GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default"),
+                                        GdouSyncScript.buildScrapeCurrentPageDomScript(),
                                         null
                                     )
                                 }
@@ -1288,6 +1412,7 @@ fun SyncPortalScreen(
                 }
             }
         }
+        } // end if (activePortalMode == 0) bottom sync dock
     }
 
     jsAlertDialog?.let { (msg, res) ->

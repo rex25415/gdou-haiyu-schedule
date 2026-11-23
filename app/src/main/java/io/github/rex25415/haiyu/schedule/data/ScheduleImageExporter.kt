@@ -56,7 +56,7 @@ object ScheduleImageExporter {
         snapshot: AppDataSnapshot,
         weekNumber: Int
     ): ImageExportResult {
-        if (snapshot.courses.isEmpty()) return ImageExportResult(ok = false)
+        if (snapshot.courses.isEmpty() && snapshot.exams.isEmpty()) return ImageExportResult(ok = false)
         val width = 1080
         val height = 1920
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -66,7 +66,18 @@ object ScheduleImageExporter {
         val maxSec = (snapshot.courses.maxOfOrNull { it.endSection } ?: 10).coerceIn(10, 12)
         val slots = GdouTimeRules.slotsForCampus(settings.campus, maxSec)
         val weekDates = GdouTimeRules.getWeekDates(settings.semesterStartDate, weekNumber)
-        val hasAnyWeekend = settings.showWeekend || snapshot.courses.any { it.dayOfWeek >= 6 }
+        val weekExams = if (settings.showExamsOnTimetable) {
+            GdouTimeRules.resolveExamsForWeek(
+                exams = snapshot.exams,
+                startDateStr = settings.semesterStartDate,
+                weekNumber = weekNumber,
+                campus = settings.campus,
+                maxSection = maxSec
+            )
+        } else emptyList()
+        val hasAnyWeekend = settings.showWeekend ||
+            snapshot.courses.any { it.dayOfWeek >= 6 } ||
+            weekExams.any { it.dayOfWeek >= 6 }
         val dayCount = if (hasAnyWeekend) 7 else 5
 
         // Soft ocean-mint background
@@ -270,6 +281,77 @@ object ScheduleImageExporter {
                     locLayout.draw(canvas)
                     canvas.restore()
                 }
+            }
+
+            // Also draw projected finals exams on the week poster in high-contrast amber!
+            val dayExams = weekExams.filter { it.dayOfWeek == day }
+            for (exBlock in dayExams) {
+                val s = exBlock.startSection.coerceIn(1, slots.size)
+                val e = exBlock.endSection.coerceIn(s, slots.size)
+                val left = marginX + timeColW + (day - 1) * colW + 4f
+                val right = left + colW - 8f
+                val top = bodyTop + (s - 1) * rowH + 4f
+                val bottom = bodyTop + e * rowH - 4f
+                val rect = RectF(left, top, right, bottom)
+
+                fillPaint.color = 0xFFFFF0DB.toInt()
+                canvas.drawRoundRect(rect, 18f, 18f, fillPaint)
+                strokePaint.color = 0xFFD97706.toInt()
+                strokePaint.alpha = 235
+                strokePaint.strokeWidth = 2.8f
+                canvas.drawRoundRect(rect, 18f, 18f, strokePaint)
+
+                val innerW = (right - left - 18f).toInt().coerceAtLeast(36)
+                var cursorY = top + 11f
+                val badgeText = "考试 ${exBlock.startTime}"
+                val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    textSize = 17f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                val bw = (badgePaint.measureText(badgeText) + 12f).coerceAtMost(right - left - 14f)
+                fillPaint.color = 0xFFD97706.toInt()
+                canvas.drawRoundRect(RectF(left + 9f, cursorY, left + 9f + bw, cursorY + 24f), 7f, 7f, fillPaint)
+                canvas.drawText(badgeText, left + 15f, cursorY + 18f, badgePaint)
+                cursorY += 29f
+
+                val nameTp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF78350F.toInt()
+                    textSize = if (dayCount == 5) 25f else 20f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                val nameLayout = StaticLayout.Builder.obtain(
+                    exBlock.exam.courseName,
+                    0,
+                    exBlock.exam.courseName.length,
+                    nameTp,
+                    innerW
+                )
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setMaxLines(3)
+                    .build()
+                canvas.save()
+                canvas.translate(left + 9f, cursorY)
+                nameLayout.draw(canvas)
+                canvas.restore()
+
+                val roomSeat = buildString {
+                    append(exBlock.exam.location.ifBlank { "考场待定" })
+                    if (exBlock.exam.seatNumber.isNotBlank()) append("·${exBlock.exam.seatNumber}座")
+                }
+                val locTp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF78350F.toInt()
+                    alpha = 215
+                    textSize = if (dayCount == 5) 20f else 16.5f
+                }
+                val locLayout = StaticLayout.Builder.obtain(roomSeat, 0, roomSeat.length, locTp, innerW)
+                    .setMaxLines(2)
+                    .build()
+                val locY = (cursorY + nameLayout.height + 6f).coerceAtMost(bottom - locLayout.height - 8f)
+                canvas.save()
+                canvas.translate(left + 9f, locY)
+                locLayout.draw(canvas)
+                canvas.restore()
             }
         }
 

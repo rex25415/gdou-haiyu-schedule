@@ -95,8 +95,10 @@ fun HaiyuApp(
     var isJwLoggedIn by remember { mutableStateOf(false) }
     var isJwSyncing by remember { mutableStateOf(false) }
     var quickRefreshTrigger by remember { mutableIntStateOf(0) }
-    var academicRequestedSubTab by rememberSaveable { mutableIntStateOf(0) }
+    var academicRequestedSubTab by rememberSaveable { mutableIntStateOf(-1) }
     var academicSubTabNonce by rememberSaveable { mutableIntStateOf(0) }
+    var syncRequestedMode by rememberSaveable { mutableIntStateOf(0) }
+    var syncModeNonce by rememberSaveable { mutableIntStateOf(0) }
     var lastGradeSkipReason by rememberSaveable { mutableStateOf<String?>(null) }
 
     // In-App GitHub Releases Updater state
@@ -384,6 +386,8 @@ fun HaiyuApp(
                                 isVisible = currentTab == 1,
                                 settings = snapshot.settings,
                                 quickRefreshTrigger = quickRefreshTrigger,
+                                requestedMode = syncRequestedMode,
+                                modeRequestNonce = syncModeNonce,
                                 onLoginStateChanged = { isJwLoggedIn = it },
                                 onSyncStateChanged = { isJwSyncing = it },
                                 onQuickRefreshNeedsLogin = { reason ->
@@ -398,7 +402,7 @@ fun HaiyuApp(
                                         )
                                     }
                                 },
-                                onCoursesSynced = { courses, startDate, totalWeeks, termLabel, yearCode, semCode, detectedCampusId ->
+                                onCoursesSynced = { courses, startDate, totalWeeks, termLabel, yearCode, semCode, detectedCampusId, practiceCourses ->
                                     val detected = repo.replaceSyncedCourses(
                                         courses = courses,
                                         semesterStartDate = startDate,
@@ -406,16 +410,17 @@ fun HaiyuApp(
                                         academicYearLabel = termLabel,
                                         yearCode = yearCode,
                                         semesterCode = semCode,
-                                        detectedCampusId = detectedCampusId
+                                        detectedCampusId = detectedCampusId,
+                                        practiceCourses = practiceCourses
                                     )
                                     syncWidgetsAndReminders()
                                     if (detected != null) {
                                         showToast("已自动识别「${detected.label}」并匹配对应错峰作息")
                                     }
                                 },
-                                onGradesSynced = { grades ->
+                                onGradesSynced = { grades, levelExams ->
                                     lastGradeSkipReason = null
-                                    repo.replaceSyncedGrades(grades)
+                                    repo.replaceSyncedGrades(grades, levelExams)
                                 },
                                 onExamsSynced = { exams ->
                                     repo.replaceSyncedExams(exams)
@@ -539,15 +544,33 @@ fun HaiyuApp(
                                     } else {
                                         showToast("源日期当天没有排课，未执行调休")
                                     }
+                                },
+                                onOpenEmptyClassroom = {
+                                    syncRequestedMode = 1
+                                    syncModeNonce++
+                                    hasOpenedSyncTab = true
+                                    currentTab = 1
+                                },
+                                onToggleCompactBanner = {
+                                    val next = !snapshot.settings.compactScheduleBanner
+                                    repo.updateSettings { it.copy(compactScheduleBanner = next) }
+                                    showToast(if (next) "已收起为极简预告条，课表视野更开阔" else "已展开完整下节看板")
                                 }
                             )
 
                             2 -> AcademicScreen(
                                 snapshot = snapshot,
+                                isDark = isDark,
                                 requestedSubTab = academicRequestedSubTab,
                                 subTabRequestNonce = academicSubTabNonce,
                                 lastGradeSkipReason = lastGradeSkipReason,
-                                onJumpToSync = { currentTab = 1 },
+                                onSubTabChanged = { sub -> academicRequestedSubTab = sub },
+                                onJumpToSync = {
+                                    syncRequestedMode = 0
+                                    syncModeNonce++
+                                    hasOpenedSyncTab = true
+                                    currentTab = 1
+                                },
                                 onAddTask = { task ->
                                     repo.upsertTask(task)
                                     syncWidgetsAndReminders()
@@ -570,6 +593,14 @@ fun HaiyuApp(
                                 onAddGrade = { g ->
                                     repo.upsertGrade(g)
                                     showToast("已加入模拟成绩：${g.courseName}")
+                                },
+                                onUpdateGrade = { g ->
+                                    repo.upsertGrade(g)
+                                    showToast("已保存「${g.courseName}」分项成绩明细")
+                                },
+                                onUpdateCreditTargets = { targets ->
+                                    repo.updateSettings { it.copy(creditTargets = targets) }
+                                    showToast("已保存毕业目标学分要求")
                                 },
                                 onDeleteGrade = { id ->
                                     repo.deleteGrade(id)

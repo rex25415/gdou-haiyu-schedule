@@ -110,7 +110,8 @@ object ClassReminderScheduler {
     }
 
     /**
-     * 只要桌面添加了任意海屿小组件，安排一次零耗电的次日 00:05 刷新，确保早上醒来倒计时与今日课表已跨天更新
+     * 只要桌面添加了任意海屿小组件，安排一次零耗电的「下一次课程状态切换（上课/下课）或次日 00:05」刷新，
+     * 确保每节课下课瞬间自动切下一节、当天最后一节下课即刻切「明日早课预告」、跨零点自动更新倒计时！
      */
     fun scheduleMidnightWidgetRefresh(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -130,8 +131,32 @@ object ClassReminderScheduler {
             if (existing != null) am.cancel(existing)
             return
         }
-        val nextMidnight = LocalDate.now().plusDays(1).atTime(0, 5)
-        val triggerMillis = nextMidnight.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val now = LocalDateTime.now()
+        val today = now.toLocalDate()
+        val nextMidnight = today.plusDays(1).atTime(0, 5)
+        var nextTransition: LocalDateTime = nextMidnight
+
+        try {
+            val snapshot = AppRepository.getInstance(context).state.value
+            val settings = snapshot.settings
+            val todayCourses = GdouTimeRules.getTodayCoursesWithStatus(
+                courses = snapshot.courses,
+                startDateStr = settings.semesterStartDate,
+                totalWeeks = settings.totalWeeks,
+                campus = settings.campus,
+                now = now,
+                pinnedKeys = settings.pinnedConflictKeys.toSet()
+            )
+            for (occ in todayCourses) {
+                val st = LocalDateTime.of(today, GdouTimeRules.parseLocalTime(occ.time.startTime))
+                val et = LocalDateTime.of(today, GdouTimeRules.parseLocalTime(occ.time.endTime)).plusMinutes(1)
+                if (st.isAfter(now) && st.isBefore(nextTransition)) nextTransition = st
+                if (et.isAfter(now) && et.isBefore(nextTransition)) nextTransition = et
+            }
+        } catch (_: Exception) {
+        }
+
+        val triggerMillis = nextTransition.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val pi = PendingIntent.getBroadcast(
             context,
             REQUEST_CODE_MIDNIGHT_WIDGET,

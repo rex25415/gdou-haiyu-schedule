@@ -2,8 +2,11 @@ package io.github.rex25415.haiyu.schedule.sync
 
 import android.webkit.JavascriptInterface
 import io.github.rex25415.haiyu.schedule.model.CourseItem
+import io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem
 import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GradeItem
+import io.github.rex25415.haiyu.schedule.model.LevelExamItem
+import io.github.rex25415.haiyu.schedule.model.PracticeCourseItem
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.URI
@@ -33,12 +36,28 @@ private data class SyncedCourseDto(
     val startSection: Int = 1,
     val endSection: Int = 2,
     val weeks: List<Int> = emptyList(),
-    val credit: String = ""
+    val credit: String = "",
+    val courseType: String = "",
+    val examMethod: String = "",
+    val classGroup: String = "",
+    val totalHours: String = ""
+)
+
+@Serializable
+private data class SyncedPracticeCourseDto(
+    val name: String,
+    val teacher: String = "",
+    val weeksText: String = "",
+    val weeks: List<Int> = emptyList(),
+    val credit: String = "",
+    val courseType: String = "实践环节",
+    val note: String = ""
 )
 
 @Serializable
 private data class SyncedCoursesPayload(
     val courses: List<SyncedCourseDto> = emptyList(),
+    val practiceCourses: List<SyncedPracticeCourseDto> = emptyList(),
     val semesterStartDate: String = "",
     val totalWeeks: Int = 20,
     val termLabel: String = "",
@@ -57,12 +76,28 @@ private data class SyncedGradeDto(
     val credit: Double = 0.0,
     val courseType: String = "",
     val examNature: String = "正常考试",
-    val teacher: String = ""
+    val teacher: String = "",
+    val breakdown: String = ""
+)
+
+@Serializable
+private data class SyncedLevelExamDto(
+    val examName: String = "",
+    val score: String = "",
+    val examDate: String = "",
+    val detail: String = ""
 )
 
 @Serializable
 private data class SyncedGradesPayload(
-    val grades: List<SyncedGradeDto> = emptyList()
+    val grades: List<SyncedGradeDto> = emptyList(),
+    val levelExams: List<SyncedLevelExamDto> = emptyList()
+)
+
+@Serializable
+private data class SyncedEmptyClassroomsPayload(
+    val rooms: List<EmptyClassroomItem> = emptyList(),
+    val summary: String = ""
 )
 
 @Serializable
@@ -92,10 +127,12 @@ interface GdouSyncCallback {
         termLabel: String,
         yearCode: String,
         semesterCode: String,
-        detectedCampusId: String
+        detectedCampusId: String,
+        practiceCourses: List<PracticeCourseItem> = emptyList()
     )
-    fun onGradesSynced(grades: List<GradeItem>)
+    fun onGradesSynced(grades: List<GradeItem>, levelExams: List<LevelExamItem> = emptyList())
     fun onExamsSynced(exams: List<ExamItem>)
+    fun onEmptyClassroomsLoaded(rooms: List<EmptyClassroomItem>, summary: String) {}
     fun onComplete(summary: String)
     fun onError(errorMessage: String)
     fun onQuickRefreshNeedsLogin(reason: String) {}
@@ -144,7 +181,22 @@ class GdouJsBridge(
                     endSection = dto.endSection,
                     weeks = dto.weeks,
                     credit = dto.credit,
+                    courseType = dto.courseType,
+                    examMethod = dto.examMethod,
+                    classGroup = dto.classGroup,
+                    totalHours = dto.totalHours,
                     isManual = false
+                )
+            }
+            val mappedPractice = payload.practiceCourses.map { dto ->
+                PracticeCourseItem(
+                    name = dto.name,
+                    teacher = dto.teacher,
+                    weeksText = dto.weeksText,
+                    weeks = dto.weeks,
+                    credit = dto.credit,
+                    courseType = dto.courseType.ifBlank { "实践环节" },
+                    note = dto.note
                 )
             }
             callback.onCoursesSynced(
@@ -154,7 +206,8 @@ class GdouJsBridge(
                 termLabel = payload.termLabel,
                 yearCode = payload.academicYear,
                 semesterCode = payload.semesterCode,
-                detectedCampusId = payload.detectedCampus
+                detectedCampusId = payload.detectedCampus,
+                practiceCourses = mappedPractice
             )
         } catch (e: Exception) {
             callback.onError("解析课表数据失败：${e.message}")
@@ -177,12 +230,33 @@ class GdouJsBridge(
                     courseType = dto.courseType,
                     examNature = dto.examNature,
                     teacher = dto.teacher,
+                    breakdown = dto.breakdown,
                     isSimulated = false
                 )
             }
-            callback.onGradesSynced(mapped)
+            val mappedLevels = payload.levelExams.mapNotNull { dto ->
+                if (dto.examName.isBlank()) null
+                else LevelExamItem(
+                    examName = dto.examName,
+                    score = dto.score,
+                    examDate = dto.examDate,
+                    detail = dto.detail
+                )
+            }
+            callback.onGradesSynced(mapped, mappedLevels)
         } catch (e: Exception) {
             callback.onError("解析成绩数据失败：${e.message}")
+        }
+    }
+
+    @JavascriptInterface
+    fun onEmptyClassroomsLoaded(payloadJson: String) {
+        if (!isAllowedOrigin()) return
+        try {
+            val payload = json.decodeFromString(SyncedEmptyClassroomsPayload.serializer(), payloadJson)
+            callback.onEmptyClassroomsLoaded(payload.rooms, payload.summary)
+        } catch (e: Exception) {
+            callback.onError("解析空教室结果失败：${e.message}")
         }
     }
 
