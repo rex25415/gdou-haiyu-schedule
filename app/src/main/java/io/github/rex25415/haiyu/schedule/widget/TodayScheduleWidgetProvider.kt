@@ -135,11 +135,13 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
                 return
             }
 
+            val pinnedSet = settings.pinnedConflictKeys.toSet()
             val todayCourses = GdouTimeRules.getTodayCoursesWithStatus(
                 courses = snapshot.courses,
                 startDateStr = settings.semesterStartDate,
                 totalWeeks = settings.totalWeeks,
-                campus = settings.campus
+                campus = settings.campus,
+                pinnedKeys = pinnedSet
             )
             val remainingToday = todayCourses.filter { it.state != OccurrenceState.FINISHED }
             val tomorrow = today.plusDays(1)
@@ -149,7 +151,8 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
                     startDateStr = settings.semesterStartDate,
                     totalWeeks = settings.totalWeeks,
                     campus = settings.campus,
-                    date = tomorrow
+                    date = tomorrow,
+                    pinnedKeys = pinnedSet
                 )
             } else {
                 emptyList()

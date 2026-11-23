@@ -1,6 +1,7 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
@@ -69,9 +72,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -95,6 +100,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -129,6 +136,7 @@ import java.time.temporal.ChronoUnit
 fun ScheduleScreen(
     snapshot: AppDataSnapshot,
     isDark: Boolean,
+    backgroundBitmap: ImageBitmap? = null,
     isRefreshingSchedule: Boolean,
     onQuickRefreshSchedule: () -> Unit,
     onJumpToSync: () -> Unit,
@@ -139,6 +147,7 @@ fun ScheduleScreen(
     onSaveCourse: (CourseItem) -> Unit,
     onDeleteCourse: (String) -> Unit,
     onRescheduleSingleWeek: (courseId: String, weekNumber: Int, newDay: Int, newStartSection: Int, newEndSection: Int, newLocation: String) -> Unit,
+    onTogglePinConflictCourse: (CourseItem, List<CourseItem>) -> Unit,
     onAddTask: (TodoTaskItem) -> Unit,
     onToggleTaskDone: (String) -> Unit,
     onExportWeekImage: (weekNumber: Int) -> Unit,
@@ -197,27 +206,34 @@ fun ScheduleScreen(
     var showHolidayShiftDialog by remember { mutableStateOf(false) }
     var showCourseSearchSheet by remember { mutableStateOf(false) }
 
-    val weekConflictClusters = remember(snapshot.courses, selectedWeek) {
-        GdouTimeRules.findConflictClustersForWeek(snapshot.courses, selectedWeek)
+    val pinnedKeys = remember(settings.pinnedConflictKeys) { settings.pinnedConflictKeys.toSet() }
+    val resolvedTimeMap = remember(snapshot.courses, settings.campus) {
+        snapshot.courses.associate { it.id to GdouTimeRules.resolveCourseTime(it, settings.campus) }
     }
 
-    val todayStatuses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus, nowDateTime) {
+    val weekConflictClusters = remember(snapshot.courses, selectedWeek, pinnedKeys) {
+        GdouTimeRules.findConflictClustersForWeek(snapshot.courses, selectedWeek, pinnedKeys)
+    }
+
+    val todayStatuses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus, nowDateTime, pinnedKeys) {
         GdouTimeRules.getTodayCoursesWithStatus(
             courses = snapshot.courses,
             startDateStr = settings.semesterStartDate,
             totalWeeks = totalWeeks,
             campus = settings.campus,
-            now = nowDateTime
+            now = nowDateTime,
+            pinnedKeys = pinnedKeys
         )
     }
 
-    val tomorrowCourses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus, today) {
+    val tomorrowCourses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus, today, pinnedKeys) {
         GdouTimeRules.getCoursesForDate(
             courses = snapshot.courses,
             startDateStr = settings.semesterStartDate,
             totalWeeks = totalWeeks,
             campus = settings.campus,
-            date = today.plusDays(1)
+            date = today.plusDays(1),
+            pinnedKeys = pinnedKeys
         )
     }
 
@@ -597,16 +613,21 @@ fun ScheduleScreen(
                     beyondViewportPageCount = 1
                 ) { pageIdx ->
                     val pageWeek = pageIdx + 1
+                    val isPageCurrentWeek = pageWeek == actualCurrentWeek && termWeekInfo.phase == TermWeekPhase.IN_TERM
                     WeekGridScheduleView(
                         courses = snapshot.courses,
+                        resolvedTimeMap = resolvedTimeMap,
+                        pinnedKeys = pinnedKeys,
                         selectedWeek = pageWeek,
                         today = today,
-                        nowTime = nowTime,
+                        nowTime = if (isPageCurrentWeek) nowTime else null,
                         startDateStr = settings.semesterStartDate,
                         campus = settings.campus,
                         showWeekend = settings.showWeekend,
                         showNonCurrentWeek = settings.showNonCurrentWeekCourses,
                         isDark = isDark,
+                        backgroundBitmap = backgroundBitmap,
+                        cardAlpha = if (backgroundBitmap != null) settings.courseCardAlpha.coerceIn(0.6f, 1f) else 1f,
                         onCourseClick = { detailCourse = it },
                         onConflictClusterClick = { day, overlapped ->
                             conflictSheetData = day to overlapped
@@ -623,18 +644,46 @@ fun ScheduleScreen(
         }
     }
 
-    // Smart Week Picker Dialog (shows per-week course density at a glance!)
+    // Smart Week Picker Dialog (semester progress bar + per-week course density!)
     if (showWeekPicker) {
+        val progressFraction = when (termWeekInfo.phase) {
+            TermWeekPhase.BEFORE_TERM -> 0f
+            TermWeekPhase.AFTER_TERM -> 1f
+            TermWeekPhase.IN_TERM -> (actualCurrentWeek.toFloat() / totalWeeks.toFloat()).coerceIn(0f, 1f)
+        }
+        val progressPct = (progressFraction * 100f).toInt()
+        val remainingWeeks = (totalWeeks - actualCurrentWeek).coerceAtLeast(0)
+        val progressLabel = when (termWeekInfo.phase) {
+            TermWeekPhase.BEFORE_TERM -> "尚未开学 · 距第 1 周还有 ${termWeekInfo.daysUntilStart} 天"
+            TermWeekPhase.AFTER_TERM -> "本学期已结课 · 假期愉快"
+            TermWeekPhase.IN_TERM -> "本学期进度 $progressPct% · 距结课还有 ${remainingWeeks} 周"
+        }
         AlertDialog(
             onDismissRequest = { showWeekPicker = false },
             title = { Text("快速切换教学周") },
             text = {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.height(250.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = progressLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        LinearProgressIndicator(
+                            progress = { progressFraction },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                        )
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(5),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.height(250.dp)
+                    ) {
                     items(totalWeeks) { idx ->
                         val w = idx + 1
                         val isSelected = w == selectedWeek
@@ -692,6 +741,7 @@ fun ScheduleScreen(
                             }
                         }
                     }
+                }
                 }
             },
             confirmButton = {
@@ -1027,8 +1077,9 @@ fun ScheduleScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 overlappedCourses.forEach { c ->
-                    val resolved = GdouTimeRules.resolveCourseTime(c, settings.campus)
+                    val resolved = resolvedTimeMap[c.id] ?: GdouTimeRules.resolveCourseTime(c, settings.campus)
                     val palette = coursePaletteFor(c.colorIndex, isDark)
+                    val isPinned = GdouTimeRules.courseConflictKey(c) in pinnedKeys
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = palette.container),
@@ -1047,7 +1098,7 @@ fun ScheduleScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    text = c.name,
+                                    text = if (isPinned) "★ ${c.name}" else c.name,
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = palette.onContainer,
@@ -1078,23 +1129,38 @@ fun ScheduleScreen(
                                 color = palette.onContainer.copy(alpha = 0.85f)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        onTogglePinConflictCourse(c, overlappedCourses)
+                                        conflictSheetData = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(Icons.Rounded.PushPin, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(if (isPinned) "取消置顶" else "置顶显示", fontSize = 11.5.sp)
+                                }
                                 OutlinedButton(
                                     onClick = {
                                         conflictSheetData = null
                                         detailCourse = c
                                     },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     modifier = Modifier.height(34.dp)
-                                ) { Text("查看详情", fontSize = 12.sp) }
+                                ) { Text("查看详情", fontSize = 11.5.sp) }
                                 FilledTonalButton(
                                     onClick = {
                                         conflictSheetData = null
                                         singleWeekShiftCourse = c
                                     },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                     modifier = Modifier.height(34.dp)
-                                ) { Text("仅调第${selectedWeek}周", fontSize = 12.sp) }
+                                ) { Text("仅调第${selectedWeek}周", fontSize = 11.5.sp) }
                             }
                         }
                     }
@@ -1220,16 +1286,23 @@ fun ScheduleScreen(
         }
     }
 
-    // Full Semester Course Search & Credit Summary BottomSheet
+    // Full Semester Course Search & Credit Summary BottomSheet (with grouped/expanded toggle & 1-tap jump to week!)
     if (showCourseSearchSheet) {
         CourseSearchBottomSheet(
             courses = snapshot.courses,
+            resolvedTimeMap = resolvedTimeMap,
             campus = settings.campus,
             isDark = isDark,
             onDismiss = { showCourseSearchSheet = false },
             onSelectCourse = { c ->
                 showCourseSearchSheet = false
                 detailCourse = c
+            },
+            onJumpToWeek = { targetWeek ->
+                showCourseSearchSheet = false
+                scope.launch {
+                    pagerState.animateScrollToPage((targetWeek - 1).coerceIn(0, totalWeeks - 1))
+                }
             }
         )
     }
@@ -1411,10 +1484,27 @@ private fun EmptyScheduleOnboarding(
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
                     GdouCampus.entries.forEach { campus ->
+                        val selected = selectedCampus == campus
                         FilterChip(
-                            selected = selectedCampus == campus,
+                            selected = selected,
                             onClick = { onSelectCampus(campus) },
-                            label = { Text(campus.label, fontSize = 12.sp, maxLines = 1, softWrap = false) }
+                            leadingIcon = if (selected) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            } else null,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            label = {
+                                Text(
+                                    campus.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         )
                     }
                 }
@@ -1734,12 +1824,15 @@ private fun NextClassHeroBanner(
 @Composable
 private fun CourseSearchBottomSheet(
     courses: List<CourseItem>,
+    resolvedTimeMap: Map<String, io.github.rex25415.haiyu.schedule.data.ResolvedCourseTime>,
     campus: GdouCampus,
     isDark: Boolean,
     onDismiss: () -> Unit,
-    onSelectCourse: (CourseItem) -> Unit
+    onSelectCourse: (CourseItem) -> Unit,
+    onJumpToWeek: (Int) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    var groupByCourse by remember { mutableStateOf(true) }
     val distinctCourseCount = remember(courses) { courses.map { it.name.trim() }.distinct().size }
     val totalCredits = remember(courses) {
         val creditMap = LinkedHashMap<String, Double>()
@@ -1768,6 +1861,9 @@ private fun CourseSearchBottomSheet(
                 .thenBy { it.startSection }
                 .thenBy { it.name }
         )
+    }
+    val groupedCourses = remember(filtered) {
+        filtered.groupBy { it.name.trim() }.values.toList()
     }
 
     ModalBottomSheet(
@@ -1808,7 +1904,36 @@ private fun CourseSearchBottomSheet(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = groupByCourse,
+                    onClick = { groupByCourse = true },
+                    leadingIcon = if (groupByCourse) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    label = { Text("按课程聚合 (${groupedCourses.size}门)", fontSize = 11.5.sp, fontWeight = if (groupByCourse) FontWeight.Bold else FontWeight.Medium) }
+                )
+                FilterChip(
+                    selected = !groupByCourse,
+                    onClick = { groupByCourse = false },
+                    leadingIcon = if (!groupByCourse) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    label = { Text("按排课展开 (${filtered.size}条)", fontSize = 11.5.sp, fontWeight = if (!groupByCourse) FontWeight.Bold else FontWeight.Medium) }
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -1832,6 +1957,90 @@ private fun CourseSearchBottomSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            } else if (groupByCourse) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 22.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(380.dp)
+                ) {
+                    items(groupedCourses, key = { it.first().name.trim() }) { group ->
+                        val head = group.first()
+                        val pal = coursePaletteFor(head.colorIndex, isDark)
+                        val allWeeks = group.flatMap { it.weeks }.distinct().sorted()
+                        val firstWeek = allWeeks.firstOrNull() ?: 1
+                        val teachers = group.mapNotNull { it.teacher.trim().takeIf(String::isNotBlank) }.distinct().joinToString("/")
+                        val locations = group.mapNotNull { it.location.trim().takeIf(String::isNotBlank) }.distinct().take(2).joinToString("、")
+                        val positiveCredit = head.credit.trim().toDoubleOrNull()?.takeIf { it > 0.0 }
+
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectCourse(head) }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(4.dp)
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(pal.accent)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = head.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "${GdouTimeRules.formatWeeksCompact(allWeeks)} · 共 ${group.size} 条排课",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append(locations.ifBlank { "地点待定" })
+                                            if (teachers.isNotBlank()) append(" · $teachers")
+                                            if (positiveCredit != null) append(" · ${head.credit}学分")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onJumpToWeek(firstWeek) }
+                                ) {
+                                    Text(
+                                        text = "去第${firstWeek}周",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1841,8 +2050,10 @@ private fun CourseSearchBottomSheet(
                         .height(380.dp)
                 ) {
                     items(filtered, key = { it.id }) { c ->
-                        val resolved = GdouTimeRules.resolveCourseTime(c, campus)
+                        val resolved = resolvedTimeMap[c.id] ?: GdouTimeRules.resolveCourseTime(c, campus)
                         val pal = coursePaletteFor(c.colorIndex, isDark)
+                        val firstWeek = c.weeks.minOrNull() ?: 1
+                        val positiveCredit = c.credit.trim().toDoubleOrNull()?.takeIf { it > 0.0 }
                         Card(
                             shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
@@ -1882,7 +2093,7 @@ private fun CourseSearchBottomSheet(
                                         text = buildString {
                                             append(c.location.ifBlank { "地点待定" })
                                             if (c.teacher.isNotBlank()) append(" · ${c.teacher}")
-                                            if (c.credit.isNotBlank()) append(" · ${c.credit}学分")
+                                            if (positiveCredit != null) append(" · ${c.credit}学分")
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1890,12 +2101,22 @@ private fun CourseSearchBottomSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onJumpToWeek(firstWeek) }
+                                ) {
+                                    Text(
+                                        text = "第${firstWeek}周",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2116,14 +2337,18 @@ private fun DayTimelineScheduleView(
 @Composable
 private fun WeekGridScheduleView(
     courses: List<CourseItem>,
+    resolvedTimeMap: Map<String, io.github.rex25415.haiyu.schedule.data.ResolvedCourseTime>,
+    pinnedKeys: Set<String>,
     selectedWeek: Int,
     today: LocalDate,
-    nowTime: LocalTime,
+    nowTime: LocalTime?,
     startDateStr: String,
     campus: GdouCampus,
     showWeekend: Boolean,
     showNonCurrentWeek: Boolean,
     isDark: Boolean,
+    backgroundBitmap: ImageBitmap?,
+    cardAlpha: Float,
     onCourseClick: (CourseItem) -> Unit,
     onConflictClusterClick: (day: Int, overlappedCourses: List<CourseItem>) -> Unit,
     onEmptyCellClick: (day: Int, section: Int) -> Unit
@@ -2140,7 +2365,7 @@ private fun WeekGridScheduleView(
     }
     val weekContainsToday = remember(weekDates, today) { weekDates.any { it == today } }
     val activeSectionNumber: Int? = remember(slots, nowTime, weekContainsToday) {
-        if (!weekContainsToday) null
+        if (!weekContainsToday || nowTime == null) null
         else slots.firstOrNull { slot ->
             val st = GdouTimeRules.parseLocalTime(slot.startTime)
             val et = GdouTimeRules.parseLocalTime(slot.endTime)
@@ -2167,8 +2392,9 @@ private fun WeekGridScheduleView(
     val totalBreaks = (if (slots.size > 4) 1 else 0) + (if (slots.size > 8) 1 else 0)
     val totalGridHeight = rowHeight * slots.size + breakGap * totalBreaks
 
-    // Calculate live current-time line Y-position (during campus hours 07:50 ~ 22:30)
-    val liveTimeY: Dp? = remember(slots, nowTime, rowHeight) {
+    // Calculate live current-time line Y-position (ONLY on the week containing today!)
+    val liveTimeY: Dp? = remember(slots, nowTime, rowHeight, weekContainsToday) {
+        if (!weekContainsToday || nowTime == null) return@remember null
         val firstStart = GdouTimeRules.parseLocalTime(slots.first().startTime).minusMinutes(15)
         val lastEnd = GdouTimeRules.parseLocalTime(slots.last().endTime).plusMinutes(15)
         if (nowTime.isBefore(firstStart) || nowTime.isAfter(lastEnd)) {
@@ -2261,13 +2487,30 @@ private fun WeekGridScheduleView(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
-        // Scrollable Grid Body
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(end = 3.dp, bottom = 20.dp)
-        ) {
+        // Scrollable Grid Body (with optional zero-permission custom wallpaper + readability scrim!)
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (backgroundBitmap != null) {
+                Image(
+                    bitmap = backgroundBitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (isDark) Color.Black.copy(alpha = 0.42f)
+                            else Color.White.copy(alpha = 0.28f)
+                        )
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(end = 3.dp, bottom = 20.dp)
+            ) {
             // Left Time Slots Column (highlights current section cleanly — zero line slashing over course cards!)
             Column(modifier = Modifier.width(timeColumnWidth)) {
                 slots.forEach { slot ->
@@ -2348,10 +2591,10 @@ private fun WeekGridScheduleView(
             // Day Columns (with Today tint, live time bar, hairline grid, & Overlap Clustering!)
             for (day in 1..dayCount) {
                 val isTodayCol = weekDates[day - 1] == today
-                val dayData = remember(courses, day, selectedWeek, showNonCurrentWeek) {
+                val dayData = remember(courses, day, selectedWeek, showNonCurrentWeek, pinnedKeys) {
                     val allDay = courses.filter { it.dayOfWeek == day }
                     val inWeek = allDay.filter { selectedWeek in it.weeks }
-                    val activeClusters = GdouTimeRules.groupOverlappingCourses(inWeek)
+                    val activeClusters = GdouTimeRules.groupOverlappingCourses(inWeek, pinnedKeys)
                     val outWeek = if (showNonCurrentWeek) {
                         val placed = mutableListOf<CourseItem>()
                         val candidates = allDay
@@ -2429,7 +2672,7 @@ private fun WeekGridScheduleView(
                         val span = (clampedEnd - clampedStart + 1)
                         val topOffset = yOffsetForSection(clampedStart)
                         val blockHeight = heightForSpan(clampedStart, clampedEnd)
-                        val resolved = GdouTimeRules.resolveCourseTime(course, campus)
+                        val resolved = resolvedTimeMap[course.id] ?: GdouTimeRules.resolveCourseTime(course, campus)
                         val palette = coursePaletteFor(course.colorIndex, isDark)
                         WeekGridCourseCard(
                             course = course,
@@ -2442,6 +2685,7 @@ private fun WeekGridScheduleView(
                             dayCount = dayCount,
                             span = span,
                             fontScale = fontScale,
+                            cardAlpha = cardAlpha,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(blockHeight)
@@ -2460,7 +2704,7 @@ private fun WeekGridScheduleView(
                             val span = (clampedEnd - clampedStart + 1)
                             val topOffset = yOffsetForSection(clampedStart)
                             val blockHeight = heightForSpan(clampedStart, clampedEnd)
-                            val resolved = GdouTimeRules.resolveCourseTime(course, campus)
+                            val resolved = resolvedTimeMap[course.id] ?: GdouTimeRules.resolveCourseTime(course, campus)
                             val palette = coursePaletteFor(course.colorIndex, isDark)
                             WeekGridCourseCard(
                                 course = course,
@@ -2473,6 +2717,7 @@ private fun WeekGridScheduleView(
                                 dayCount = dayCount,
                                 span = span,
                                 fontScale = fontScale,
+                                cardAlpha = cardAlpha,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(blockHeight)
@@ -2490,7 +2735,7 @@ private fun WeekGridScheduleView(
                                 val span = (clampedEnd - clampedStart + 1)
                                 val topOffset = yOffsetForSection(clampedStart)
                                 val blockHeight = heightForSpan(clampedStart, clampedEnd)
-                                val resolved = GdouTimeRules.resolveCourseTime(course, campus)
+                                val resolved = resolvedTimeMap[course.id] ?: GdouTimeRules.resolveCourseTime(course, campus)
                                 val palette = coursePaletteFor(course.colorIndex, isDark)
                                 WeekGridCourseCard(
                                     course = course,
@@ -2503,6 +2748,7 @@ private fun WeekGridScheduleView(
                                     dayCount = 7,
                                     span = span,
                                     fontScale = fontScale,
+                                    cardAlpha = cardAlpha,
                                     modifier = Modifier
                                         .width(subW)
                                         .height(blockHeight)
@@ -2520,7 +2766,7 @@ private fun WeekGridScheduleView(
                             val span = (clampedEnd - clampedStart + 1)
                             val topOffset = yOffsetForSection(clampedStart)
                             val blockHeight = heightForSpan(clampedStart, clampedEnd)
-                            val primaryResolved = GdouTimeRules.resolveCourseTime(primary, campus)
+                            val primaryResolved = resolvedTimeMap[primary.id] ?: GdouTimeRules.resolveCourseTime(primary, campus)
                             val primaryPalette = coursePaletteFor(primary.colorIndex, isDark)
                             val secondaryPalette = coursePaletteFor(secondary.colorIndex, isDark)
 
@@ -2533,7 +2779,7 @@ private fun WeekGridScheduleView(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = secondaryPalette.container,
+                                    color = secondaryPalette.container.copy(alpha = cardAlpha),
                                     border = BorderStroke(1.dp, Color(0xFFD94A1E).copy(alpha = 0.72f)),
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -2550,6 +2796,7 @@ private fun WeekGridScheduleView(
                                     dayCount = dayCount,
                                     span = span,
                                     fontScale = fontScale,
+                                    cardAlpha = cardAlpha,
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(end = 3.dp, bottom = 3.dp),
@@ -2560,6 +2807,7 @@ private fun WeekGridScheduleView(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -2576,14 +2824,15 @@ private fun WeekGridCourseCard(
     dayCount: Int,
     span: Int,
     fontScale: Float,
+    cardAlpha: Float,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
     val isConflict = conflictCount > 1 || showInlineConflictTag
     val bgColor = if (isInCurrentWeek) {
-        palette.container
+        palette.container.copy(alpha = cardAlpha)
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (isDark) 0.45f else 0.52f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = (if (isDark) 0.45f else 0.52f) * cardAlpha)
     }
     val textColor = if (isInCurrentWeek) {
         palette.onContainer

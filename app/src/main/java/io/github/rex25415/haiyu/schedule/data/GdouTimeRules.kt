@@ -11,6 +11,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.ConcurrentHashMap
 
 data class ResolvedCourseTime(
     val startTime: String,
@@ -96,6 +97,12 @@ object GdouTimeRules {
     private val HAIBIN_LAB_SHORT_REGEX = Regex("^实\\d")
     private val HAIBIN_OUTDOOR_KEYWORDS = listOf("场", "东面", "南面", "西面", "北面")
     private val HUGUANG_SPECIAL_VENUES = listOf("广学楼", "明德楼")
+    private val TIME_HH_MM_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    private val PARSED_TIME_CACHE = ConcurrentHashMap<String, LocalTime>()
+
+    fun courseConflictKey(course: CourseItem): String {
+        return "${course.name.trim()}|${course.dayOfWeek}|${course.startSection}"
+    }
 
     fun slotsForCampus(campus: GdouCampus, maxSection: Int = 10): List<TimeSlot> {
         val base = if (campus == GdouCampus.YANGJIANG) YANGJIANG_SLOTS else STANDARD_SLOTS
@@ -171,9 +178,13 @@ object GdouTimeRules {
     }
 
     /**
-     * 将同一天在节次上有交集的课程合并为冲突簇（支持完全重叠、部分跨节重叠及多门连续重课）
+     * 将同一天在节次上有交集的课程合并为冲突簇（支持完全重叠、部分跨节重叠及多门连续重课），
+     * 若用户对冲突簇内某门课设置了「优先显示（置顶）」，则自动将其排在簇首位。
      */
-    fun groupOverlappingCourses(dayCourses: List<CourseItem>): List<CourseOverlapCluster> {
+    fun groupOverlappingCourses(
+        dayCourses: List<CourseItem>,
+        pinnedKeys: Set<String> = emptySet()
+    ): List<CourseOverlapCluster> {
         if (dayCourses.isEmpty()) return emptyList()
         val sorted = dayCourses.sortedWith(
             compareBy<CourseItem> { it.startSection }
@@ -185,19 +196,29 @@ object GdouTimeRules {
         var minStart = sorted.first().startSection
         var maxEnd = sorted.first().endSection
 
+        fun prioritize(list: List<CourseItem>): List<CourseItem> {
+            if (pinnedKeys.isEmpty() || list.size <= 1) return list
+            return list.sortedWith(
+                compareByDescending<CourseItem> { courseConflictKey(it) in pinnedKeys }
+                    .thenBy { it.startSection }
+                    .thenBy { it.endSection }
+                    .thenBy { it.name }
+            )
+        }
+
         for (i in 1 until sorted.size) {
             val next = sorted[i]
             if (next.startSection <= maxEnd) {
                 currentList.add(next)
                 if (next.endSection > maxEnd) maxEnd = next.endSection
             } else {
-                clusters.add(CourseOverlapCluster(currentList.toList(), minStart, maxEnd))
+                clusters.add(CourseOverlapCluster(prioritize(currentList.toList()), minStart, maxEnd))
                 currentList = mutableListOf(next)
                 minStart = next.startSection
                 maxEnd = next.endSection
             }
         }
-        clusters.add(CourseOverlapCluster(currentList.toList(), minStart, maxEnd))
+        clusters.add(CourseOverlapCluster(prioritize(currentList.toList()), minStart, maxEnd))
         return clusters
     }
 
@@ -220,12 +241,13 @@ object GdouTimeRules {
      */
     fun findConflictClustersForWeek(
         courses: List<CourseItem>,
-        weekNumber: Int
+        weekNumber: Int,
+        pinnedKeys: Set<String> = emptySet()
     ): List<Pair<Int, CourseOverlapCluster>> {
         val list = mutableListOf<Pair<Int, CourseOverlapCluster>>()
         for (day in 1..7) {
             val active = courses.filter { it.dayOfWeek == day && weekNumber in it.weeks }
-            groupOverlappingCourses(active)
+            groupOverlappingCourses(active, pinnedKeys)
                 .filter { it.hasConflict }
                 .forEach { list.add(day to it) }
         }
@@ -242,11 +264,17 @@ object GdouTimeRules {
     }
 
     fun parseLocalTime(timeStr: String): LocalTime {
-        return try {
-            LocalTime.parse(timeStr, DateTimeFormatter.ofPattern("HH:mm"))
+        val key = timeStr.trim()
+        PARSED_TIME_CACHE[key]?.let { return it }
+        val parsed = try {
+            LocalTime.parse(key, TIME_HH_MM_FORMATTER)
         } catch (_: Exception) {
             LocalTime.of(8, 10)
         }
+        if (PARSED_TIME_CACHE.size < 128) {
+            PARSED_TIME_CACHE[key] = parsed
+        }
+        return parsed
     }
 
     /**
@@ -344,20 +372,24 @@ object GdouTimeRules {
         startDateStr: String,
         totalWeeks: Int,
         campus: GdouCampus,
-        date: LocalDate
+        date: LocalDate,
+        pinnedKeys: Set<String> = emptySet()
     ): List<ResolvedScheduledCourse> {
         val weekInfo = calculateTermWeekInfo(startDateStr, totalWeeks, date)
         if (weekInfo.phase != TermWeekPhase.IN_TERM) return emptyList()
         val dow = date.dayOfWeek.value
-        return courses
-            .filter { it.dayOfWeek == dow && weekInfo.rawWeek in it.weeks }
-            .map { c -> ResolvedScheduledCourse(c, resolveCourseTime(c, campus)) }
-            .sortedWith(
-                compareBy<ResolvedScheduledCourse> { it.time.startTime }
-                    .thenBy { it.course.startSection }
-                    .thenBy { it.course.endSection }
-                    .thenBy { it.course.name }
-            )
+        val active = courses.filter { it.dayOfWeek == dow && weekInfo.rawWeek in it.weeks }
+        return groupOverlappingCourses(active, pinnedKeys)
+            .flatMap { cluster ->
+                cluster.courses
+                    .map { c -> ResolvedScheduledCourse(c, resolveCourseTime(c, campus)) }
+                    .sortedWith(
+                        compareByDescending<ResolvedScheduledCourse> { courseConflictKey(it.course) in pinnedKeys }
+                            .thenBy { it.time.startTime }
+                            .thenBy { it.course.startSection }
+                            .thenBy { it.course.name }
+                    )
+            }
     }
 
     fun getTodayCoursesWithStatus(
@@ -365,7 +397,8 @@ object GdouTimeRules {
         startDateStr: String,
         totalWeeks: Int,
         campus: GdouCampus,
-        now: LocalDateTime = LocalDateTime.now()
+        now: LocalDateTime = LocalDateTime.now(),
+        pinnedKeys: Set<String> = emptySet()
     ): List<CourseOccurrenceStatus> {
         val today = now.toLocalDate()
         val weekInfo = calculateTermWeekInfo(startDateStr, totalWeeks, today)
@@ -374,13 +407,9 @@ object GdouTimeRules {
         val todayDow = today.dayOfWeek.value // 1..7
         val currentTime = now.toLocalTime()
 
-        return courses
-            .filter { it.dayOfWeek == todayDow && currentWeek in it.weeks }
-            .sortedWith(
-                compareBy<CourseItem> { it.startSection }
-                    .thenBy { it.endSection }
-                    .thenBy { it.name }
-            )
+        val active = courses.filter { it.dayOfWeek == todayDow && currentWeek in it.weeks }
+        return groupOverlappingCourses(active, pinnedKeys)
+            .flatMap { it.courses }
             .map { course ->
                 val resolved = resolveCourseTime(course, campus)
                 val start = parseLocalTime(resolved.startTime)

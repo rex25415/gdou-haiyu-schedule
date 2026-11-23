@@ -7,6 +7,7 @@ import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
 import io.github.rex25415.haiyu.schedule.sync.GdouJsBridge
+import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
 import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppSignatureVerifier
@@ -254,5 +255,38 @@ class AppUpdateManagerTest {
             isDebugBuild = false
         )
         assertEquals(SignatureTrustState.THIRD_PARTY_MODIFIED, repackaged.state)
+    }
+
+    @Test
+    fun offCampusSyncScriptKeepsWfwProxyPrefixAndPrewarmsExamsAndGrades() {
+        val syncJs = GdouSyncScript.buildSyncScript("all", "2026", "3", "2026-2027 第一学期")
+        assertTrue(syncJs.contains("if (host.includes(\"wfw.gdou.edu.cn\")) return \"/https://jw.gdou.edu.cn\";"))
+        assertTrue(syncJs.contains("/kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default"))
+        assertTrue(syncJs.contains("/cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default"))
+        assertTrue(syncJs.contains("/cjcx/cjcx_cxDcListByXs.html?doType=query&gnmkdm=N305005"))
+        assertTrue(syncJs.contains("let _wfwSessionWarmed = false;"))
+        assertTrue(syncJs.contains("let _cachedMenuEndpoints = null;"))
+
+        val navJs = GdouSyncScript.buildQuickNavigateScript("kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default")
+        assertTrue(navJs.contains("if (host.includes(\"wfw.gdou.edu.cn\")) return \"/https://jw.gdou.edu.cn\";"))
+    }
+
+    @Test
+    fun upgradeFromV280SettingsPreservesDataAndPopulatesV290Defaults() {
+        val v280Json = """
+            {
+              "settings": {
+                "campus": "HAIBIN",
+                "showWeekend": true,
+                "settingsVersion": 2,
+                "semesterStartDate": "2026-08-31",
+                "preferOffCampusChannel": true
+              }
+            }
+        """.trimIndent()
+        val decoded = lenientJson.decodeFromString(AppDataSnapshot.serializer(), v280Json)
+        assertTrue(decoded.settings.pinnedConflictKeys.isEmpty())
+        assertEquals("", decoded.settings.scheduleBgFileName)
+        assertEquals(0.92f, decoded.settings.courseCardAlpha, 0.001f)
     }
 }

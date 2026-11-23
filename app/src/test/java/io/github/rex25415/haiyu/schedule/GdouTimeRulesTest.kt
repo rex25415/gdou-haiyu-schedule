@@ -257,4 +257,54 @@ class GdouTimeRulesTest {
         assertEquals("工程数学", monCourses.first().course.name)
         assertEquals("10:05", monCourses.first().time.startTime)
     }
+
+    @Test
+    fun pinnedConflictCourseWinsClusterAndTodayOrder() {
+        val c1 = CourseItem(
+            id = "c1",
+            name = "高等数学",
+            location = "教学楼101",
+            dayOfWeek = 1,
+            startSection = 3,
+            endSection = 4,
+            weeks = listOf(1)
+        )
+        val c2 = CourseItem(
+            id = "c2",
+            name = "英语听力",
+            location = "教学楼202",
+            dayOfWeek = 1,
+            startSection = 3,
+            endSection = 4,
+            weeks = listOf(1)
+        )
+        val defaultClusters = GdouTimeRules.groupOverlappingCourses(listOf(c1, c2))
+        val initiallySecond = defaultClusters.first().courses.last()
+        val pinnedKey = setOf(GdouTimeRules.courseConflictKey(initiallySecond))
+        val pinnedClusters = GdouTimeRules.groupOverlappingCourses(listOf(c1, c2), pinnedKey)
+        assertEquals(initiallySecond.id, pinnedClusters.first().courses.first().id)
+
+        val todayStatuses = GdouTimeRules.getTodayCoursesWithStatus(
+            courses = listOf(c1, c2),
+            startDateStr = "2026-08-31",
+            totalWeeks = 19,
+            campus = GdouCampus.HAIBIN,
+            now = java.time.LocalDateTime.of(2026, 8, 31, 10, 30),
+            pinnedKeys = pinnedKey
+        )
+        assertEquals(initiallySecond.id, todayStatuses.first().course.id)
+    }
+
+    @Test
+    fun cachedParseLocalTimeHandlesValidAndFallbackInputs() {
+        val t1 = GdouTimeRules.parseLocalTime("10:05")
+        val t2 = GdouTimeRules.parseLocalTime("10:05")
+        assertEquals(10, t1.hour)
+        assertEquals(5, t1.minute)
+        assertEquals(t1, t2)
+
+        val fallback = GdouTimeRules.parseLocalTime("invalid-time")
+        assertEquals(8, fallback.hour)
+        assertEquals(10, fallback.minute)
+    }
 }

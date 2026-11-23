@@ -228,14 +228,15 @@ object GdouSyncScript {
         function getJwBasePrefix() {
             const host = (window.location && window.location.hostname || "").toLowerCase();
             const path = (window.location && window.location.pathname) || "";
+            const proxyPrefix = path.match(/^\/(?:https?:\/\/[^/]+|(?:http|https|https-443)\/[^/]+)/i);
+            if (proxyPrefix) return proxyPrefix[0];
+            // On wfw.gdou.edu.cn, NEVER fall back to naked "" even when redirected to /xtgl/dl_loginForward.html!
+            if (host.includes("wfw.gdou.edu.cn")) return "/https://jw.gdou.edu.cn";
             const anchors = ["/kbcx/", "/cjcx/", "/kwgl/", "/xtgl/", "/xsxk/", "/xspjgl/", "/cdjy/"];
             for (const anchor of anchors) {
                 const idx = path.indexOf(anchor);
                 if (idx >= 0) return path.slice(0, idx);
             }
-            const proxyPrefix = path.match(/^\/(?:https?:\/\/[^/]+|(?:http|https|https-443)\/[^/]+)/i);
-            if (proxyPrefix) return proxyPrefix[0];
-            if (host.includes("wfw.gdou.edu.cn")) return "/https://jw.gdou.edu.cn";
             return "";
         }
         function buildJwUrl(relativePath) {
@@ -248,13 +249,16 @@ object GdouSyncScript {
                 const resp = await fetch(url, init);
                 lastResp = resp;
                 if (resp.status !== 503) return resp;
-                await new Promise(r => setTimeout(r, 450));
+                await new Promise(r => setTimeout(r, 400));
             }
             return lastResp;
         }
+        let _wfwSessionWarmed = false;
         async function ensureWfwJwSessionIfNeeded() {
+            if (_wfwSessionWarmed) return;
             const host = (window.location && window.location.hostname || "").toLowerCase();
             if (!host.includes("wfw.gdou.edu.cn")) return;
+            _wfwSessionWarmed = true;
             try {
                 await fetchWithRetry(window.location.origin + "/https://jw.gdou.edu.cn/", {
                     method: "GET",
@@ -264,14 +268,16 @@ object GdouSyncScript {
         }
         async function fetchJwTextWithFallback(relativePath, init, expectJson) {
             const clean = relativePath.startsWith("/") ? relativePath : ("/" + relativePath);
-            const primary = buildJwUrl(clean);
             const host = (window.location && window.location.hostname || "").toLowerCase();
-            const candidates = [primary];
+            const candidates = [];
             if (host.includes("wfw.gdou.edu.cn")) {
-                const alt1 = window.location.origin + "/https://jw.gdou.edu.cn" + clean;
-                const alt2 = window.location.origin + clean;
-                if (!candidates.includes(alt1)) candidates.push(alt1);
-                if (!candidates.includes(alt2)) candidates.push(alt2);
+                candidates.push(window.location.origin + "/https://jw.gdou.edu.cn" + clean);
+                const p = buildJwUrl(clean);
+                if (!candidates.includes(p)) candidates.push(p);
+                const naked = window.location.origin + clean;
+                if (!candidates.includes(naked)) candidates.push(naked);
+            } else {
+                candidates.push(buildJwUrl(clean));
             }
             let lastStatus = 0;
             let lastText = "";
@@ -403,7 +409,9 @@ object GdouSyncScript {
             }
         }
 
+        let _cachedMenuEndpoints = null;
         async function discoverMenuEndpoints() {
+            if (_cachedMenuEndpoints) return _cachedMenuEndpoints;
             const found = { gradeEps: [], examEps: [] };
             try {
                 const sources = [document.documentElement ? document.documentElement.innerHTML : ""];
@@ -428,6 +436,7 @@ object GdouSyncScript {
                     }
                 }
             } catch (_) {}
+            _cachedMenuEndpoints = found;
             return found;
         }
 
@@ -680,11 +689,38 @@ object GdouSyncScript {
 
         async function syncGrades() {
             await ensureWfwJwSessionIfNeeded();
+            // Pre-warm the Zhengfang v9 grade module page so server-side menu/session state is initialized
+            // automatically without requiring the user to manually click into the grades page first!
+            const pageDiscovered = [];
+            try {
+                const warmResp = await fetchJwWithFallback("/cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default", {
+                    method: "GET",
+                    credentials: "include"
+                });
+                if (warmResp.ok) {
+                    const html = await warmResp.text();
+                    const epRe = /(\/cjcx\/cjcx_cx[A-Za-z0-9_]+\.html(?:\?[^'"\s)]*)?)/g;
+                    let m;
+                    while ((m = epRe.exec(html)) !== null) {
+                        const rawEp = m[1];
+                        const sep = rawEp.includes("?") ? "&" : "?";
+                        if (!rawEp.includes("doType=query")) {
+                            pageDiscovered.push(rawEp + sep + "doType=query&gnmkdm=N305005");
+                        } else {
+                            pageDiscovered.push(rawEp);
+                        }
+                    }
+                }
+            } catch (_) {}
+
             const discovered = await discoverMenuEndpoints();
             const endpoints = Array.from(new Set([
                 ...discovered.gradeEps,
+                ...pageDiscovered,
+                "/cjcx/cjcx_cxDcListByXs.html?doType=query&gnmkdm=N305005",
                 "/cjcx/cjcx_cxXsgrcj.html?doType=query&gnmkdm=N305005",
                 "/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305005",
+                "/cjcx/cjcx_cxDcListByXs.html?doType=query&gnmkdm=N305007",
                 "/cjcx/cjcx_cxXsgrcj.html?doType=query&gnmkdm=N305007",
                 "/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305007"
             ]));
@@ -730,88 +766,121 @@ object GdouSyncScript {
                 return Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
             }
 
-            let workingEp = null;
+            // Try ALL endpoints (NEVER break on first empty [] so cjcx_cxDcListByXs / cjcx_cxDgXscj all get tried!)
+            const workingEps = [];
             for (const ep of endpoints) {
                 try {
                     const items = await queryGradesOnce(ep, "", "");
                     if (items === null) continue;
-                    workingEp = ep;
-                    if (items.length > 0) {
-                        return { ok: true, grades: mapGradeItems(items) };
+                    workingEps.push(ep);
+                    const mapped = mapGradeItems(items);
+                    if (mapped.length > 0) {
+                        return { ok: true, grades: mapped };
                     }
-                    break;
                 } catch (e) {
                     // Try next endpoint
                 }
             }
 
-            // Fallback: some Zhengfang v9 deployments require non-empty xnm (query recent 4 academic years gently)
-            if (workingEp) {
+            // Fallback: query recent 4 academic years gently across working endpoints
+            if (workingEps.length > 0) {
                 const curY = Number(getDefaultAcademicYear());
-                const collected = [];
-                const seen = new Set();
-                for (let offset = 0; offset < 4; offset++) {
-                    const y = String(curY - offset);
-                    try {
-                        const items = await queryGradesOnce(workingEp, y, "");
-                        if (items && items.length > 0) {
-                            for (const g of mapGradeItems(items)) {
-                                const key = g.academicYear + "|" + g.semester + "|" + g.courseName + "|" + g.score;
-                                if (!seen.has(key)) {
-                                    seen.add(key);
-                                    collected.push(g);
+                for (const ep of workingEps.slice(0, 3)) {
+                    const collected = [];
+                    const seen = new Set();
+                    for (let offset = 0; offset < 4; offset++) {
+                        const y = String(curY - offset);
+                        try {
+                            const items = await queryGradesOnce(ep, y, "");
+                            if (items && items.length > 0) {
+                                for (const g of mapGradeItems(items)) {
+                                    const key = g.academicYear + "|" + g.semester + "|" + g.courseName + "|" + g.score;
+                                    if (!seen.has(key)) {
+                                        seen.add(key);
+                                        collected.push(g);
+                                    }
                                 }
                             }
-                        }
-                    } catch (_) {}
-                }
-                if (collected.length > 0) {
-                    return { ok: true, grades: collected };
+                        } catch (_) {}
+                    }
+                    if (collected.length > 0) {
+                        return { ok: true, grades: collected };
+                    }
                 }
             }
 
-            return { ok: false, error: "未获取到成绩记录（可能当前未出成绩或教务需先确认学业通知）" };
+            return { ok: false, error: "暂未获取到成绩（可能当前未出分或需先在教务页确认学业通知）" };
         }
 
         async function syncExams(xnm, xqm) {
+            await ensureWfwJwSessionIfNeeded();
+            // Pre-warm the Zhengfang v9 exam module page so off-campus one-tap sync NEVER requires manually visiting the exam page first!
+            try {
+                await fetchJwWithFallback("/kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default", {
+                    method: "GET",
+                    credentials: "include"
+                });
+            } catch (_) {}
+
             const discovered = await discoverMenuEndpoints();
             const endpoints = Array.from(new Set([
                 ...discovered.examEps,
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105",
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358110"
             ]));
-            const form = "xnm=" + encodeURIComponent(xnm) + "&xqm=" + encodeURIComponent(xqm) +
-                "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
-                "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+
+            async function queryExamsOnce(ep, qXnm, qXqm) {
+                const form = "xnm=" + encodeURIComponent(qXnm) + "&xqm=" + encodeURIComponent(qXqm) +
+                    "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
+                    "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+                const resp = await fetchJwJsonWithFallback(ep, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                        "x-requested-with": "XMLHttpRequest"
+                    },
+                    body: form,
+                    credentials: "include"
+                });
+                if (!resp.ok) return null;
+                const json = JSON.parse(await resp.text());
+                const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                return items.map(it => ({
+                    academicYear: String(it.xnmc || qXnm || xnm).trim(),
+                    semester: String(it.xqmmc || (qXqm === "3" ? "第一学期" : (qXqm === "12" ? "第二学期" : ""))).trim(),
+                    courseName: String(it.kcmc || "").trim(),
+                    examTimeRaw: String(it.kssj || "").trim(),
+                    location: String(it.cdmc || it.ksmc || "").trim(),
+                    seatNumber: String(it.zwh || "").trim(),
+                    examType: String(it.ksmc || it.ksfs || "期末考试").trim(),
+                    campus: String(it.cdxqmc || "").trim()
+                })).filter(ex => ex.courseName.length > 0);
+            }
+
+            let workingEp = null;
             for (const ep of endpoints) {
                 try {
-                    const resp = await fetchJwJsonWithFallback(ep, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: form,
-                        credentials: "include"
-                    });
-                    if (!resp.ok) continue;
-                    const json = JSON.parse(await resp.text());
-                    const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-                    const exams = items.map(it => ({
-                        academicYear: String(it.xnmc || xnm).trim(),
-                        semester: String(it.xqmmc || (xqm === "3" ? "第一学期" : "第二学期")).trim(),
-                        courseName: String(it.kcmc || "").trim(),
-                        examTimeRaw: String(it.kssj || "").trim(),
-                        location: String(it.cdmc || it.ksmc || "").trim(),
-                        seatNumber: String(it.zwh || "").trim(),
-                        examType: String(it.ksmc || it.ksfs || "期末考试").trim(),
-                        campus: String(it.cdxqmc || "").trim()
-                    })).filter(ex => ex.courseName.length > 0);
-                    return { ok: true, exams };
+                    const exams = await queryExamsOnce(ep, xnm, xqm);
+                    if (exams === null) continue;
+                    if (!workingEp) workingEp = ep;
+                    if (exams.length > 0) {
+                        return { ok: true, exams };
+                    }
                 } catch (e) {
-                    // Try next
+                    // Try next endpoint
                 }
             }
+
+            // Fallback: if term-scoped query returned 0, try whole-year query once
+            if (workingEp && xqm) {
+                try {
+                    const yearExams = await queryExamsOnce(workingEp, xnm, "");
+                    if (yearExams && yearExams.length > 0) {
+                        return { ok: true, exams: yearExams };
+                    }
+                } catch (_) {}
+            }
+
             return { ok: false, error: "当前学期暂未公布考试安排" };
         }
     """

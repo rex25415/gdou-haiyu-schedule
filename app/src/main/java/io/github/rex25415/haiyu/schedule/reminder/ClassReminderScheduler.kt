@@ -88,9 +88,11 @@ object ClassReminderScheduler {
             val weekNum = weekInfo.rawWeek
             val dow = date.dayOfWeek.value
 
-            snapshot.courses
-                .filter { it.dayOfWeek == dow && weekNum in it.weeks }
-                .sortedWith(compareBy({ it.startSection }, { it.endSection }, { it.name }))
+            val pinnedSet = settings.pinnedConflictKeys.toSet()
+            GdouTimeRules.groupOverlappingCourses(
+                snapshot.courses.filter { it.dayOfWeek == dow && weekNum in it.weeks },
+                pinnedKeys = pinnedSet
+            ).flatMap { it.courses }
                 .forEach { course ->
                     val resolved = GdouTimeRules.resolveCourseTime(course, settings.campus)
                     val startTime = GdouTimeRules.parseLocalTime(resolved.startTime)

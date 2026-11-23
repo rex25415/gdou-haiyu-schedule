@@ -7,7 +7,7 @@ import java.util.UUID
 enum class GdouCampus(val id: String, val label: String, val shortDesc: String) {
     HUGUANG("huguang", "湖光校区", "广学楼/明德楼 3-4节 10:05-11:35，7-8节 16:25-17:50；其余教学楼按常规作息"),
     HAIBIN("haibin", "海滨校区", "实验楼/实+房号/球场与方位场地 3-4节 10:05-11:35，7-8节 16:25-17:50"),
-    YANGJIANG("yangjiang", "阳江校区", "慎思楼 3-4节 10:25-12:00；非慎思楼 3-4节 10:10-11:40，7-8节 16:20-17:55");
+    YANGJIANG("yangjiang", "阳江校区", "慎思楼 3-4节 10:25-12:00，非慎思楼 3-4节 10:10-11:40；全校区 7-8节 16:20-17:55");
 
     companion object {
         fun fromIdOrNull(id: String?): GdouCampus? = entries.firstOrNull {
@@ -117,7 +117,10 @@ data class AppSettings(
     val preferDesktopUa: Boolean = false,
     val autoCheckUpdates: Boolean = true,
     val lastUpdateCheckEpochMs: Long = 0L,
-    val ignoredUpdateVersion: String = ""
+    val ignoredUpdateVersion: String = "",
+    val pinnedConflictKeys: List<String> = emptyList(),
+    val scheduleBgFileName: String = "",
+    val courseCardAlpha: Float = 0.92f
 )
 
 @Serializable

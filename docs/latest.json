@@ -1,11 +1,11 @@
 {
-  "tagName": "v2.8.0",
-  "versionName": "2.8.0",
-  "title": "海屿课表 v2.8.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v2.8.0.apk",
-  "apkSizeBytes": 1750417,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.8.0/HaiyuSchedule-GDOU-v2.8.0.apk",
-  "expectedSha256": "ef7f5f0ac703559a3c8b27d99140bd428d227f2c353715513cfd33cc53a9ce7a",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.8.0",
-  "releaseNotes": "- 启用中性个人开源包名（io.github.rex25415.haiyu.schedule），旧版可用「同班分享码」1 秒无损迁移\n- 升级为 PolyForm Noncommercial 1.0.0 非商业开源协议并新增运行时安装包签名验真，防商用与二次打包植入广告\n- 晚间下课/无课时自动预告「明日早课」，并全面修复寒暑假误报提醒与桌面组件深色模式适配\n- 修复快速切换教学周反色、.ics 换行转义并内置课前闹钟；新增本学期课程检索、冲突列表逐条可点、DDL/考试可视化日历选日期与编辑"
+  "tagName": "v2.9.0",
+  "versionName": "2.9.0",
+  "title": "海屿课表 v2.9.0",
+  "apkFileName": "HaiyuSchedule-GDOU-v2.9.0.apk",
+  "apkSizeBytes": 1783185,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.9.0/HaiyuSchedule-GDOU-v2.9.0.apk",
+  "expectedSha256": "435700f48109a65949f89778f8804aaab1bae7fba16affb82772348b8ee63d4d",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.9.0",
+  "releaseNotes": "- 彻底修复校外免校园网通道下「一键全同步」无法直接拉取考试与成绩的根因，登录后无需点进任何子页面，一次点击直接拉通课表、历史成绩与考场座位\n- 修复校外通道下「教务直达」（如查空教室）误跳文件管理页问题，同步精简教务顶栏控件\n- 新增「重课冲突置顶显示」、零权限「自定义课表壁纸 + 卡片不透明度调节」、「全量换机备份 / 从备份恢复」与「学期进度条」\n- 课程检索升级「按课程聚合 / 按排课展开」双视图与 1 键跳转上课周次；全面异步化本地存储与导出，切页自动暂停后台 WebView 省电更流畅"
 }

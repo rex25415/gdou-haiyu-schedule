@@ -1,5 +1,9 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,21 +26,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.HideImage
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.AlertDialog
@@ -55,6 +63,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -62,6 +71,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -89,6 +99,7 @@ import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,11 +113,15 @@ fun SettingsScreen(
     onOpenGitHubRepo: () -> Unit,
     onCopyDownloadPageLink: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
+    onPickWallpaperUri: (Uri) -> Unit,
+    onClearWallpaper: () -> Unit,
     onToggleReminder: (Boolean) -> Unit,
     onTestNotification: () -> Unit,
     onRefreshWidget: () -> Unit,
     onExportWeekImage: () -> Unit,
     onExportIcs: () -> Unit,
+    onExportFullBackup: () -> Unit,
+    onImportFullBackupUri: (Uri) -> Unit,
     onGetShareCode: () -> String?,
     onCopyShareCode: (String) -> Unit,
     onImportShareCode: (String) -> Unit,
@@ -123,6 +138,17 @@ fun SettingsScreen(
     var showBellRefDialog by remember { mutableStateOf(false) }
     var showShareCodeDialog by remember { mutableStateOf(false) }
     var showOemGuideDialog by remember { mutableStateOf(false) }
+
+    val wallpaperPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) onPickWallpaperUri(uri)
+    }
+    val backupRestorePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) onImportFullBackupUri(uri)
+    }
 
     Box(
         modifier = Modifier
@@ -277,6 +303,72 @@ fun SettingsScreen(
                             onClick = { onUpdateSettings { it.copy(darkMode = m) } }
                         )
                     }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                Text("自定义课表壁纸（零权限）", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "精选喜欢的风景或纯色图作为周课表底图，图片仅压缩保存在本机私有目录，不申请系统相册权限。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val hasWallpaper = settings.scheduleBgFileName.isNotBlank()
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            wallpaperPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (hasWallpaper) "更换课表壁纸" else "选择课表壁纸", fontSize = 12.5.sp)
+                    }
+                    if (hasWallpaper) {
+                        OutlinedButton(
+                            onClick = onClearWallpaper,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Rounded.HideImage, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("恢复默认", fontSize = 12.5.sp)
+                        }
+                    }
+                }
+                if (hasWallpaper) {
+                    var sliderAlpha by remember(settings.courseCardAlpha) {
+                        mutableFloatStateOf(settings.courseCardAlpha.coerceIn(0.62f, 1.0f))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("课程卡片不透明度", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = "${(sliderAlpha * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = sliderAlpha,
+                        onValueChange = { sliderAlpha = it },
+                        onValueChangeFinished = {
+                            onUpdateSettings { it.copy(courseCardAlpha = sliderAlpha.coerceIn(0.62f, 1.0f)) }
+                        },
+                        valueRange = 0.62f..1.0f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
@@ -436,6 +528,38 @@ fun SettingsScreen(
                         Text("同班分享码", fontSize = 12.5.sp)
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    FilledTonalButton(
+                        onClick = onExportFullBackup,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("导出全量备份", fontSize = 12.5.sp)
+                    }
+                    FilledTonalButton(
+                        onClick = {
+                            backupRestorePicker.launch(arrayOf("application/json", "text/plain", "*/*"))
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("从备份恢复", fontSize = 12.5.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "全量备份包含课表、作业 DDL、成绩、考试与个性化设置（不含学号密码），换机一键还原。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),

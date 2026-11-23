@@ -173,9 +173,10 @@ object ScheduleImageExporter {
             style = Paint.Style.STROKE
             strokeWidth = 2.5f
         }
+        val pinnedSet = settings.pinnedConflictKeys.toSet()
         for (day in 1..dayCount) {
             val activeDayCourses = snapshot.courses.filter { it.dayOfWeek == day && weekNumber in it.weeks }
-            val clusters = GdouTimeRules.groupOverlappingCourses(activeDayCourses)
+            val clusters = GdouTimeRules.groupOverlappingCourses(activeDayCourses, pinnedSet)
             for (cluster in clusters) {
                 val course = cluster.courses.first()
                 val cIdx = ((course.colorIndex % CARD_BG.size) + CARD_BG.size) % CARD_BG.size
@@ -288,6 +289,7 @@ object ScheduleImageExporter {
         }
 
         // Save directly to System Gallery (Pictures/海屿课表) on Android 10+ with zero extra permissions
+        // Copy the already-encoded PNG bytes instead of encoding a second 1080x1920 PNG (2x faster!)
         var savedToGallery = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
@@ -301,7 +303,7 @@ object ScheduleImageExporter {
                 val mediaUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 if (mediaUri != null) {
                     resolver.openOutputStream(mediaUri)?.use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 96, out)
+                        imgFile.inputStream().use { inp -> inp.copyTo(out) }
                     }
                     values.clear()
                     values.put(MediaStore.Images.Media.IS_PENDING, 0)

@@ -64,6 +64,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -461,16 +462,6 @@ fun SyncPortalScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    IconButton(
-                        onClick = { toggleDesktopUa() },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (desktopMode) Icons.Rounded.Computer else Icons.Rounded.PhoneAndroid,
-                            contentDescription = "切换电脑/手机排版",
-                            tint = if (desktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     Box {
                         IconButton(
                             onClick = { showQuickNavMenu = true },
@@ -670,7 +661,7 @@ fun SyncPortalScreen(
                         }
                     }
 
-                    // Neutral UA mode chip (clearly distinct from the active channel switcher)
+                    // Neutral UA mode chip (single clean toggle with icon + label, distinct from channel switcher)
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
                         shape = RoundedCornerShape(10.dp),
@@ -683,10 +674,18 @@ fun SyncPortalScreen(
                             .clip(RoundedCornerShape(10.dp))
                             .clickable { toggleDesktopUa() }
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 9.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp)
                         ) {
+                            Icon(
+                                imageVector = if (desktopMode) Icons.Rounded.Computer else Icons.Rounded.PhoneAndroid,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = if (desktopMode) "电脑版" else "手机版",
                                 fontSize = 11.sp,
@@ -820,6 +819,12 @@ fun SyncPortalScreen(
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
                     view.visibility = if (isVisible) View.VISIBLE else View.GONE
+                    // Pause background WebView JS/rendering timers when user is on other tabs (saves battery & RAM!)
+                    if (isVisible || isSyncing) {
+                        view.onResume()
+                    } else {
+                        view.onPause()
+                    }
                 },
                 factory = { ctx ->
                     WebView(ctx).apply {
@@ -1342,10 +1347,19 @@ fun SyncPortalScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         termOpts.yearOptions.forEachIndexed { idx, opt ->
+                            val selected = yearIdx == idx
                             FilterChip(
-                                selected = yearIdx == idx,
+                                selected = selected,
                                 onClick = { yearIdx = idx },
-                                label = { Text(opt.text, fontSize = 12.sp) }
+                                leadingIcon = if (selected) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                } else null,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                label = { Text(opt.text, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) }
                             )
                         }
                     }
@@ -1356,10 +1370,19 @@ fun SyncPortalScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         termOpts.semesterOptions.forEachIndexed { idx, opt ->
+                            val selected = semIdx == idx
                             FilterChip(
-                                selected = semIdx == idx,
+                                selected = selected,
                                 onClick = { semIdx = idx },
-                                label = { Text(opt.text, fontSize = 12.sp) }
+                                leadingIcon = if (selected) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                } else null,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                label = { Text(opt.text, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) }
                             )
                         }
                     }
@@ -1395,11 +1418,28 @@ fun SyncPortalScreen(
     }
 
     if (syncSuccessSummary != null) {
+        val rawBody = syncSuccessSummary!!.removePrefix("同步完成：").trim()
+        val bulletLines = rawBody.split(" · ").map { it.trim() }.filter { it.isNotEmpty() }
         AlertDialog(
             onDismissRequest = { syncSuccessSummary = null },
             title = { Text("广海数据已离线保存") },
             text = {
-                Text("${syncSuccessSummary!!}\n\n已自动应用「${settings.campus.label}」作息规则并刷新桌面小组件！")
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    bulletLines.forEach { line ->
+                        val isSkipped = line.contains("跳过") || line.contains("未获取")
+                        Text(
+                            text = (if (isSkipped) "• " else "✓ ") + line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isSkipped) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "已自动应用「${settings.campus.label}」作息规则并刷新桌面小组件。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             },
             confirmButton = {
                 Button(

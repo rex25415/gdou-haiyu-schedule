@@ -33,6 +33,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -89,10 +90,25 @@ fun BellScheduleReferenceDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     GdouCampus.entries.forEach { campus ->
+                        val selected = selectedCampus == campus
                         FilterChip(
-                            selected = selectedCampus == campus,
+                            selected = selected,
                             onClick = { selectedCampus = campus },
-                            label = { Text(campus.label.removeSuffix("校区"), fontSize = 12.sp) }
+                            leadingIcon = if (selected) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            } else null,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            label = {
+                                Text(
+                                    campus.label.removeSuffix("校区"),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
                         )
                     }
                 }
@@ -362,7 +378,18 @@ fun QuickAddTaskDialog(
                                 leadingIcon = if (selected) {
                                     { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                                 } else null,
-                                label = { Text(cName.take(10), fontSize = 11.sp) }
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                label = {
+                                    Text(
+                                        cName.take(10),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
                             )
                         }
                     }
@@ -393,7 +420,18 @@ fun QuickAddTaskDialog(
                             leadingIcon = if (selected) {
                                 { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                             } else null,
-                            label = { Text(label, fontSize = 11.sp) }
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            label = {
+                                Text(
+                                    label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
                         )
                     }
                 }

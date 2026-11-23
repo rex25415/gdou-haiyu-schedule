@@ -1,5 +1,8 @@
 package io.github.rex25415.haiyu.schedule.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import androidx.activity.compose.BackHandler
@@ -32,6 +35,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -177,16 +182,111 @@ fun HaiyuApp(
         }
     }
 
-    fun exportScheduleImage(weekNumber: Int) {
-        try {
-            val res = ScheduleImageExporter.exportWeekScheduleImageAndShare(context, snapshot, weekNumber)
-            when {
-                !res.ok -> showToast("当前没有课程可生成图片，请先同步课表")
-                res.savedToGallery -> showToast("高清课表图已保存至手机相册（Pictures/海屿课表）")
-                else -> showToast("已生成第 $weekNumber 周高清课表图")
+    // Custom schedule wallpaper decoded off the UI thread (RGB_565, <=1440px)
+    var scheduleBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(snapshot.settings.scheduleBgFileName) {
+        val fileName = snapshot.settings.scheduleBgFileName
+        scheduleBgBitmap = if (fileName.isBlank()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                val file = repo.getScheduleBackgroundFile(fileName)
+                if (file != null) {
+                    try {
+                        val opts = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                        }
+                        BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
+                    } catch (_: Exception) {
+                        null
+                    }
+                } else {
+                    null
+                }
             }
-        } catch (e: Exception) {
-            showToast("生成课表图失败：${e.message}")
+        }
+    }
+
+    fun exportScheduleImage(weekNumber: Int) {
+        val snap = snapshot
+        scope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    ScheduleImageExporter.exportWeekScheduleImageAndShare(context, snap, weekNumber)
+                }
+                when {
+                    !res.ok -> showToast("当前没有课程可生成图片，请先同步课表")
+                    res.savedToGallery -> showToast("高清课表图已保存至手机相册（Pictures/海屿课表）")
+                    else -> showToast("已生成第 $weekNumber 周高清课表图")
+                }
+            } catch (e: Exception) {
+                showToast("生成课表图失败：${e.message}")
+            }
+        }
+    }
+
+    fun exportIcsAsync() {
+        val snap = snapshot
+        scope.launch {
+            try {
+                val ok = withContext(Dispatchers.IO) {
+                    IcsExporter.exportToIcsAndShare(context, snap)
+                }
+                if (!ok) showToast("当前没有可导出的课程，请先同步课表")
+            } catch (e: Exception) {
+                showToast("导出日历失败：${e.message}")
+            }
+        }
+    }
+
+    fun exportFullBackupAsync() {
+        scope.launch {
+            try {
+                val ok = withContext(Dispatchers.IO) {
+                    repo.exportFullBackupAndShare(context)
+                }
+                if (ok) showToast("已生成全量备份文件，可保存本地或发给自己换机还原")
+            } catch (e: Exception) {
+                showToast("导出备份失败：${e.message}")
+            }
+        }
+    }
+
+    fun importFullBackupUri(uri: Uri) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val raw = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val bytes = stream.readBytes()
+                        if (bytes.size > 5 * 1024 * 1024) {
+                            return@withContext Result.failure<String>(IllegalArgumentException("备份文件过大（超过 5MB）"))
+                        }
+                        bytes.toString(Charsets.UTF_8)
+                    } ?: return@withContext Result.failure<String>(IllegalArgumentException("无法读取所选备份文件"))
+                    repo.importFullBackupJson(raw)
+                } catch (e: Exception) {
+                    Result.failure(IllegalArgumentException("读取备份失败：${e.message ?: "未知错误"}"))
+                }
+            }
+            result.onSuccess { summary ->
+                syncWidgetsAndReminders()
+                showToast(summary)
+            }.onFailure { err ->
+                showToast(err.message ?: "备份恢复失败")
+            }
+        }
+    }
+
+    fun pickWallpaperUri(uri: Uri) {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                repo.saveScheduleBackgroundFromUri(uri)
+            }
+            result.onSuccess {
+                showToast("已应用自定义课表壁纸，可拖动下方滑块微调卡片透明度")
+            }.onFailure { err ->
+                showToast(err.message ?: "设置壁纸失败")
+            }
         }
     }
 
@@ -314,6 +414,7 @@ fun HaiyuApp(
                             0 -> ScheduleScreen(
                                 snapshot = snapshot,
                                 isDark = isDark,
+                                backgroundBitmap = scheduleBgBitmap,
                                 isRefreshingSchedule = isJwSyncing,
                                 onQuickRefreshSchedule = { triggerQuickRefreshSchedule() },
                                 onJumpToSync = { currentTab = 1 },
@@ -355,6 +456,11 @@ fun HaiyuApp(
                                     } else {
                                         showToast("调整失败，请检查该课程周次")
                                     }
+                                },
+                                onTogglePinConflictCourse = { target, peers ->
+                                    val pinned = repo.togglePinConflictCourse(target, peers)
+                                    syncWidgetsAndReminders()
+                                    showToast(if (pinned) "已置顶显示「${target.name}」" else "已取消置顶「${target.name}」")
                                 },
                                 onAddTask = { task ->
                                     repo.upsertTask(task)
@@ -446,6 +552,11 @@ fun HaiyuApp(
                                     repo.updateSettings(transform)
                                     syncWidgetsAndReminders()
                                 },
+                                onPickWallpaperUri = { uri -> pickWallpaperUri(uri) },
+                                onClearWallpaper = {
+                                    repo.clearScheduleBackground()
+                                    showToast("已恢复默认清新课表背景")
+                                },
                                 onToggleReminder = { enabled ->
                                     if (enabled) onRequestNotificationPermission()
                                     repo.updateSettings { it.copy(reminderEnabled = enabled) }
@@ -468,10 +579,9 @@ fun HaiyuApp(
                                     )
                                     exportScheduleImage(curWeek)
                                 },
-                                onExportIcs = {
-                                    val ok = IcsExporter.exportToIcsAndShare(context, snapshot)
-                                    if (!ok) showToast("当前没有可导出的课程，请先同步课表")
-                                },
+                                onExportIcs = { exportIcsAsync() },
+                                onExportFullBackup = { exportFullBackupAsync() },
+                                onImportFullBackupUri = { uri -> importFullBackupUri(uri) },
                                 onGetShareCode = { repo.exportScheduleShareCode() },
                                 onCopyShareCode = { copyShareCode(it) },
                                 onImportShareCode = { importShareCode(it) },

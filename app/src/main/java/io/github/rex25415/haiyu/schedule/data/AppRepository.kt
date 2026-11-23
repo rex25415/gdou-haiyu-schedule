@@ -1,6 +1,12 @@
 package io.github.rex25415.haiyu.schedule.data
 
+import android.content.ClipData
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.core.content.FileProvider
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.AppSettings
 import io.github.rex25415.haiyu.schedule.model.CourseItem
@@ -15,18 +21,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.Executors
 
 class AppRepository(context: Context) {
 
     private val appContext = context.applicationContext
     private val dataFile = File(appContext.filesDir, "haiyu_schedule_v1.json")
+    private val ioExecutor = Executors.newSingleThreadExecutor()
 
-    private val json = Json {
+    private val storageJson = Json {
+        prettyPrint = false
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    private val prettyJson = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -46,7 +61,7 @@ class AppRepository(context: Context) {
             try {
                 val content = dataFile.readText(Charsets.UTF_8)
                 if (content.isNotBlank()) {
-                    val decoded = json.decodeFromString(AppDataSnapshot.serializer(), content)
+                    val decoded = storageJson.decodeFromString(AppDataSnapshot.serializer(), content)
                     // One-time v2.3.0 migration: ensure 7-day Mon-Sun week view stays consistent on every week page
                     if (decoded.settings.settingsVersion < 2) {
                         val migrated = decoded.copy(
@@ -56,7 +71,7 @@ class AppRepository(context: Context) {
                             )
                         )
                         try {
-                            dataFile.writeText(json.encodeToString(migrated), Charsets.UTF_8)
+                            dataFile.writeText(storageJson.encodeToString(migrated), Charsets.UTF_8)
                         } catch (_: Exception) {
                         }
                         return migrated
@@ -104,14 +119,159 @@ class AppRepository(context: Context) {
 
     @Synchronized
     private fun persist(snapshot: AppDataSnapshot) {
+        // Immediate 0ms state update on main thread; serialize & atomically flush on dedicated ordered IO thread
         _state.value = snapshot
-        try {
-            val tmpFile = File(appContext.filesDir, "haiyu_schedule_v1.json.tmp")
-            tmpFile.writeText(json.encodeToString(snapshot), Charsets.UTF_8)
-            if (dataFile.exists()) dataFile.delete()
-            tmpFile.renameTo(dataFile)
-        } catch (_: Exception) {
+        ioExecutor.execute {
+            try {
+                val encoded = storageJson.encodeToString(snapshot)
+                val tmpFile = File(appContext.filesDir, "haiyu_schedule_v1.json.tmp")
+                tmpFile.writeText(encoded, Charsets.UTF_8)
+                if (dataFile.exists()) dataFile.delete()
+                tmpFile.renameTo(dataFile)
+            } catch (_: Exception) {
+            }
         }
+    }
+
+    /**
+     * 在重课冲突簇中置顶某门课程（优先展示于课表卡片、顶部提醒与课前通知；再次点击取消置顶）
+     */
+    fun togglePinConflictCourse(target: CourseItem, peers: List<CourseItem>): Boolean {
+        val current = _state.value
+        val targetKey = GdouTimeRules.courseConflictKey(target)
+        val peerKeys = peers.map { GdouTimeRules.courseConflictKey(it) }.toSet()
+        val existing = current.settings.pinnedConflictKeys.toMutableList()
+        val wasPinned = targetKey in existing
+        existing.removeAll { it in peerKeys || it == targetKey }
+        if (!wasPinned) {
+            existing.add(targetKey)
+        }
+        persist(current.copy(settings = current.settings.copy(pinnedConflictKeys = existing)))
+        return !wasPinned
+    }
+
+    /**
+     * 导出全量本地换机备份（课表 + 作业 DDL + 成绩 + 考试 + 设置，纯离线无账号密码）
+     */
+    fun exportFullBackupAndShare(context: Context): Boolean {
+        val current = _state.value
+        val sanitized = current.copy(
+            settings = current.settings.copy(scheduleBgFileName = "")
+        )
+        val text = prettyJson.encodeToString(sanitized)
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
+        val backupFile = File(exportDir, "海屿课表全量备份_$stamp.json")
+        backupFile.writeText(text, Charsets.UTF_8)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            backupFile
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "海屿课表全量备份 ($stamp)")
+            clipData = ClipData.newRawUri("海屿课表全量备份.json", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(intent, "保存或发送全量备份文件").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+        return true
+    }
+
+    fun importFullBackupJson(rawJson: String): Result<String> {
+        return try {
+            val cleaned = rawJson.trim()
+            if (cleaned.isEmpty()) return Result.failure(IllegalArgumentException("备份文件为空"))
+            val decoded = storageJson.decodeFromString(AppDataSnapshot.serializer(), cleaned)
+            if (decoded.courses.isEmpty() && decoded.tasks.isEmpty() && decoded.grades.isEmpty() && decoded.exams.isEmpty()) {
+                return Result.failure(IllegalArgumentException("备份文件中没有可恢复的数据"))
+            }
+            val currentBg = _state.value.settings.scheduleBgFileName
+            val restored = decoded.copy(
+                courses = assignStableColors(decoded.courses),
+                settings = decoded.settings.copy(
+                    scheduleBgFileName = currentBg,
+                    settingsVersion = maxOf(2, decoded.settings.settingsVersion)
+                )
+            )
+            persist(restored)
+            Result.success(
+                "已恢复：课表 ${restored.courses.size} 条 · 作业 ${restored.tasks.size} 项 · 成绩 ${restored.grades.size} 门 · 考试 ${restored.exams.size} 场"
+            )
+        } catch (e: Exception) {
+            Result.failure(IllegalArgumentException("备份文件格式无效：${e.message ?: "解析失败"}"))
+        }
+    }
+
+    /**
+     * 零权限保存自定义课表壁纸（自动降采样至 <= 1440px 以控制内存 < 2MB，仅存本机私有目录）
+     */
+    fun saveScheduleBackgroundFromUri(uri: Uri): Result<String> {
+        return try {
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, boundsOpts)
+            } ?: return Result.failure(IllegalArgumentException("无法读取所选图片"))
+
+            val maxDim = 1440
+            var sample = 1
+            while (boundsOpts.outWidth / sample > maxDim || boundsOpts.outHeight / sample > maxDim) {
+                sample *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            val bitmap = appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, decodeOpts)
+            } ?: return Result.failure(IllegalArgumentException("图片解码失败"))
+
+            val oldName = _state.value.settings.scheduleBgFileName
+            val newName = "schedule_bg_${System.currentTimeMillis()}.jpg"
+            val dstFile = File(appContext.filesDir, newName)
+            FileOutputStream(dstFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 86, out)
+            }
+            bitmap.recycle()
+
+            if (oldName.isNotBlank() && oldName != newName) {
+                File(appContext.filesDir, oldName).delete()
+            }
+            val current = _state.value
+            val defaultAlpha = if (current.settings.courseCardAlpha >= 0.99f) 0.86f else current.settings.courseCardAlpha
+            persist(
+                current.copy(
+                    settings = current.settings.copy(
+                        scheduleBgFileName = newName,
+                        courseCardAlpha = defaultAlpha
+                    )
+                )
+            )
+            Result.success(newName)
+        } catch (e: Exception) {
+            Result.failure(IllegalArgumentException("设置壁纸失败：${e.message ?: "未知错误"}"))
+        }
+    }
+
+    fun clearScheduleBackground() {
+        val current = _state.value
+        val oldName = current.settings.scheduleBgFileName
+        if (oldName.isNotBlank()) {
+            File(appContext.filesDir, oldName).delete()
+        }
+        persist(current.copy(settings = current.settings.copy(scheduleBgFileName = "")))
+    }
+
+    fun getScheduleBackgroundFile(fileName: String): File? {
+        if (fileName.isBlank()) return null
+        val f = File(appContext.filesDir, fileName)
+        return if (f.exists() && f.length() > 0L) f else null
     }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
