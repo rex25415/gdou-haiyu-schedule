@@ -142,8 +142,40 @@ class AppRepository(context: Context) {
             lastSyncSemesterCode = semesterCode?.takeIf { it.isNotBlank() } ?: current.settings.lastSyncSemesterCode,
             lastSyncTime = nowLabel
         )
-        persist(current.copy(courses = coloredCourses + manualCourses, settings = nextSettings))
+        // Automatically clean up leftover demo tasks / demo grades / demo exams once real courses are synced!
+        val cleanedTasks = current.tasks.filterNot { isLegacyOrFlaggedDemoTask(it) }
+        val cleanedGrades = current.grades.filterNot { isLegacyOrFlaggedDemoGrade(it) }
+        val cleanedExams = current.exams.filterNot { isLegacyOrFlaggedDemoExam(it) }
+        persist(
+            current.copy(
+                courses = coloredCourses + manualCourses,
+                tasks = cleanedTasks,
+                grades = cleanedGrades,
+                exams = cleanedExams,
+                settings = nextSettings
+            )
+        )
         return detectedCampus
+    }
+
+    private fun isLegacyOrFlaggedDemoTask(t: TodoTaskItem): Boolean {
+        if (t.isDemo) return true
+        return t.note.startsWith("示例：") ||
+            (t.title == "高数第 5 章课后习题" && t.courseName == "高等数学A(上)") ||
+            (t.title == "数据结构实验报告（链表与栈）" && t.courseName == "数据结构与算法实验")
+    }
+
+    private fun isLegacyOrFlaggedDemoGrade(g: GradeItem): Boolean {
+        if (g.isDemo) return true
+        if (g.isSimulated) return false
+        return (g.courseName == "线性代数" && g.teacher == "王启明" && g.score == "91") ||
+            (g.courseName == "C语言程序设计" && g.teacher == "林海涛" && g.score == "95") ||
+            (g.courseName == "大学物理B" && g.teacher == "赵志远" && g.score == "84")
+    }
+
+    private fun isLegacyOrFlaggedDemoExam(e: ExamItem): Boolean {
+        if (e.isDemo) return true
+        return e.courseName.contains("[示例]")
     }
 
     fun upsertCourse(course: CourseItem) {
@@ -388,12 +420,14 @@ class AppRepository(context: Context) {
                 title = "数据结构实验报告（链表与栈）",
                 courseName = "数据结构与算法实验",
                 dueDate = LocalDate.now().plusDays(2).format(DateTimeFormatter.ISO_LOCAL_DATE),
-                note = "示例：在课表点任意课程即可快捷添加作业 DDL"
+                note = "示例：在课表点任意课程即可快捷添加作业 DDL",
+                isDemo = true
             ),
             TodoTaskItem(
                 title = "高数第 5 章课后习题",
                 courseName = "高等数学A(上)",
-                dueDate = LocalDate.now().plusDays(5).format(DateTimeFormatter.ISO_LOCAL_DATE)
+                dueDate = LocalDate.now().plusDays(5).format(DateTimeFormatter.ISO_LOCAL_DATE),
+                isDemo = true
             )
         )
         persist(

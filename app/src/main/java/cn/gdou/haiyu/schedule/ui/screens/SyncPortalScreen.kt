@@ -20,7 +20,6 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +42,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -83,7 +83,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -576,102 +578,192 @@ fun SyncPortalScreen(
                     }
                 }
 
-                // Friendly Single-Row Channel Selector (scrollable for 1.35x+ accessibility large font!)
+                // Unmistakable High-Contrast 2-Segment Channel Switcher (solid primary + checkmark = active!)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilterChip(
-                        selected = useOffCampus,
-                        onClick = { if (!useOffCampus) switchChannel(true) },
-                        label = { Text("校外通用(免校园网)", fontSize = 11.5.sp, maxLines = 1, softWrap = false) },
-                        modifier = Modifier.height(32.dp)
-                    )
-                    FilterChip(
-                        selected = !useOffCampus,
-                        onClick = { if (useOffCampus) switchChannel(false) },
-                        label = { Text("校园网直连", fontSize = 11.5.sp, maxLines = 1, softWrap = false) },
-                        modifier = Modifier.height(32.dp)
-                    )
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text(
-                            text = if (desktopMode) "电脑版" else "手机版",
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            softWrap = false,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Row(
                             modifier = Modifier
-                                .clickable { toggleDesktopUa() }
-                                .padding(horizontal = 8.dp, vertical = 5.dp)
-                        )
-                    }
-                    when (networkProbe.state) {
-                        CampusNetworkState.ON_CAMPUS_DIRECT_READY -> {
+                                .fillMaxWidth()
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            // Segment 1: Off-Campus Universal Channel
                             Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable {
+                                color = if (useOffCampus) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                shape = RoundedCornerShape(9.dp),
+                                modifier = Modifier
+                                    .weight(1.18f)
+                                    .height(30.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .clickable { if (!useOffCampus) switchChannel(true) }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                ) {
                                     if (useOffCampus) {
-                                        switchChannel(false)
-                                        onShowMessage("已切至「校园网直连」，加载更快更稳")
-                                    } else {
-                                        probeTrigger++
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
                                     }
+                                    Text(
+                                        text = "校外免校园网",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (useOffCampus) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (useOffCampus) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
-                            ) {
-                                Text(
-                                    text = if (useOffCampus) "校内可直连·点击提速" else "校园网直连中",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                )
                             }
-                        }
-                        CampusNetworkState.OFF_CAMPUS_ONLY -> {
+
+                            // Segment 2: On-Campus Direct Channel
                             Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
-                                shape = RoundedCornerShape(8.dp)
+                                color = if (!useOffCampus) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                shape = RoundedCornerShape(9.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(30.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .clickable { if (useOffCampus) switchChannel(false) }
                             ) {
-                                Text(
-                                    text = "校外网络",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                ) {
+                                    if (!useOffCampus) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        text = "校园网直连",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (!useOffCampus) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (!useOffCampus) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
-                        CampusNetworkState.OFFLINE_OR_BLOCKED -> {
-                            Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { probeTrigger++ }
-                            ) {
-                                Text(
-                                    text = "网络受限·点此重测",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                )
-                            }
-                        }
-                        CampusNetworkState.PROBING -> Unit
                     }
+
+                    // Neutral UA mode chip (clearly distinct from the active channel switcher)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.8.dp,
+                            MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { toggleDesktopUa() }
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 9.dp)
+                        ) {
+                            Text(
+                                text = if (desktopMode) "电脑版" else "手机版",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dedicated non-confusing slim network banner ONLY when actionable (never clips or mimics a channel tab!)
+        if (networkProbe.state == CampusNetworkState.ON_CAMPUS_DIRECT_READY && useOffCampus && !isLoggedIntoJw) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        switchChannel(false)
+                        onShowMessage("已切至「校园网直连」，加载更快更稳")
+                    }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "检测到当前处于校园网，点此切「校园网直连」加载更快",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        } else if (networkProbe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { probeTrigger++ }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "当前网络暂未连通学校服务器（请检查流量或先登录校园网认证），点此重测",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
         }

@@ -77,11 +77,20 @@ object AppUpdateManager {
     const val DOWNLOAD_PAGE_URL = "https://$REPO_OWNER.github.io/$REPO_NAME/"
     const val LATEST_RELEASE_WEB_URL = "$REPO_WEB_URL/releases/latest"
     private const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+    private const val RAW_LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/docs/latest.json"
+    private const val PAGES_LATEST_MANIFEST_URL = "${DOWNLOAD_PAGE_URL}latest.json"
 
     // 经实测可用的 HTTPS 国内加速前缀（仅在具备 SHA-256 官方摘要时启用，校验不通过立即丢弃并回落官方源）
     private val VERIFIED_MIRROR_PREFIXES = listOf(
         "国内加速线路 1" to "https://gh-proxy.com/",
-        "国内加速线路 2" to "https://ghfast.top/"
+        "国内加速线路 2" to "https://ghfast.top/",
+        "国内加速线路 3" to "https://ghproxy.net/"
+    )
+
+    private val MANIFEST_FALLBACK_URLS = listOf(
+        PAGES_LATEST_MANIFEST_URL,
+        "https://gh-proxy.com/$RAW_LATEST_MANIFEST_URL",
+        "https://ghfast.top/$RAW_LATEST_MANIFEST_URL"
     )
 
     const val AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L // 12 hours
@@ -209,38 +218,105 @@ object AppUpdateManager {
         }
     }
 
+    /**
+     * 解析托管在 docs/latest.json 的静态版本清单（用于国内 5G / 校园网免 VPN 容灾检查）
+     */
+    fun parseStaticManifestJson(rawJson: String): AppReleaseInfo? {
+        return try {
+            val root: JsonObject = json.parseToJsonElement(rawJson).jsonObject
+            val tagName = root["tagName"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val versionName = root["versionName"]?.jsonPrimitive?.contentOrNull?.trim()
+                ?.ifBlank { normalizeVersion(tagName) }
+                ?: normalizeVersion(tagName)
+            if (versionName.isEmpty()) return null
+            val finalTag = tagName.ifBlank { "v$versionName" }
+            val title = root["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿课表 v$versionName" }
+            val notes = root["releaseNotes"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val htmlUrl = root["htmlUrl"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                .ifBlank { "$REPO_WEB_URL/releases/tag/$finalTag" }
+            val apkName = root["apkFileName"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                .ifBlank { "HaiyuSchedule-GDOU-v$versionName.apk" }
+            val apkUrl = root["apkDownloadUrl"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                .ifBlank { "$REPO_WEB_URL/releases/download/$finalTag/$apkName" }
+            val apkSize = root["apkSizeBytes"]?.jsonPrimitive?.longOrNull ?: 0L
+            val sha = root["expectedSha256"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase(Locale.US)
+                ?.takeIf { it.length == 64 && it.all { ch -> ch in '0'..'9' || ch in 'a'..'f' } }
+
+            AppReleaseInfo(
+                tagName = finalTag,
+                versionName = versionName,
+                title = title,
+                releaseNotes = cleanReleaseNotes(notes),
+                htmlUrl = htmlUrl,
+                apkDownloadUrl = apkUrl,
+                apkFileName = apkName,
+                apkSizeBytes = apkSize,
+                expectedSha256 = sha
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun friendlyNetworkError(e: Throwable?): String {
+        val msg = e?.message.orEmpty()
+        return when {
+            msg.contains("Unable to resolve host", ignoreCase = true) ||
+                e is java.net.UnknownHostException -> "当前网络 DNS 无法解析该域名"
+            msg.contains("timed out", ignoreCase = true) ||
+                e is java.net.SocketTimeoutException -> "连接超时"
+            msg.contains("Connection reset", ignoreCase = true) ||
+                msg.contains("unexpected end of stream", ignoreCase = true) -> "连接被网络中断"
+            msg.contains("SSL", ignoreCase = true) -> "HTTPS 握手异常"
+            else -> "网络连接不稳定"
+        }
+    }
+
     private fun cleanReleaseNotes(raw: String): String {
         if (raw.isBlank()) return "优化体验并修复已知问题，建议更新到最新版本。"
-        return raw
+        val cleaned = raw
             .replace("\r\n", "\n")
             .lines()
             .filterNot { line ->
                 val t = line.trim()
                 t.startsWith("SHA-256", ignoreCase = true) ||
                     t.startsWith("- SHA-256", ignoreCase = true) ||
-                    t.startsWith("### 文件校验")
+                    t.startsWith("### 文件校验") ||
+                    t.startsWith("- 文件名") ||
+                    t.startsWith("- 包名") ||
+                    t.contains("中文极速下载主页") ||
+                    t.contains("点击下方") ||
+                    t.contains("若你已安装") ||
+                    t.startsWith("## 🌊 海屿课表")
             }
             .joinToString("\n") { line ->
                 line
                     .replace(Regex("^#{1,4}\\s*"), "")
+                    .replace(Regex("\\[([^\\]]+)]\\(https?://[^)]+\\)"), "$1")
                     .replace("**", "")
                     .replace("`", "")
                     .trimEnd()
             }
+            .replace(Regex("\n{3,}"), "\n\n")
             .trim()
-            .take(1200)
+            .take(1000)
+        return cleaned.ifBlank { "优化体验并修复已知问题，建议更新到最新版本。" }
     }
 
     /**
-     * 检查 GitHub 最新 Release（自动支持 API 限流时的网页重定向降级，适配校园网大出口 NAT）
+     * 检查最新 Release：
+     * 1. 优先查 GitHub Releases API；
+     * 2. 若国内 5G/校园网遇到 DNS 或 API 限流，自动按序走 GitHub Pages / 国内镜像拉取 docs/latest.json（含完整 SHA-256 摘要）；
+     * 3. 兜底走 /releases/latest 重定向探测。
      */
     suspend fun checkLatestRelease(currentVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
-        var apiError: String? = null
+        var lastError: String? = null
+        // 1. Official GitHub Releases API
         try {
             val conn = (URL(LATEST_RELEASE_API_URL).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 10000
+                connectTimeout = 5500
+                readTimeout = 7000
                 setRequestProperty("Accept", "application/vnd.github+json")
                 setRequestProperty("User-Agent", "HaiyuSchedule-Android/$currentVersion")
             }
@@ -256,9 +332,9 @@ object AppUpdateManager {
                             UpdateCheckResult.UpToDate(parsed.versionName)
                         }
                     }
-                    apiError = "版本信息解析失败"
+                    lastError = "版本信息解析失败"
                 } else {
-                    apiError = "GitHub 接口返回 HTTP $code"
+                    lastError = "官方接口返回 HTTP $code"
                 }
             } finally {
                 conn.disconnect()
@@ -266,16 +342,42 @@ object AppUpdateManager {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            apiError = e.localizedMessage ?: "连接更新服务器超时"
+            lastError = friendlyNetworkError(e)
         }
 
-        // Fallback: probe /releases/latest redirect (immune to GitHub REST API 60/hr IP rate limit!)
+        // 2. Zero-VPN China 5G failover: GitHub Pages + domestic accelerated raw latest.json (carries exact SHA-256!)
+        for (manifestUrl in MANIFEST_FALLBACK_URLS) {
+            try {
+                val conn = openFollowingRedirects(manifestUrl, maxHops = 4)
+                try {
+                    if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                        val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        val parsed = parseStaticManifestJson(text)
+                        if (parsed != null) {
+                            return@withContext if (isNewerVersion(parsed.versionName, currentVersion)) {
+                                UpdateCheckResult.UpdateAvailable(parsed)
+                            } else {
+                                UpdateCheckResult.UpToDate(parsed.versionName)
+                            }
+                        }
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = friendlyNetworkError(e)
+            }
+        }
+
+        // 3. Final fallback: probe /releases/latest redirect
         try {
             val redirectConn = (URL(LATEST_RELEASE_WEB_URL).openConnection() as HttpURLConnection).apply {
                 requestMethod = "HEAD"
                 instanceFollowRedirects = false
-                connectTimeout = 8000
-                readTimeout = 8000
+                connectTimeout = 6000
+                readTimeout = 6000
                 setRequestProperty("User-Agent", "HaiyuSchedule-Android/$currentVersion")
             }
             try {
@@ -310,7 +412,7 @@ object AppUpdateManager {
         }
 
         UpdateCheckResult.Error(
-            "检查更新失败（${apiError ?: "网络异常"}），可检查网络或直接点浏览器查看 GitHub Releases"
+            "检查更新失败（${lastError ?: "网络异常"}），可稍后重试或点下方下载主页获取新版"
         )
     }
 
@@ -419,7 +521,7 @@ object AppUpdateManager {
                 throw e
             } catch (e: Exception) {
                 partFile.delete()
-                lastError = "${route.label} 失败（${e.localizedMessage ?: "连接超时"}）"
+                lastError = "${route.label}失败（${friendlyNetworkError(e)}）"
             }
         }
 

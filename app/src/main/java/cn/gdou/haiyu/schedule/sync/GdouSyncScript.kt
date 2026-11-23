@@ -679,6 +679,7 @@ object GdouSyncScript {
         }
 
         async function syncGrades() {
+            await ensureWfwJwSessionIfNeeded();
             const discovered = await discoverMenuEndpoints();
             const endpoints = Array.from(new Set([
                 ...discovered.gradeEps,
@@ -687,47 +688,89 @@ object GdouSyncScript {
                 "/cjcx/cjcx_cxXsgrcj.html?doType=query&gnmkdm=N305007",
                 "/cjcx/cjcx_cxDgXscj.html?doType=query&gnmkdm=N305007"
             ]));
-            const form = "xnm=&xqm=&_search=false&nd=" + Date.now() + "&queryModel.showCount=500&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+
+            function mapGradeItems(items) {
+                return items.map(it => {
+                    const xnmText = String(it.xnmmc || (it.xnm ? (it.xnm + "-" + (Number(it.xnm) + 1)) : "")).trim();
+                    const rawXq = String(it.xqmmc || it.xqm || "").trim();
+                    const semText = rawXq === "1" || rawXq === "3" ? "第一学期"
+                        : (rawXq === "2" || rawXq === "12" ? "第二学期" : (rawXq || "第一学期"));
+                    const jd = parseFloat(it.jd);
+                    const xf = parseFloat(it.xf);
+                    return {
+                        academicYear: xnmText || "未知学年",
+                        semester: semText,
+                        courseName: String(it.kcmc || "").trim(),
+                        score: String(it.cj || it.bfzcj || "").trim(),
+                        gradePoint: isNaN(jd) ? 0.0 : jd,
+                        credit: isNaN(xf) ? 0.0 : xf,
+                        courseType: String(it.kcxzmc || it.kclbmc || "").trim(),
+                        examNature: String(it.ksxz || "正常考试").trim(),
+                        teacher: String(it.jsxm || "").trim()
+                    };
+                }).filter(g => g.courseName.length > 0);
+            }
+
+            async function queryGradesOnce(ep, xnmVal, xqmVal) {
+                const form = "xnm=" + encodeURIComponent(xnmVal) +
+                    "&xqm=" + encodeURIComponent(xqmVal) +
+                    "&kcbj=&_search=false&nd=" + Date.now() +
+                    "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+                const resp = await fetchJwJsonWithFallback(ep, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                        "x-requested-with": "XMLHttpRequest"
+                    },
+                    body: form,
+                    credentials: "include"
+                });
+                if (!resp.ok) return null;
+                const json = JSON.parse(await resp.text());
+                return Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+            }
+
+            let workingEp = null;
             for (const ep of endpoints) {
                 try {
-                    const resp = await fetchJwJsonWithFallback(ep, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: form,
-                        credentials: "include"
-                    });
-                    if (!resp.ok) continue;
-                    const json = JSON.parse(await resp.text());
-                    const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-                    if (items.length === 0) continue;
-                    const grades = items.map(it => {
-                        const xnmText = String(it.xnmmc || (it.xnm ? (it.xnm + "-" + (Number(it.xnm) + 1)) : "")).trim();
-                        const rawXq = String(it.xqmmc || it.xqm || "").trim();
-                        const semText = rawXq === "1" || rawXq === "3" ? "第一学期"
-                            : (rawXq === "2" || rawXq === "12" ? "第二学期" : (rawXq || "第一学期"));
-                        const jd = parseFloat(it.jd);
-                        const xf = parseFloat(it.xf);
-                        return {
-                            academicYear: xnmText || "未知学年",
-                            semester: semText,
-                            courseName: String(it.kcmc || "").trim(),
-                            score: String(it.cj || it.bfzcj || "").trim(),
-                            gradePoint: isNaN(jd) ? 0.0 : jd,
-                            credit: isNaN(xf) ? 0.0 : xf,
-                            courseType: String(it.kcxzmc || it.kclbmc || "").trim(),
-                            examNature: String(it.ksxz || "正常考试").trim(),
-                            teacher: String(it.jsxm || "").trim()
-                        };
-                    }).filter(g => g.courseName.length > 0);
-                    return { ok: true, grades };
+                    const items = await queryGradesOnce(ep, "", "");
+                    if (items === null) continue;
+                    workingEp = ep;
+                    if (items.length > 0) {
+                        return { ok: true, grades: mapGradeItems(items) };
+                    }
+                    break;
                 } catch (e) {
                     // Try next endpoint
                 }
             }
-            return { ok: false, error: "未获取到成绩记录（可能当前未出成绩或教务未开放成绩查询）" };
+
+            // Fallback: some Zhengfang v9 deployments require non-empty xnm (query recent 4 academic years gently)
+            if (workingEp) {
+                const curY = Number(getDefaultAcademicYear());
+                const collected = [];
+                const seen = new Set();
+                for (let offset = 0; offset < 4; offset++) {
+                    const y = String(curY - offset);
+                    try {
+                        const items = await queryGradesOnce(workingEp, y, "");
+                        if (items && items.length > 0) {
+                            for (const g of mapGradeItems(items)) {
+                                const key = g.academicYear + "|" + g.semester + "|" + g.courseName + "|" + g.score;
+                                if (!seen.has(key)) {
+                                    seen.add(key);
+                                    collected.push(g);
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+                if (collected.length > 0) {
+                    return { ok: true, grades: collected };
+                }
+            }
+
+            return { ok: false, error: "未获取到成绩记录（可能当前未出成绩或教务需先确认学业通知）" };
         }
 
         async function syncExams(xnm, xqm) {

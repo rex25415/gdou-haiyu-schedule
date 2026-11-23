@@ -703,7 +703,8 @@ object GdouTimeRules {
             gradePoint = 4.1,
             credit = 3.0,
             courseType = "学科基础必修",
-            teacher = "王启明"
+            teacher = "王启明",
+            isDemo = true
         ),
         GradeItem(
             academicYear = "2025-2026",
@@ -713,7 +714,8 @@ object GdouTimeRules {
             gradePoint = 4.5,
             credit = 4.0,
             courseType = "专业必修",
-            teacher = "林海涛"
+            teacher = "林海涛",
+            isDemo = true
         ),
         GradeItem(
             academicYear = "2025-2026",
@@ -723,7 +725,8 @@ object GdouTimeRules {
             gradePoint = 3.4,
             credit = 3.5,
             courseType = "学科基础必修",
-            teacher = "赵志远"
+            teacher = "赵志远",
+            isDemo = true
         )
     )
 
@@ -745,7 +748,8 @@ object GdouTimeRules {
                 location = loc1,
                 seatNumber = "18",
                 examType = "期末考试",
-                campus = campus.label
+                campus = campus.label,
+                isDemo = true
             ),
             ExamItem(
                 academicYear = "2026-2027",
@@ -755,7 +759,8 @@ object GdouTimeRules {
                 location = loc2,
                 seatNumber = "32",
                 examType = "期末考试",
-                campus = campus.label
+                campus = campus.label,
+                isDemo = true
             )
         )
     }

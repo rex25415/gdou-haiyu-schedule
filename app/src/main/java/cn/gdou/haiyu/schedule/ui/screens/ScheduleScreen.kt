@@ -272,48 +272,55 @@ fun ScheduleScreen(
                             )
                         }
                     }
-                    Text(
-                        text = if (selectedWeek == actualCurrentWeek) {
-                            "${settings.academicYearLabel} · $actualCurrentWeek/${totalWeeks}周"
-                        } else {
-                            "当前第${actualCurrentWeek}周 · 预览第${selectedWeek}周"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = if (selectedWeek == actualCurrentWeek) {
+                                "${settings.academicYearLabel} · $actualCurrentWeek/${totalWeeks}周"
+                            } else {
+                                "当前第${actualCurrentWeek}周 · 预览第${selectedWeek}周"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (selectedWeek != actualCurrentWeek) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = RoundedCornerShape(999.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .clickable {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage((actualCurrentWeek - 1).coerceIn(0, totalWeeks - 1))
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = "回到本周",
+                                    fontSize = 10.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    if (selectedWeek != actualCurrentWeek) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(999.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable {
-                                    scope.launch {
-                                        pagerState.animateScrollToPage((actualCurrentWeek - 1).coerceIn(0, totalWeeks - 1))
-                                    }
-                                }
-                        ) {
-                            Text(
-                                text = "回本周",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(2.dp))
-                    }
-                    // Uniform 20.dp action icons with harmonious visual weight
+                    // Uniform 20.dp action icons with harmonious visual weight (never collides with week/campus badges!)
                     IconButton(
                         onClick = { if (!isRefreshingSchedule) onQuickRefreshSchedule() },
                         modifier = Modifier.size(34.dp)
@@ -1458,8 +1465,13 @@ private fun DayTimelineScheduleView(
     val dayCourses = remember(courses, selectedWeek, selectedDay, campus) {
         courses
             .filter { it.dayOfWeek == selectedDay && selectedWeek in it.weeks }
-            .sortedBy { it.startSection }
             .map { it to GdouTimeRules.resolveCourseTime(it, campus) }
+            .sortedWith(
+                compareBy<Pair<CourseItem, cn.gdou.haiyu.schedule.data.ResolvedCourseTime>> { it.second.startTime }
+                    .thenBy { it.first.startSection }
+                    .thenBy { it.first.endSection }
+                    .thenBy { it.first.name }
+            )
     }
     val conflictingIds = remember(courses, selectedWeek) {
         GdouTimeRules.findConflictingCourseIds(courses, selectedWeek)
@@ -1681,7 +1693,7 @@ private fun WeekGridScheduleView(
     val baseTimeW = if (dayCount == 7) 36f else 42f
     val timeColumnWidth = (baseTimeW * (1f + (fontScale - 1f) * 0.65f)).dp
     val rowHeight = (62f * (1f + (fontScale - 1f) * 0.55f)).dp
-    val breakGap = 14.dp
+    val breakGap = (14f * (1f + (fontScale - 1f) * 0.45f)).dp
 
     fun yOffsetForSection(section: Int): Dp {
         val breaksBefore = (if (section > 4) 1 else 0) + (if (section > 8) 1 else 0)
@@ -2163,7 +2175,7 @@ private fun WeekGridCourseCard(
                 if (resolved.isSpecialStaggered && (dayCount == 7 || fontScale > 1.15f)) {
                     Spacer(modifier = Modifier.height(1.5.dp))
                     Text(
-                        text = "错峰${resolved.startTime}",
+                        text = if (fontScale <= 1.1f) "错峰${resolved.startTime}" else resolved.startTime,
                         fontSize = 7.2.sp,
                         lineHeight = 8.5.sp,
                         fontWeight = FontWeight.Bold,

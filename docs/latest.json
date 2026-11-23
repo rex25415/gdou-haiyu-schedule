@@ -1,0 +1,11 @@
+{
+    "tagName":  "v2.7.0",
+    "versionName":  "2.7.0",
+    "title":  "海屿课表 v2.7.0 · 顶栏零重叠、通道开关焕新与国内免 VPN 极速自更新",
+    "apkFileName":  "HaiyuSchedule-GDOU-v2.7.0.apk",
+    "apkSizeBytes":  1732117,
+    "apkDownloadUrl":  "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.7.0/HaiyuSchedule-GDOU-v2.7.0.apk",
+    "expectedSha256":  "e3df205ba21c5a8a63bf2e5d6cf39671c19ec083233ee9d6f0f55475e5d6fd52",
+    "htmlUrl":  "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.7.0",
+    "releaseNotes":  "- 修复切换非本周时「回到本周」与校区徽标重叠遮挡问题（窄屏与超大字体 0 重叠）\n- 重做「校外免校园网 / 校园网直连」二选一实心勾选分段开关，一眼看清当前通道\n- 应用内更新升级为 4 级免 VPN 国内 5G 容灾检查 + 3 条国内加速下载线路与 SHA-256 严格校验，彻底解决国内流量 DNS 无法解析 github.com 导致下载中断的问题\n- 首次同步真实教务课表后自动清理示例作业/示例成绩/示例考场残留\n- 升级正方教务成绩查询脚本（适配 kcbj 参数与多学年自动回落）及日视图按实际错峰时间排序"
+}

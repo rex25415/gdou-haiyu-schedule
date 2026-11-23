@@ -67,7 +67,8 @@ data class GradeItem(
     val courseType: String = "", // 必修 / 选修 / 公选
     val examNature: String = "正常考试",
     val teacher: String = "",
-    val isSimulated: Boolean = false
+    val isSimulated: Boolean = false,
+    val isDemo: Boolean = false
 )
 
 @Serializable
@@ -81,7 +82,8 @@ data class ExamItem(
     val seatNumber: String = "",
     val examType: String = "期末考试",
     val campus: String = "",
-    val isManual: Boolean = false
+    val isManual: Boolean = false,
+    val isDemo: Boolean = false
 )
 
 @Serializable
@@ -91,7 +93,8 @@ data class TodoTaskItem(
     val courseName: String = "",
     val dueDate: String = "", // yyyy-MM-dd
     val isDone: Boolean = false,
-    val note: String = ""
+    val note: String = "",
+    val isDemo: Boolean = false
 )
 
 @Serializable

@@ -184,7 +184,7 @@ class AppUpdateManagerTest {
             expectedSha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         )
         val verifiedRoutes = AppUpdateManager.buildDownloadRoutes(verifiedRelease)
-        assertTrue(verifiedRoutes.size >= 3)
+        assertEquals(4, verifiedRoutes.size)
         assertTrue(verifiedRoutes.all { it.requiresSha256 })
         assertEquals("GitHub 官方源", verifiedRoutes.last().label)
 
@@ -204,5 +204,31 @@ class AppUpdateManagerTest {
         assertTrue(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = false, state = CampusNetworkState.OFF_CAMPUS_ONLY))
         assertFalse(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = true, state = CampusNetworkState.OFF_CAMPUS_ONLY))
         assertFalse(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = false, state = CampusNetworkState.ON_CAMPUS_DIRECT_READY))
+    }
+
+    @Test
+    fun parseStaticManifestAndFriendlyErrorsWorkForChina5G() {
+        val manifest = """
+            {
+              "tagName": "v2.7.0",
+              "versionName": "2.7.0",
+              "title": "海屿课表 v2.7.0",
+              "apkFileName": "HaiyuSchedule-GDOU-v2.7.0.apk",
+              "apkSizeBytes": 1740000,
+              "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.7.0/HaiyuSchedule-GDOU-v2.7.0.apk",
+              "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.7.0",
+              "releaseNotes": "- 修复非本周「回到本周」与校区徽标重叠\n- 通道开关升级为实心勾选分段栏"
+            }
+        """.trimIndent()
+        val parsed = AppUpdateManager.parseStaticManifestJson(manifest)
+        assertNotNull(parsed)
+        assertEquals("2.7.0", parsed!!.versionName)
+        assertEquals(1740000L, parsed.apkSizeBytes)
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", parsed.expectedSha256)
+        assertTrue(parsed.releaseNotes.contains("回到本周"))
+
+        val dnsErr = AppUpdateManager.friendlyNetworkError(java.net.UnknownHostException("Unable to resolve host \"github.com\""))
+        assertTrue(dnsErr.contains("DNS"))
     }
 }
