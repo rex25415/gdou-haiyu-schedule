@@ -15,16 +15,16 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "cn.gdou.haiyu.schedule"
+    namespace = "io.github.rex25415.haiyu.schedule"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "cn.gdou.haiyu.schedule"
+        applicationId = "io.github.rex25415.haiyu.schedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 270
-        versionName = "2.7.0"
+        versionCode = 280
+        versionName = "2.8.0"
 
         vectorDrawables {
             useSupportLibrary = true

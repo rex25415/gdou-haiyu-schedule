@@ -23,7 +23,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="海屿课表 · 今日"
-            android:textColor="#0B4F4A"
+            android:textColor="@color/widget_title"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -37,7 +37,7 @@
             android:paddingRight="8dp"
             android:paddingBottom="2dp"
             android:text="第1周"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/widget_badge_text"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -47,7 +47,7 @@
             android:layout_height="wrap_content"
             android:paddingLeft="8dp"
             android:text="刷新"
-            android:textColor="#0E8A7D"
+            android:textColor="@color/widget_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -60,7 +60,7 @@
         android:layout_weight="1"
         android:gravity="center"
         android:text="今天没有课，好好休息或去图书馆充充电~"
-        android:textColor="#4B746E"
+        android:textColor="@color/widget_empty_text"
         android:textSize="13sp"
         android:visibility="gone" />
 
@@ -81,7 +81,7 @@
             android:layout_width="64dp"
             android:layout_height="wrap_content"
             android:text="08:10\n09:45"
-            android:textColor="#0E8A7D"
+            android:textColor="@color/widget_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -98,7 +98,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="课程名"
-                android:textColor="#132A27"
+                android:textColor="@color/widget_text_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -109,7 +109,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="教室 · 教师"
-                android:textColor="#55726E"
+                android:textColor="@color/widget_text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
@@ -130,7 +130,7 @@
             android:id="@+id/widget_time_2"
             android:layout_width="64dp"
             android:layout_height="wrap_content"
-            android:textColor="#0E8A7D"
+            android:textColor="@color/widget_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -146,7 +146,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#132A27"
+                android:textColor="@color/widget_text_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -156,7 +156,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#55726E"
+                android:textColor="@color/widget_text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
@@ -177,7 +177,7 @@
             android:id="@+id/widget_time_3"
             android:layout_width="64dp"
             android:layout_height="wrap_content"
-            android:textColor="#0E8A7D"
+            android:textColor="@color/widget_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -193,7 +193,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#132A27"
+                android:textColor="@color/widget_text_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -203,7 +203,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#55726E"
+                android:textColor="@color/widget_text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
@@ -224,7 +224,7 @@
             android:id="@+id/widget_time_4"
             android:layout_width="64dp"
             android:layout_height="wrap_content"
-            android:textColor="#0E8A7D"
+            android:textColor="@color/widget_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -240,7 +240,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#132A27"
+                android:textColor="@color/widget_text_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -250,7 +250,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#55726E"
+                android:textColor="@color/widget_text_secondary"
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>
@@ -260,7 +260,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="end"
-        android:textColor="#0E8A7D"
+        android:textColor="@color/widget_accent"
         android:textSize="11sp"
         android:visibility="gone" />
 </LinearLayout>

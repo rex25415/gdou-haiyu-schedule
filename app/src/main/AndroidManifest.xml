@@ -43,12 +43,13 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Class reminder alarm receiver -->
+        <!-- Class & DDL reminder alarm receiver -->
         <receiver
             android:name=".reminder.ClassReminderReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="cn.gdou.haiyu.schedule.ACTION_CLASS_REMINDER" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_CLASS_REMINDER" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_DDL_REMINDER" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
@@ -60,7 +61,7 @@
             android:label="@string/widget_today_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="cn.gdou.haiyu.schedule.ACTION_WIDGET_REFRESH" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_WIDGET_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
