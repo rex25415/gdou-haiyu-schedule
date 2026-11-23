@@ -2,21 +2,22 @@
 
 [![Release](https://img.shields.io/github/v/release/rex25415/gdou-haiyu-schedule?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
 [![Android CI](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml/badge.svg)](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml)
-[![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
+[![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://rex25415.github.io/gdou-haiyu-schedule/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> **非官方开源声明**：本项目为学生基于个人学习与开源交流开发的独立工具，与广东海洋大学官方无任何隶属关系。应用 **零自建后端、零账号密码中转、零广告统计、零后台自动爬虫/抢课**，所有数据 100% 仅保存在用户手机本地。详见 [安全与合规说明 (SECURITY.md)](SECURITY.md)。
 
 专为 **广东海洋大学全校区（湖光主校区 · 海滨校区 · 阳江校区）** 打造的纯原生 **Kotlin + Jetpack Compose + Material 3** 安卓课表与学业助手。
 
-**零广告 · 零后台统计 · 零第三方中转服务器 · 无需校园网直接同步正方教务 · 完全开源可审计。**
-
 ---
 
-## 📥 快速下载安装
+## 📥 极速下载安装（推荐发同学用中文下载主页）
 
-前往右侧 / 下方 **[GitHub Releases 最新版本](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)** 直接下载 `.apk` 安装包（仅约 **1.6 MB**）：
+- 🌐 **中文一键下载主页（推荐 · 含国内多线加速与微信/QQ 跳转指引）**：https://rex25415.github.io/gdou-haiyu-schedule/
+- 📦 **GitHub Releases 官方发布页**：https://github.com/rex25415/gdou-haiyu-schedule/releases/latest
 
-- **支持系统**：Android 8.0 ～ Android 17（`minSdk 26` / `targetSdk 36` Android 16），同时完全兼容 **华为鸿蒙 4.x 及以下**；
-- **内置一键更新**：`v2.5.0+` 内置 GitHub Releases 检查更新与 SHA-256 校验下载安装，统一正式签名打包，覆盖升级自动保留全部课表、作业与设置。
+- **支持系统**：Android 8.0 ～ Android 17（`minSdk 26` / `targetSdk 36` Android 16），同时完全兼容 **华为鸿蒙 4.x 及以下**（包体仅约 **1.6 MB**）；
+- **内置一键更新**：`v2.5.0+` 内置自动检查更新，支持国内多线加速下载与 **SHA-256 完整性安全校验**，统一正式签名打包，覆盖升级自动保留全部课表、作业与设置。
 
 ---
 

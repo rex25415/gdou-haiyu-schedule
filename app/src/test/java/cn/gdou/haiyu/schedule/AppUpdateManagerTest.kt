@@ -5,6 +5,10 @@ import cn.gdou.haiyu.schedule.data.OccurrenceState
 import cn.gdou.haiyu.schedule.model.AppDataSnapshot
 import cn.gdou.haiyu.schedule.model.CourseItem
 import cn.gdou.haiyu.schedule.model.GdouCampus
+import cn.gdou.haiyu.schedule.sync.CampusNetworkState
+import cn.gdou.haiyu.schedule.sync.GdouJsBridge
+import cn.gdou.haiyu.schedule.sync.NetworkChannelProbe
+import cn.gdou.haiyu.schedule.update.AppReleaseInfo
 import cn.gdou.haiyu.schedule.update.AppUpdateManager
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -144,5 +148,61 @@ class AppUpdateManagerTest {
         val clusters = GdouTimeRules.groupOverlappingCourses(listOf(c1, c2))
         assertEquals(2, statuses.count { it.state == OccurrenceState.ONGOING })
         assertEquals(clusters.first().courses.first().id, statuses.first().course.id)
+    }
+
+    @Test
+    fun jsBridgeOriginGuardBlocksSpoofedAndCleartextUrls() {
+        assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://jw.gdou.edu.cn/kbcx/xskbcx_cxXskbcxIndex.html"))
+        assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn/"))
+        assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://gdou.edu.cn/"))
+
+        assertFalse(GdouJsBridge.isTrustedGdouOrigin("http://jw.gdou.edu.cn/"))
+        assertFalse(GdouJsBridge.isTrustedGdouOrigin("https://gdou.edu.cn.evil.com/"))
+        assertFalse(GdouJsBridge.isTrustedGdouOrigin("https://evil.com/?next=jw.gdou.edu.cn"))
+        assertFalse(GdouJsBridge.isTrustedGdouOrigin("file:///data/local/tmp/x.html"))
+        assertFalse(GdouJsBridge.isTrustedGdouOrigin(null))
+
+        assertEquals(
+            "https://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fjw.gdou.edu.cn",
+            GdouJsBridge.upgradeGdouHttpToHttps("http://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fjw.gdou.edu.cn")
+        )
+        assertEquals(null, GdouJsBridge.upgradeGdouHttpToHttps("http://gdou.edu.cn.evil.com/login"))
+        assertEquals(null, GdouJsBridge.upgradeGdouHttpToHttps("https://authserver.gdou.edu.cn/"))
+    }
+
+    @Test
+    fun downloadRoutesOnlyUseMirrorsWhenSha256IsPresent() {
+        val verifiedRelease = AppReleaseInfo(
+            tagName = "v2.6.0",
+            versionName = "2.6.0",
+            title = "v2.6.0",
+            releaseNotes = "notes",
+            htmlUrl = "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.6.0",
+            apkDownloadUrl = "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.6.0/HaiyuSchedule-GDOU-v2.6.0.apk",
+            apkFileName = "HaiyuSchedule-GDOU-v2.6.0.apk",
+            apkSizeBytes = 1700000L,
+            expectedSha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        )
+        val verifiedRoutes = AppUpdateManager.buildDownloadRoutes(verifiedRelease)
+        assertTrue(verifiedRoutes.size >= 3)
+        assertTrue(verifiedRoutes.all { it.requiresSha256 })
+        assertEquals("GitHub 官方源", verifiedRoutes.last().label)
+
+        val noShaRelease = verifiedRelease.copy(expectedSha256 = null)
+        val directOnlyRoutes = AppUpdateManager.buildDownloadRoutes(noShaRelease)
+        assertEquals(1, directOnlyRoutes.size)
+        assertEquals(verifiedRelease.apkDownloadUrl, directOnlyRoutes.first().url)
+        assertFalse(directOnlyRoutes.first().requiresSha256)
+    }
+
+    @Test
+    fun networkChannelProbeRecommendsSmartFallback() {
+        assertEquals(CampusNetworkState.ON_CAMPUS_DIRECT_READY, NetworkChannelProbe.classifyState(true, true))
+        assertEquals(CampusNetworkState.OFF_CAMPUS_ONLY, NetworkChannelProbe.classifyState(false, true))
+        assertEquals(CampusNetworkState.OFFLINE_OR_BLOCKED, NetworkChannelProbe.classifyState(false, false))
+
+        assertTrue(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = false, state = CampusNetworkState.OFF_CAMPUS_ONLY))
+        assertFalse(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = true, state = CampusNetworkState.OFF_CAMPUS_ONLY))
+        assertFalse(NetworkChannelProbe.shouldAutoFallbackToOffCampus(currentlyOffCampus = false, state = CampusNetworkState.ON_CAMPUS_DIRECT_READY))
     }
 }

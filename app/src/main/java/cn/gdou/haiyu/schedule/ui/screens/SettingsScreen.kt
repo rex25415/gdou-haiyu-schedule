@@ -93,6 +93,7 @@ fun SettingsScreen(
     onCheckForUpdates: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
     onOpenGitHubRepo: () -> Unit,
+    onCopyDownloadPageLink: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onToggleReminder: (Boolean) -> Unit,
     onTestNotification: () -> Unit,
@@ -524,21 +525,33 @@ fun SettingsScreen(
                         Text("GitHub 开源", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(
+                    onClick = onCopyDownloadPageLink,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("复制中文下载主页（发同学免翻 GitHub）", fontSize = 12.5.sp)
+                }
                 Spacer(modifier = Modifier.height(6.dp))
                 SettingSwitchRow(
                     title = "启动时自动检查更新",
-                    subtitle = "每隔 12 小时静默检查 GitHub Releases，发现新版第一时间提醒",
+                    subtitle = "每隔 12 小时静默检查 GitHub Releases，支持国内多线加速与 SHA-256 校验",
                     checked = settings.autoCheckUpdates,
                     onCheckedChange = { v -> onUpdateSettings { it.copy(autoCheckUpdates = v) } }
                 )
             }
         }
 
-        // 7. Account Privacy & Public Release Statement
+        // 7. Account Privacy, Compliance & Non-Official Open-Source Disclaimer
         item {
-            SettingsCard(title = "账号隐私与安全声明", icon = Icons.Rounded.Security) {
+            SettingsCard(title = "隐私安全、合规与非官方声明", icon = Icons.Rounded.Security) {
                 Text(
-                    text = "本应用为纯本地独立工具，无广告、无后台统计、无任何第三方中转服务器。你在「教务」页登录后的 Cookie 仅保存在本机浏览器中（因此下次打开会自动保持登录状态），已关闭系统云备份，换号登录或分享设备前可随时点击下方按钮彻底登出。",
+                    text = "1. 非官方声明：海屿课表为个人学习与开源交流开发的独立开源项目，与广东海洋大学官方无隶属关系。\n" +
+                        "2. 零后端零中转：无任何自建服务器、无广告统计 SDK、不收集/不上传学号密码，教务登录仅在系统原生 WebView 中通过严格 HTTPS 直连 *.gdou.edu.cn，且不包含任何后台自动轮询、抢课或写入教务操作。\n" +
+                        "3. 本地隔离：所有数据仅存于本机私有目录，已禁用系统云备份与换机导出；换号或借出设备前可随时点击下方按钮彻底清除登录态。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

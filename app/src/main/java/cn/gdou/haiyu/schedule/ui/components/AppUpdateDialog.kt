@@ -191,10 +191,11 @@ fun AppUpdateDialog(
                         } else {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
+                        val routePrefix = p?.routeLabel?.takeIf { it.isNotBlank() }?.let { "[$it] " } ?: ""
                         val detail = if (p != null && p.totalBytes > 0L) {
-                            "正在下载安装包：${AppUpdateManager.formatBytes(p.downloadedBytes)} / ${AppUpdateManager.formatBytes(p.totalBytes)}（$pct%）"
+                            "${routePrefix}正在下载：${AppUpdateManager.formatBytes(p.downloadedBytes)} / ${AppUpdateManager.formatBytes(p.totalBytes)}（$pct%）"
                         } else {
-                            "正在连接 GitHub Releases 下载安装包..."
+                            "${routePrefix}正在连接下载线路..."
                         }
                         Text(
                             text = detail,
@@ -249,8 +250,8 @@ fun AppUpdateDialog(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            if (!AppUpdateManager.openUrlInBrowser(context, release.htmlUrl)) {
-                                onShowMessage("未检测到可用浏览器，请前往 GitHub Releases 页面下载")
+                            if (!AppUpdateManager.openUrlInBrowser(context, AppUpdateManager.DOWNLOAD_PAGE_URL)) {
+                                onShowMessage("未检测到可用浏览器，下载主页：${AppUpdateManager.DOWNLOAD_PAGE_URL}")
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -258,7 +259,7 @@ fun AppUpdateDialog(
                     ) {
                         Icon(Icons.Rounded.OpenInBrowser, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("浏览器下载", fontSize = 12.sp)
+                        Text("下载主页", fontSize = 12.sp)
                     }
                     if (!isDownloading && downloadedFile == null) {
                         FilledTonalButton(

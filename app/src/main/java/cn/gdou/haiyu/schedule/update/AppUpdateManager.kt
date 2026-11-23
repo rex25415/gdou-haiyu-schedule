@@ -45,11 +45,18 @@ sealed interface UpdateCheckResult {
 
 data class ApkDownloadProgress(
     val downloadedBytes: Long,
-    val totalBytes: Long
+    val totalBytes: Long,
+    val routeLabel: String = ""
 ) {
     val fraction: Float
         get() = if (totalBytes > 0L) (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else -1f
 }
+
+data class ApkDownloadRoute(
+    val label: String,
+    val url: String,
+    val requiresSha256: Boolean
+)
 
 sealed interface ApkDownloadResult {
     data class Success(val file: File, val sha256Verified: Boolean) : ApkDownloadResult
@@ -67,10 +74,36 @@ object AppUpdateManager {
     const val REPO_OWNER = "rex25415"
     const val REPO_NAME = "gdou-haiyu-schedule"
     const val REPO_WEB_URL = "https://github.com/$REPO_OWNER/$REPO_NAME"
+    const val DOWNLOAD_PAGE_URL = "https://$REPO_OWNER.github.io/$REPO_NAME/"
     const val LATEST_RELEASE_WEB_URL = "$REPO_WEB_URL/releases/latest"
     private const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
 
+    // 经实测可用的 HTTPS 国内加速前缀（仅在具备 SHA-256 官方摘要时启用，校验不通过立即丢弃并回落官方源）
+    private val VERIFIED_MIRROR_PREFIXES = listOf(
+        "国内加速线路 1" to "https://gh-proxy.com/",
+        "国内加速线路 2" to "https://ghfast.top/"
+    )
+
     const val AUTO_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L // 12 hours
+
+    /**
+     * 生成安全的多线路下载候选列表（纯函数，便于单元测试）：
+     * - 当存在官方 SHA-256 摘要时，优先走国内加速线路并严格校验 SHA-256，失败自动回落 GitHub 官方源；
+     * - 当不存在 SHA-256 摘要时，为确保零篡改风险，仅直连 GitHub 官方源，不经任何镜像。
+     */
+    fun buildDownloadRoutes(release: AppReleaseInfo): List<ApkDownloadRoute> {
+        val officialUrl = release.apkDownloadUrl.trim()
+        if (officialUrl.isEmpty()) return emptyList()
+        val hasSha = !release.expectedSha256.isNullOrBlank()
+        val routes = mutableListOf<ApkDownloadRoute>()
+        if (hasSha && officialUrl.startsWith("https://github.com/", ignoreCase = true)) {
+            VERIFIED_MIRROR_PREFIXES.forEach { (label, prefix) ->
+                routes.add(ApkDownloadRoute(label = label, url = "$prefix$officialUrl", requiresSha256 = true))
+            }
+        }
+        routes.add(ApkDownloadRoute(label = "GitHub 官方源", url = officialUrl, requiresSha256 = hasSha))
+        return routes
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
     private val sha256Regex = Regex("(?i)\\b([a-f0-9]{64})\\b")
@@ -306,70 +339,91 @@ object AppUpdateManager {
             }
         }
 
-        try {
-            val conn = openFollowingRedirects(release.apkDownloadUrl)
-            try {
-                val code = conn.responseCode
-                if (code != HttpURLConnection.HTTP_OK) {
-                    return@withContext ApkDownloadResult.Error("下载失败（HTTP $code），建议改用系统浏览器下载")
-                }
-                val contentLength = conn.contentLengthLong.takeIf { it > 0L } ?: release.apkSizeBytes
-                var downloaded = 0L
-                val digest = MessageDigest.getInstance("SHA-256")
-                val buffer = ByteArray(16 * 1024)
-                var lastEmit = 0L
-
-                conn.inputStream.use { input ->
-                    FileOutputStream(partFile).use { output ->
-                        while (true) {
-                            if (!isActive) {
-                                partFile.delete()
-                                throw CancellationException("下载已取消")
-                            }
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            digest.update(buffer, 0, read)
-                            downloaded += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastEmit >= 120L || downloaded == contentLength) {
-                                lastEmit = now
-                                onProgress(ApkDownloadProgress(downloaded, contentLength))
-                            }
-                        }
-                        output.flush()
-                    }
-                }
-
-                if (downloaded < 100_000L) {
-                    partFile.delete()
-                    return@withContext ApkDownloadResult.Error("下载的文件异常不完整，请重试或改用浏览器下载")
-                }
-
-                val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
-                val expected = release.expectedSha256
-                if (expected != null && !actualSha256.equals(expected, ignoreCase = true)) {
-                    partFile.delete()
-                    return@withContext ApkDownloadResult.Error("安装包安全校验（SHA-256）未通过，已自动丢弃，请重新下载")
-                }
-
-                if (targetFile.exists()) targetFile.delete()
-                if (!partFile.renameTo(targetFile)) {
-                    partFile.copyTo(targetFile, overwrite = true)
-                    partFile.delete()
-                }
-                onProgress(ApkDownloadProgress(downloaded, maxOf(downloaded, contentLength)))
-                ApkDownloadResult.Success(targetFile, sha256Verified = expected != null)
-            } finally {
-                conn.disconnect()
-            }
-        } catch (e: CancellationException) {
-            partFile.delete()
-            throw e
-        } catch (e: Exception) {
-            partFile.delete()
-            ApkDownloadResult.Error("下载中断（${e.localizedMessage ?: "网络连接不稳定"}），可点击重试或改用浏览器下载")
+        val routes = buildDownloadRoutes(release)
+        if (routes.isEmpty()) {
+            return@withContext ApkDownloadResult.Error("未找到可用的安装包下载地址，请打开下载主页获取")
         }
+
+        var lastError = "网络连接不稳定"
+        for (route in routes) {
+            if (!isActive) throw CancellationException("下载已取消")
+            partFile.delete()
+            onProgress(ApkDownloadProgress(0L, release.apkSizeBytes, route.label))
+            try {
+                val conn = openFollowingRedirects(route.url)
+                try {
+                    val code = conn.responseCode
+                    if (code != HttpURLConnection.HTTP_OK) {
+                        lastError = "${route.label} 返回 HTTP $code"
+                        continue
+                    }
+                    val contentType = conn.contentType.orEmpty().lowercase(Locale.US)
+                    if (contentType.contains("text/html")) {
+                        lastError = "${route.label} 返回异常网页内容"
+                        continue
+                    }
+                    val contentLength = conn.contentLengthLong.takeIf { it > 0L } ?: release.apkSizeBytes
+                    var downloaded = 0L
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    val buffer = ByteArray(16 * 1024)
+                    var lastEmit = 0L
+
+                    conn.inputStream.use { input ->
+                        FileOutputStream(partFile).use { output ->
+                            while (true) {
+                                if (!isActive) {
+                                    partFile.delete()
+                                    throw CancellationException("下载已取消")
+                                }
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                output.write(buffer, 0, read)
+                                digest.update(buffer, 0, read)
+                                downloaded += read
+                                val now = System.currentTimeMillis()
+                                if (now - lastEmit >= 120L || downloaded == contentLength) {
+                                    lastEmit = now
+                                    onProgress(ApkDownloadProgress(downloaded, contentLength, route.label))
+                                }
+                            }
+                            output.flush()
+                        }
+                    }
+
+                    if (downloaded < 100_000L) {
+                        partFile.delete()
+                        lastError = "${route.label} 文件大小异常"
+                        continue
+                    }
+
+                    val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                    val expected = release.expectedSha256
+                    if (route.requiresSha256 && (expected == null || !actualSha256.equals(expected, ignoreCase = true))) {
+                        partFile.delete()
+                        lastError = "${route.label} SHA-256 校验未通过，已自动切换下一线路"
+                        continue
+                    }
+
+                    if (targetFile.exists()) targetFile.delete()
+                    if (!partFile.renameTo(targetFile)) {
+                        partFile.copyTo(targetFile, overwrite = true)
+                        partFile.delete()
+                    }
+                    onProgress(ApkDownloadProgress(downloaded, maxOf(downloaded, contentLength), route.label))
+                    return@withContext ApkDownloadResult.Success(targetFile, sha256Verified = expected != null)
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: CancellationException) {
+                partFile.delete()
+                throw e
+            } catch (e: Exception) {
+                partFile.delete()
+                lastError = "${route.label} 失败（${e.localizedMessage ?: "连接超时"}）"
+            }
+        }
+
+        ApkDownloadResult.Error("全部下载线路均未成功（$lastError），建议点击下方「下载主页」在浏览器中下载")
     }
 
     private fun openFollowingRedirects(initialUrl: String, maxHops: Int = 6): HttpURLConnection {

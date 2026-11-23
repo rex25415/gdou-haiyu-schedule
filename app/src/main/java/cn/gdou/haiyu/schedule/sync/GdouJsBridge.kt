@@ -6,6 +6,8 @@ import cn.gdou.haiyu.schedule.model.ExamItem
 import cn.gdou.haiyu.schedule.model.GradeItem
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.net.URI
+import java.util.Locale
 
 @Serializable
 data class TermOption(
@@ -100,17 +102,25 @@ interface GdouSyncCallback {
 }
 
 class GdouJsBridge(
-    private val callback: GdouSyncCallback
+    private val callback: GdouSyncCallback,
+    private val currentUrlProvider: () -> String? = { null }
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    private fun isAllowedOrigin(): Boolean {
+        val url = currentUrlProvider()
+        return isTrustedGdouOrigin(url)
+    }
+
     @JavascriptInterface
     fun onSyncProgress(message: String) {
+        if (!isAllowedOrigin()) return
         callback.onProgress(message)
     }
 
     @JavascriptInterface
     fun onTermOptionsLoaded(payloadJson: String) {
+        if (!isAllowedOrigin()) return
         try {
             val payload = json.decodeFromString(TermOptionsPayload.serializer(), payloadJson)
             callback.onTermOptionsLoaded(payload)
@@ -121,6 +131,7 @@ class GdouJsBridge(
 
     @JavascriptInterface
     fun onCoursesSynced(payloadJson: String) {
+        if (!isAllowedOrigin()) return
         try {
             val payload = json.decodeFromString(SyncedCoursesPayload.serializer(), payloadJson)
             val mapped = payload.courses.map { dto ->
@@ -152,6 +163,7 @@ class GdouJsBridge(
 
     @JavascriptInterface
     fun onGradesSynced(payloadJson: String) {
+        if (!isAllowedOrigin()) return
         try {
             val payload = json.decodeFromString(SyncedGradesPayload.serializer(), payloadJson)
             val mapped = payload.grades.map { dto ->
@@ -176,6 +188,7 @@ class GdouJsBridge(
 
     @JavascriptInterface
     fun onExamsSynced(payloadJson: String) {
+        if (!isAllowedOrigin()) return
         try {
             val payload = json.decodeFromString(SyncedExamsPayload.serializer(), payloadJson)
             val mapped = payload.exams.map { dto ->
@@ -199,16 +212,49 @@ class GdouJsBridge(
 
     @JavascriptInterface
     fun onSyncComplete(summary: String) {
+        if (!isAllowedOrigin()) return
         callback.onComplete(summary)
     }
 
     @JavascriptInterface
     fun onSyncError(errorMessage: String) {
+        if (!isAllowedOrigin()) return
         callback.onError(errorMessage)
     }
 
     @JavascriptInterface
     fun onQuickRefreshNeedsLogin(reason: String) {
+        if (!isAllowedOrigin()) return
         callback.onQuickRefreshNeedsLogin(reason)
+    }
+
+    companion object {
+        /**
+         * 严格域名白名单校验：仅允许通过 HTTPS 访问的 gdou.edu.cn 官方域名调用原生桥接，
+         * 杜绝伪造域名（如 gdou.edu.cn.evil.com）或非 HTTPS 页面触发任何回调。
+         */
+        fun isTrustedGdouOrigin(url: String?): Boolean {
+            if (url.isNullOrBlank()) return false
+            return try {
+                val uri = URI(url.trim())
+                val scheme = uri.scheme?.lowercase(Locale.US) ?: return false
+                val host = uri.host?.lowercase(Locale.US)?.trimEnd('.') ?: return false
+                scheme == "https" && (host == "gdou.edu.cn" || host.endsWith(".gdou.edu.cn"))
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        /**
+         * 广海校内直连（jw.gdou.edu.cn/sso/jziotlogin）会 302 跳转到 http://authserver.gdou.edu.cn/...，
+         * 自动将其无感升级为 https://，既保证校内直连畅通，又杜绝校园网明文传密码风险！
+         */
+        fun upgradeGdouHttpToHttps(url: String?): String? {
+            if (url.isNullOrBlank()) return null
+            val trimmed = url.trim()
+            if (!trimmed.startsWith("http://", ignoreCase = true)) return null
+            val upgraded = "https://" + trimmed.substring(7)
+            return if (isTrustedGdouOrigin(upgraded)) upgraded else null
+        }
     }
 }

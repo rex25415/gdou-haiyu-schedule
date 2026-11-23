@@ -420,6 +420,10 @@ fun HaiyuApp(
                                         showToast("未检测到可用浏览器，仓库地址：${AppUpdateManager.REPO_WEB_URL}")
                                     }
                                 },
+                                onCopyDownloadPageLink = {
+                                    clipboard.setText(AnnotatedString(AppUpdateManager.DOWNLOAD_PAGE_URL))
+                                    showToast("已复制中文多线下载主页链接，直接发给广海同学免翻 GitHub 下载！")
+                                },
                                 onUpdateSettings = { transform ->
                                     repo.updateSettings(transform)
                                     syncWidgetsAndReminders()

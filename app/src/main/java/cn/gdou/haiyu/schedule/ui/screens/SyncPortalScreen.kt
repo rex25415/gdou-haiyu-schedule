@@ -7,6 +7,7 @@ import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JsResult
 import android.webkit.SslErrorHandler
@@ -82,6 +83,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,10 +94,14 @@ import cn.gdou.haiyu.schedule.model.AppSettings
 import cn.gdou.haiyu.schedule.model.CourseItem
 import cn.gdou.haiyu.schedule.model.ExamItem
 import cn.gdou.haiyu.schedule.model.GradeItem
+import cn.gdou.haiyu.schedule.sync.CampusNetworkState
 import cn.gdou.haiyu.schedule.sync.GdouJsBridge
 import cn.gdou.haiyu.schedule.sync.GdouSyncCallback
 import cn.gdou.haiyu.schedule.sync.GdouSyncScript
+import cn.gdou.haiyu.schedule.sync.NetworkChannelProbe
+import cn.gdou.haiyu.schedule.sync.NetworkProbeResult
 import cn.gdou.haiyu.schedule.sync.TermOptionsPayload
+import java.util.concurrent.atomic.AtomicReference
 
 @OptIn(ExperimentalLayoutApi::class)
 @SuppressLint("SetJavaScriptEnabled")
@@ -133,8 +139,22 @@ fun SyncPortalScreen(
     var hasAutoEnteredWfw by remember { mutableStateOf(false) }
     var hasAutoSwitchedForMfa by remember { mutableStateOf(false) }
     var hasAutoRecoveredRedirectLoop by remember { mutableStateOf(false) }
+    var hasAutoFallbackOffCampus by remember { mutableStateOf(false) }
     var pendingWfwEnterRunnable by remember { mutableStateOf<Runnable?>(null) }
     var pendingMfaAdaptRunnable by remember { mutableStateOf<Runnable?>(null) }
+
+    // Thread-safe URL mirror for GdouJsBridge strict HTTPS origin guard (Binder thread safe!)
+    val trustedUrlRef = remember {
+        AtomicReference(
+            if (settings.preferOffCampusChannel) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
+        )
+    }
+
+    // Real-time campus vs off-campus network probe state
+    var networkProbe by remember {
+        mutableStateOf(NetworkProbeResult(state = CampusNetworkState.PROBING, isOnWifi = false))
+    }
+    var probeTrigger by remember { mutableIntStateOf(0) }
 
     var isSyncing by remember { mutableStateOf(false) }
     var isSilentQuickRefresh by remember { mutableStateOf(false) }
@@ -325,12 +345,29 @@ fun SyncPortalScreen(
         useOffCampus = offCampus
         hasAutoEnteredWfw = false
         hasAutoSwitchedForMfa = false
+        hasAutoRecoveredRedirectLoop = false
         pageErrorMsg = null
         onUpdateChannelPrefs(offCampus, desktopMode)
         val url = if (offCampus) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
         currentUrl = url
+        trustedUrlRef.set(url)
         webViewRef?.stopLoading()
         webViewRef?.loadUrl(url)
+    }
+
+    // Smart On-Campus / Off-Campus probe when Sync tab is visible (lightweight single HEAD)
+    LaunchedEffect(isVisible, probeTrigger) {
+        if (!isVisible) return@LaunchedEffect
+        val result = NetworkChannelProbe.probe(context)
+        networkProbe = result
+        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(useOffCampus, result.state) &&
+            !hasAutoFallbackOffCampus &&
+            !isLoggedIntoJw
+        ) {
+            hasAutoFallbackOffCampus = true
+            switchChannel(true)
+            onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
+        }
     }
 
     fun toggleDesktopUa() {
@@ -459,6 +496,8 @@ fun SyncPortalScreen(
                                         if (path == "__WFW_JW__") {
                                             val entry = if (useOffCampus) GdouSyncScript.URL_WFW_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
                                             webViewRef?.loadUrl(entry)
+                                        } else if (!isLoggedIntoJw) {
+                                            onShowMessage("请先完成广海教务登录，再打开「$label」")
                                         } else {
                                             webViewRef?.evaluateJavascript(
                                                 GdouSyncScript.buildQuickNavigateScript(path),
@@ -480,11 +519,20 @@ fun SyncPortalScreen(
                                     } catch (_: Exception) { "无" }
                                     diagnosticDialogText = buildString {
                                         appendLine("当前通道：${if (useOffCampus) "校外通用(免校园网)" else "校园网直连"}")
+                                        appendLine(
+                                            "网络探测：" + when (networkProbe.state) {
+                                                CampusNetworkState.PROBING -> "探测中"
+                                                CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（${networkProbe.jwLatencyMs ?: "-"}ms）"
+                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外网络（wfw ${networkProbe.wfwLatencyMs ?: "-"}ms）"
+                                                CampusNetworkState.OFFLINE_OR_BLOCKED -> "网络未连通或校园网未认证"
+                                            }
+                                        )
                                         appendLine("页面排版：${if (desktopMode) "电脑版" else "手机版"}")
                                         appendLine("页面标题：$pageTitle")
                                         appendLine("实际URL：$wvUrl")
                                         appendLine("加载进度：$loadProgress%")
                                         appendLine("识别已登录：$isLoggedIntoJw")
+                                        appendLine("桥接域名白名单校验：${GdouJsBridge.isTrustedGdouOrigin(wvUrl)}")
                                         appendLine("Cookie键名(已脱敏)：${cookies.ifBlank { "空" }}")
                                         if (pageErrorMsg != null) appendLine("最近报错：$pageErrorMsg")
                                     }
@@ -564,6 +612,66 @@ fun SyncPortalScreen(
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         )
                     }
+                    when (networkProbe.state) {
+                        CampusNetworkState.ON_CAMPUS_DIRECT_READY -> {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    if (useOffCampus) {
+                                        switchChannel(false)
+                                        onShowMessage("已切至「校园网直连」，加载更快更稳")
+                                    } else {
+                                        probeTrigger++
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    text = if (useOffCampus) "校内可直连·点击提速" else "校园网直连中",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                        CampusNetworkState.OFF_CAMPUS_ONLY -> {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "校外网络",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                        CampusNetworkState.OFFLINE_OR_BLOCKED -> {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { probeTrigger++ }
+                            ) {
+                                Text(
+                                    text = "网络受限·点此重测",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                        CampusNetworkState.PROBING -> Unit
+                    }
                 }
             }
         }
@@ -610,11 +718,12 @@ fun SyncPortalScreen(
             }
         }
 
-        // Spacious WebView Area
+        // Spacious WebView Area (clipToBounds prevents hardware WebView layer from overdrawing Top Bar)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clipToBounds()
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -623,6 +732,10 @@ fun SyncPortalScreen(
                 },
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
                         val cm = CookieManager.getInstance()
                         cm.setAcceptCookie(true)
                         cm.setAcceptThirdPartyCookies(this, true)
@@ -630,13 +743,15 @@ fun SyncPortalScreen(
                         this.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            allowFileAccess = false
+                            allowContentAccess = false
                             builtInZoomControls = true
                             displayZoomControls = false
                             setSupportZoom(true)
                             setSupportMultipleWindows(false)
                             useWideViewPort = desktopMode
                             loadWithOverviewMode = desktopMode
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             userAgentString = if (desktopMode) {
                                 GdouSyncScript.DESKTOP_USER_AGENT
                             } else {
@@ -644,7 +759,13 @@ fun SyncPortalScreen(
                             }
                         }
 
-                        addJavascriptInterface(GdouJsBridge(syncCallback), "HaiyuBridge")
+                        addJavascriptInterface(
+                            GdouJsBridge(
+                                callback = syncCallback,
+                                currentUrlProvider = { trustedUrlRef.get() }
+                            ),
+                            "HaiyuBridge"
+                        )
 
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -688,7 +809,15 @@ fun SyncPortalScreen(
                                 request: WebResourceRequest?
                             ): Boolean {
                                 val u = request?.url?.toString() ?: return false
-                                return !(u.startsWith("http://") || u.startsWith("https://"))
+                                if (u.startsWith("https://", ignoreCase = true)) return false
+                                // Transparently upgrade GDOU internal http:// redirects (e.g. jziotlogin -> http://authserver) to HTTPS!
+                                val upgraded = GdouJsBridge.upgradeGdouHttpToHttps(u)
+                                if (upgraded != null) {
+                                    view?.loadUrl(upgraded)
+                                    return true
+                                }
+                                // Strict HTTPS-only navigation; block non-GDOU cleartext http://, file://, javascript:, intent://
+                                return true
                             }
 
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -697,12 +826,16 @@ fun SyncPortalScreen(
                                 cancelPendingTransitions()
                                 if (!url.isNullOrBlank()) {
                                     currentUrl = url
+                                    trustedUrlRef.set(url)
                                     pageErrorMsg = null
                                 }
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
-                                if (!url.isNullOrBlank()) currentUrl = url
+                                if (!url.isNullOrBlank()) {
+                                    currentUrl = url
+                                    trustedUrlRef.set(url)
+                                }
                                 CookieManager.getInstance().flush()
                                 val wv = view ?: return
                                 val finishedUrl = url.orEmpty()
@@ -791,6 +924,14 @@ fun SyncPortalScreen(
                                 if (request?.isForMainFrame == true) {
                                     val desc = error?.description?.toString().orEmpty()
                                     val reqUrl = request.url?.toString().orEmpty()
+                                    val upgradedHttp = GdouJsBridge.upgradeGdouHttpToHttps(reqUrl)
+                                    if (upgradedHttp != null && desc.contains("CLEARTEXT", ignoreCase = true)) {
+                                        mainHandler.post {
+                                            pageErrorMsg = null
+                                            view?.loadUrl(upgradedHttp)
+                                        }
+                                        return
+                                    }
                                     val isRedirectLoop = desc.contains("ERR_TOO_MANY_REDIRECTS", ignoreCase = true) ||
                                         reqUrl.contains("auth_error", ignoreCase = true)
                                     if (isRedirectLoop && !hasAutoRecoveredRedirectLoop) {
@@ -809,21 +950,34 @@ fun SyncPortalScreen(
                                         }
                                         return
                                     }
+                                    val isUnreachableOnCampus = !useOffCampus && !hasAutoFallbackOffCampus && (
+                                        desc.contains("ERR_NAME_NOT_RESOLVED", ignoreCase = true) ||
+                                            desc.contains("ERR_CONNECTION_TIMED_OUT", ignoreCase = true) ||
+                                            desc.contains("ERR_TIMED_OUT", ignoreCase = true) ||
+                                            desc.contains("ERR_ADDRESS_UNREACHABLE", ignoreCase = true) ||
+                                            desc.contains("ERR_CONNECTION_REFUSED", ignoreCase = true)
+                                        )
+                                    if (isUnreachableOnCampus) {
+                                        hasAutoFallbackOffCampus = true
+                                        mainHandler.post {
+                                            switchChannel(true)
+                                            onShowMessage("校园网直连暂不可达，已自动切至「校外通用(免校园网)」")
+                                        }
+                                        return
+                                    }
                                     pageErrorMsg = "页面加载失败（${desc.ifBlank { "网络超时或无法连接" }}）"
                                 }
                             }
 
-                            @SuppressLint("WebViewClientOnReceivedSslError")
                             override fun onReceivedSslError(
                                 view: WebView?,
                                 handler: SslErrorHandler?,
                                 error: SslError?
                             ) {
-                                val urlStr = error?.url.orEmpty().lowercase()
-                                if (urlStr.contains("gdou.edu.cn")) {
-                                    handler?.proceed()
-                                } else {
-                                    handler?.cancel()
+                                // Strict TLS security: NEVER silently bypass SSL errors (prevents MITM attacks)
+                                handler?.cancel()
+                                mainHandler.post {
+                                    pageErrorMsg = "检测到 HTTPS 安全证书异常，为保护账号安全已自动拦截本次连接（请检查网络代理或先完成校园网认证）。"
                                 }
                             }
                         }
@@ -1022,10 +1176,14 @@ fun SyncPortalScreen(
                             leadingIcon = { Icon(Icons.Rounded.MeetingRoom, contentDescription = null) },
                             onClick = {
                                 showSingleSyncMenu = false
-                                webViewRef?.evaluateJavascript(
-                                    GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default"),
-                                    null
-                                )
+                                if (!isLoggedIntoJw) {
+                                    onShowMessage("请先完成广海教务登录，再查询空教室")
+                                } else {
+                                    webViewRef?.evaluateJavascript(
+                                        GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default"),
+                                        null
+                                    )
+                                }
                             }
                         )
                     }

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>海屿课表 · 广东海洋大学全校区纯净开源课表 App 下载</title>
+  <meta name="description" content="广东海洋大学全校区（湖光/海滨/阳江）纯净开源安卓课表 App：免校园网直连正方教务、自动错峰作息、零广告零后端、完全开源可审计。" />
+  <style>
+    :root {
+      --primary: #0c7d72;
+      --primary-dark: #075b52;
+      --accent: #286684;
+      --bg: #f3faf8;
+      --card: #ffffff;
+      --text: #112a27;
+      --muted: #526e6a;
+      --border: #d7eae6;
+      --warn-bg: #fff3e6;
+      --warn-fg: #8c3d00;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background: linear-gradient(180deg, #e5f6f2 0%, var(--bg) 320px, #f7fbfa 100%);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 820px; margin: 0 auto; padding: 20px 16px 56px; }
+    .wx-banner {
+      display: none;
+      position: sticky;
+      top: 0;
+      z-index: 99;
+      background: #0f3a36;
+      color: #fff;
+      padding: 14px 16px;
+      font-size: 14px;
+      border-bottom: 2px solid #35c5b4;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+    }
+    .wx-banner .wx-row {
+      max-width: 820px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .wx-banner strong { color: #7ff5e6; }
+    .wx-arrow { font-size: 22px; flex-shrink: 0; }
+    .hero {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      color: #fff;
+      border-radius: 24px;
+      padding: 28px 22px;
+      box-shadow: 0 14px 36px rgba(12, 125, 114, 0.22);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .app-icon {
+      width: 60px; height: 60px; border-radius: 16px;
+      background: #fff; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.16); flex-shrink: 0;
+    }
+    .hero h1 { font-size: 26px; font-weight: 800; letter-spacing: 0.5px; }
+    .hero .sub { font-size: 13.5px; opacity: 0.92; margin-top: 2px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 20px; }
+    .badge {
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 999px;
+      padding: 4px 11px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .dl-primary {
+      display: block;
+      width: 100%;
+      text-align: center;
+      background: #fff;
+      color: var(--primary-dark);
+      font-size: 17px;
+      font-weight: 800;
+      text-decoration: none;
+      padding: 15px 20px;
+      border-radius: 14px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.14);
+      transition: transform 0.12s ease;
+    }
+    .dl-primary:active { transform: scale(0.985); }
+    .dl-meta { text-align: center; font-size: 12px; opacity: 0.9; margin-top: 9px; }
+    .alt-links {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .alt-btn {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      color: #fff;
+      background: rgba(255,255,255,0.14);
+      border: 1px solid rgba(255,255,255,0.28);
+      padding: 9px 10px;
+      border-radius: 11px;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      margin-top: 16px;
+      box-shadow: 0 4px 14px rgba(12, 125, 114, 0.05);
+    }
+    .card h2 {
+      font-size: 17px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      color: var(--primary-dark);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+    }
+    .feat {
+      background: #f5fbf9;
+      border: 1px solid #e0f0ec;
+      border-radius: 14px;
+      padding: 13px;
+    }
+    .feat h3 { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+    .feat p { font-size: 12.5px; color: var(--muted); }
+    .shots {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .shots img {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      display: block;
+    }
+    .shots figcaption {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .hash-box {
+      background: #f1f6f5;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11.5px;
+      word-break: break-all;
+      color: #21403c;
+      margin-top: 6px;
+    }
+    .copy-btn {
+      margin-top: 8px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      padding: 7px 13px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .faq-item { padding: 9px 0; border-bottom: 1px dashed var(--border); }
+    .faq-item:last-child { border-bottom: none; }
+    .faq-q { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+    .faq-a { font-size: 13px; color: var(--muted); }
+    .disclaimer {
+      background: var(--warn-bg);
+      color: var(--warn-fg);
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 12.5px;
+      margin-top: 16px;
+      border: 1px solid #f8d9b8;
+    }
+    footer {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    footer a { color: var(--primary); text-decoration: none; font-weight: 600; }
+    @media (max-width: 560px) {
+      .shots { grid-template-columns: 1fr; max-width: 280px; margin: 0 auto; }
+      .hero h1 { font-size: 23px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 自动识别微信 / QQ 内置浏览器，解决 90% 校园群点不开下载的痛点 -->
+  <div id="wxBanner" class="wx-banner">
+    <div class="wx-row">
+      <div>微信 / QQ 内置浏览器会拦截安装包下载，请点击右上角 <strong>「⋯」→「在浏览器打开」</strong> 即可 1 秒下载安装！</div>
+      <div class="wx-arrow">↗</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <section class="hero">
+      <div class="hero-top">
+        <div class="app-icon" aria-hidden="true">
+          <svg viewBox="0 0 108 108" width="48" height="48">
+            <rect x="18" y="18" width="72" height="72" rx="14" fill="#d4f5ec"/>
+            <rect x="18" y="34" width="72" height="56" rx="12" fill="#ffffff"/>
+            <rect x="28" y="44" width="24" height="16" rx="4" fill="#0e8a7d"/>
+            <rect x="58" y="44" width="20" height="10" rx="4" fill="#38bfa1"/>
+            <path d="M26,74 C36,66 46,66 56,72 C66,78 74,78 82,71 L82,79 C74,85 66,85 56,79 C46,73 36,73 26,81 Z" fill="#0f9d8c"/>
+          </svg>
+        </div>
+        <div>
+          <h1>海屿课表</h1>
+          <div class="sub">广东海洋大学全校区（湖光 · 海滨 · 阳江）纯净开源课表 App</div>
+        </div>
+      </div>
+
+      <div class="badges">
+        <span class="badge" id="verBadge">v2.6.0 正式版</span>
+        <span class="badge" id="sizeBadge">仅约 1.6 MB</span>
+        <span class="badge">免校园网同步教务</span>
+        <span class="badge">Android 8–17 / 鸿蒙 4.x</span>
+        <span class="badge">零广告 · 零后端 · 完全开源</span>
+      </div>
+
+      <a id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.6.0/HaiyuSchedule-GDOU-v2.6.0.apk">
+        立即下载安卓版（国内加速线路 1 · 推荐）
+      </a>
+      <div class="dl-meta" id="dlMeta">包名 cn.gdou.haiyu.schedule · 覆盖安装保留全部课表与作业记录</div>
+
+      <div class="alt-links">
+        <a id="dlMirror2" class="alt-btn" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.6.0/HaiyuSchedule-GDOU-v2.6.0.apk">国内加速线路 2</a>
+        <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.6.0/HaiyuSchedule-GDOU-v2.6.0.apk">GitHub 官方直链</a>
+        <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">查看更新日志与源码</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>✨ 为什么选海屿课表？</h2>
+      <div class="grid-3">
+        <div class="feat">
+          <h3>校园网 / 校外免 VPN 智能双通道</h3>
+          <p>自动探测校园网直连与校外通用入口，4G/5G 流量或宿舍 Wi-Fi 均可直连正方教务，一键拉取课表、校历、成绩/GPA、考场座位。</p>
+        </div>
+        <div class="feat">
+          <h3>广海三校区自动识别与精准错峰</h3>
+          <p>自动匹配湖光（广学/明德楼）、海滨（实验楼/实+房号/球场）、阳江（慎思/非慎思楼）错峰作息，支持 11-12 节晚课。</p>
+        </div>
+        <div class="feat">
+          <h3>稳定 7 天视图 + 重课 / 单周调课</h3>
+          <p>周一至周日永不消失，重课自动叠放标记并一键切换；支持「仅调第 X 周」、作业 DDL 提醒、高清锁屏长图、桌面小组件与应用内一键更新。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>📱 界面预览</h2>
+      <div class="shots">
+        <figure>
+          <img src="screenshots/light_schedule.png" alt="海屿课表日间主界面" loading="lazy" />
+          <figcaption>清爽日间 · 7 天课表</figcaption>
+        </figure>
+        <figure>
+          <img src="screenshots/dark_ocean.png" alt="海屿课表深色模式" loading="lazy" />
+          <figcaption>深海蔚蓝 · 护眼深色</figcaption>
+        </figure>
+        <figure>
+          <img src="screenshots/poster_7day.png" alt="海屿课表高清7天长图" loading="lazy" />
+          <figcaption>一键生成高清相册海报</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🔒 为什么绝对安全（零后端纯本地开源）</h2>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">
+        与需要自建服务器代登录的第三方小程序截然不同：海屿课表<strong>没有后端服务器、不收集任何学号或密码、无广告统计 SDK、不含抢课或后台爬虫</strong>。教务登录完全在手机系统 WebView 中通过严格 HTTPS 直连 <code>*.gdou.edu.cn</code>，所有数据仅保存在本机并禁止系统云备份。
+      </p>
+      <div style="font-size:12.5px;font-weight:700;margin-top:8px;">当前安装包 SHA-256 校验值：</div>
+      <div class="hash-box" id="shaBox">b61307d969b5d97fd284edb86b13a68c17daceb379263f135b5920f436d6ca39</div>
+      <button class="copy-btn" id="copyShaBtn" type="button">复制 SHA-256 校验值</button>
+      <a href="https://github.com/rex25415/gdou-haiyu-schedule/blob/main/SECURITY.md" style="margin-left:10px;font-size:12.5px;color:var(--primary);font-weight:600;text-decoration:none;">查看完整安全合规白皮书 →</a>
+    </section>
+
+    <section class="card">
+      <h2>❓ 下载与安装常见问题</h2>
+      <div class="faq-item">
+        <div class="faq-q">1. 手机提示「未知来源应用」或风险提示怎么办？</div>
+        <div class="faq-a">因为本工具为学生个人开源免费项目、未上架商业应用商店，安卓/鸿蒙系统都会弹出常规未知来源提示。确认安装包来自本页并可核对上方 SHA-256 后，点击「允许本次安装 / 继续安装」即可。华为鸿蒙 4.x 如开启了「纯净模式」，在提示框选「了解风险并继续安装」即可。</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">2. 以后出新版本怎么更新？会丢课表吗？</div>
+        <div class="faq-a">不会丢！所有版本均使用同一官方签名证书打包，覆盖安装会自动保留全部课表、作业 DDL 与设置。且从 v2.5.0 起支持在 App 内「设置 → 检查新版本」一键下载更新（自动校验 SHA-256）。</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">3. 苹果 iPhone 或鸿蒙 NEXT（5.0+）能用吗？</div>
+        <div class="faq-a">当前发布包为安卓原生 APK（兼容 Android 8.0–17 与华为鸿蒙 4.x 及以下）；iPhone / 鸿蒙 NEXT 暂无法直接安装 APK，你可以让安卓同学在 App 内使用「导出 .ics 日历」发给你一键导入苹果日历。</div>
+      </div>
+    </section>
+
+    <div class="disclaimer">
+      <strong>非官方开源声明：</strong>本项目为个人学习与开源技术交流开发的独立学生作品，与广东海洋大学官方无任何隶属或授权关系。代码基于 MIT 协议完全开源托管于 GitHub，仅用于辅助个人查看课表与规划学业。
+    </div>
+
+    <footer>
+      开源仓库：<a href="https://github.com/rex25415/gdou-haiyu-schedule">github.com/rex25415/gdou-haiyu-schedule</a> ·
+      <a href="https://github.com/rex25415/gdou-haiyu-schedule/issues">问题反馈 / 提建议</a>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var ua = navigator.userAgent || "";
+      if (/MicroMessenger|QQ\//i.test(ua)) {
+        document.getElementById("wxBanner").style.display = "block";
+      }
+
+      document.getElementById("copyShaBtn").addEventListener("click", function () {
+        var sha = document.getElementById("shaBox").textContent.trim();
+        if (!sha || sha.indexOf("__") === 0) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(sha).then(function () {
+            document.getElementById("copyShaBtn").textContent = "已复制 SHA-256 ✓";
+          });
+        }
+      });
+
+      // 自动向 GitHub Releases 查询最新正式版，保证未来发新版时下载页自动同步
+      fetch("https://api.github.com/repos/rex25415/gdou-haiyu-schedule/releases/latest", {
+        headers: { "Accept": "application/vnd.github+json" }
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !data.tag_name) return;
+          var assets = Array.isArray(data.assets) ? data.assets : [];
+          var apk = assets.find(function (a) { return a && /\.apk$/i.test(a.name || ""); });
+          if (!apk || !apk.browser_download_url) return;
+          var official = apk.browser_download_url;
+          var mb = apk.size ? (apk.size / (1024 * 1024)).toFixed(2) + " MB" : "约 1.6 MB";
+          document.getElementById("verBadge").textContent = data.tag_name + " 正式版";
+          document.getElementById("sizeBadge").textContent = "包体 " + mb;
+          document.getElementById("dlPrimary").href = "https://gh-proxy.com/" + official;
+          document.getElementById("dlMirror2").href = "https://ghfast.top/" + official;
+          document.getElementById("dlOfficial").href = official;
+          if (data.html_url) document.getElementById("dlRelease").href = data.html_url;
+          if (apk.digest && apk.digest.indexOf("sha256:") === 0) {
+            document.getElementById("shaBox").textContent = apk.digest.slice(7);
+          }
+        })
+        .catch(function () {});
+    })();
+  </script>
+</body>
+</html>
