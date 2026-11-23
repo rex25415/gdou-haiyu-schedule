@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Assignment
+import androidx.compose.material.icons.automirrored.rounded.EventNote
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.AccessTime
@@ -43,9 +44,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
@@ -112,6 +115,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.OccurrenceState
+import io.github.rex25415.haiyu.schedule.data.ResolvedExamGridBlock
 import io.github.rex25415.haiyu.schedule.data.ResolvedScheduledCourse
 import io.github.rex25415.haiyu.schedule.data.TermWeekInfo
 import io.github.rex25415.haiyu.schedule.data.TermWeekPhase
@@ -119,8 +123,11 @@ import java.util.Locale
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
+import io.github.rex25415.haiyu.schedule.model.GridRowDensity
+import io.github.rex25415.haiyu.schedule.model.ScheduleShareBundle
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
 import io.github.rex25415.haiyu.schedule.ui.components.BellScheduleReferenceDialog
+import io.github.rex25415.haiyu.schedule.ui.components.FreeSlotMatcherBottomSheet
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
 import io.github.rex25415.haiyu.schedule.ui.components.ScheduleShareCodeDialog
 import io.github.rex25415.haiyu.schedule.ui.theme.coursePaletteFor
@@ -148,12 +155,17 @@ fun ScheduleScreen(
     onDeleteCourse: (String) -> Unit,
     onRescheduleSingleWeek: (courseId: String, weekNumber: Int, newDay: Int, newStartSection: Int, newEndSection: Int, newLocation: String) -> Unit,
     onTogglePinConflictCourse: (CourseItem, List<CourseItem>) -> Unit,
+    onUpdateCourseNote: (courseId: String, note: String) -> Unit,
     onAddTask: (TodoTaskItem) -> Unit,
     onToggleTaskDone: (String) -> Unit,
     onExportWeekImage: (weekNumber: Int) -> Unit,
+    onCopyWeekScheduleText: (weekNumber: Int) -> Unit,
     onGetShareCode: () -> String?,
     onCopyShareCode: (String) -> Unit,
     onImportShareCode: (String) -> Unit,
+    onParsePartnerShareCode: (String) -> Result<ScheduleShareBundle>,
+    onSavePartnerProfile: (name: String, code: String) -> Unit,
+    onShowMessage: (String) -> Unit,
     onApplyHolidayShift: (sourceWeek: Int, sourceDay: Int, targetWeek: Int, targetDay: Int, move: Boolean) -> Unit
 ) {
     val settings = snapshot.settings
@@ -205,10 +217,19 @@ fun ScheduleScreen(
     var addPrefillSection by remember { mutableIntStateOf(1) }
     var showHolidayShiftDialog by remember { mutableStateOf(false) }
     var showCourseSearchSheet by remember { mutableStateOf(false) }
+    var showFreeSlotMatcher by remember { mutableStateOf(false) }
+    var selectedExamDetail by remember { mutableStateOf<ResolvedExamGridBlock?>(null) }
 
     val pinnedKeys = remember(settings.pinnedConflictKeys) { settings.pinnedConflictKeys.toSet() }
     val resolvedTimeMap = remember(snapshot.courses, settings.campus) {
         snapshot.courses.associate { it.id to GdouTimeRules.resolveCourseTime(it, settings.campus) }
+    }
+    val maxGridSection = remember(snapshot.courses) {
+        (snapshot.courses.maxOfOrNull { it.endSection } ?: 10).coerceIn(10, 12)
+    }
+    val selectedWeekExams = remember(snapshot.exams, settings.semesterStartDate, selectedWeek, settings.campus, settings.showExamsOnTimetable, maxGridSection) {
+        if (!settings.showExamsOnTimetable) emptyList()
+        else GdouTimeRules.resolveExamsForWeek(snapshot.exams, settings.semesterStartDate, selectedWeek, settings.campus, maxGridSection)
     }
 
     val weekConflictClusters = remember(snapshot.courses, selectedWeek, pinnedKeys) {
@@ -463,6 +484,22 @@ fun ScheduleScreen(
                                     showShareCodeDialog = true
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("空课交集对比（室友/搭子）") },
+                                leadingIcon = { Icon(Icons.Rounded.Group, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    showFreeSlotMatcher = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("复制本周课表文本") },
+                                leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
+                                onClick = {
+                                    showToolsMenu = false
+                                    onCopyWeekScheduleText(selectedWeek)
+                                }
+                            )
                         }
                     }
                 }
@@ -494,8 +531,8 @@ fun ScheduleScreen(
                 }
             )
 
-            // Unified Smart Status Pill Row (compact side-by-side DDL + Conflict chips, zero vertical bloat!)
-            if (urgentTasks.isNotEmpty() || weekConflictClusters.isNotEmpty()) {
+            // Unified Smart Status Pill Row (compact side-by-side Exam + Conflict + DDL chips, zero vertical bloat!)
+            if (selectedWeekExams.isNotEmpty() || urgentTasks.isNotEmpty() || weekConflictClusters.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -504,6 +541,37 @@ fun ScheduleScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (selectedWeekExams.isNotEmpty()) {
+                        Surface(
+                            color = if (isDark) Color(0xFF472C10) else Color(0xFFFFF0DB),
+                            shape = RoundedCornerShape(999.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { selectedExamDetail = selectedWeekExams.first() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.EventNote,
+                                    contentDescription = null,
+                                    tint = if (isDark) Color(0xFFFFCA80) else Color(0xFFB45309),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "本周 ${selectedWeekExams.size} 场考试",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color(0xFFFFE1B3) else Color(0xFF92400E),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+
                     if (weekConflictClusters.isNotEmpty()) {
                         Surface(
                             color = if (isDark) Color(0xFF4A2516) else Color(0xFFFFEFE2),
@@ -614,8 +682,13 @@ fun ScheduleScreen(
                 ) { pageIdx ->
                     val pageWeek = pageIdx + 1
                     val isPageCurrentWeek = pageWeek == actualCurrentWeek && termWeekInfo.phase == TermWeekPhase.IN_TERM
+                    val pageExams = remember(snapshot.exams, settings.semesterStartDate, pageWeek, settings.campus, settings.showExamsOnTimetable, maxGridSection) {
+                        if (!settings.showExamsOnTimetable) emptyList()
+                        else GdouTimeRules.resolveExamsForWeek(snapshot.exams, settings.semesterStartDate, pageWeek, settings.campus, maxGridSection)
+                    }
                     WeekGridScheduleView(
                         courses = snapshot.courses,
+                        weekExams = pageExams,
                         resolvedTimeMap = resolvedTimeMap,
                         pinnedKeys = pinnedKeys,
                         selectedWeek = pageWeek,
@@ -623,12 +696,14 @@ fun ScheduleScreen(
                         nowTime = if (isPageCurrentWeek) nowTime else null,
                         startDateStr = settings.semesterStartDate,
                         campus = settings.campus,
+                        rowDensity = settings.gridRowDensity,
                         showWeekend = settings.showWeekend,
                         showNonCurrentWeek = settings.showNonCurrentWeekCourses,
                         isDark = isDark,
                         backgroundBitmap = backgroundBitmap,
                         cardAlpha = if (backgroundBitmap != null) settings.courseCardAlpha.coerceIn(0.6f, 1f) else 1f,
                         onCourseClick = { detailCourse = it },
+                        onExamClick = { selectedExamDetail = it },
                         onConflictClusterClick = { day, overlapped ->
                             conflictSheetData = day to overlapped
                         },
@@ -955,19 +1030,80 @@ fun ScheduleScreen(
                         }
                     }
                 }
-                if (currentDetail.note.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "备注：${currentDetail.note}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                // Inline Quick Course Note (for attendance rules, grading weights, open-book tips!)
+                var editingInlineNote by remember(currentDetail.id) { mutableStateOf(false) }
+                var noteDraft by remember(currentDetail.id, currentDetail.note) { mutableStateOf(currentDetail.note) }
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "课堂笔记 / 考核备忘",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            TextButton(
+                                onClick = { editingInlineNote = !editingInlineNote },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.height(26.dp)
+                            ) {
+                                Text(
+                                    text = if (editingInlineNote) "取消" else if (currentDetail.note.isBlank()) "+ 记一条" else "编辑",
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                        if (editingInlineNote) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = noteDraft,
+                                onValueChange = { noteDraft = it },
+                                placeholder = { Text("如：平时分40%、学习通签到、期末开卷带A4纸...", fontSize = 12.sp) },
+                                minLines = 2,
+                                maxLines = 4,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Button(
+                                    onClick = {
+                                        onUpdateCourseNote(currentDetail.id, noteDraft)
+                                        detailCourse = currentDetail.copy(note = noteDraft.trim())
+                                        editingInlineNote = false
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("保存笔记", fontSize = 12.sp)
+                                }
+                            }
+                        } else if (currentDetail.note.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = currentDetail.note,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "点右上角随手记下老师考勤要求、平时分占比或考试范围",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                            )
+                        }
                     }
                 }
 
@@ -1375,6 +1511,78 @@ fun ScheduleScreen(
             onConfirm = { sw, sd, tw, td, move ->
                 onApplyHolidayShift(sw, sd, tw, td, move)
                 showHolidayShiftDialog = false
+            }
+        )
+    }
+
+    // Offline Partner / Roommate Joint Free-Slot Matcher
+    if (showFreeSlotMatcher) {
+        FreeSlotMatcherBottomSheet(
+            myCourses = snapshot.courses,
+            initialWeek = selectedWeek,
+            totalWeeks = totalWeeks,
+            savedPartnerName = settings.savedPartnerName,
+            savedPartnerCode = settings.savedPartnerCode,
+            isDark = isDark,
+            onParseShareCode = onParsePartnerShareCode,
+            onSavePartnerProfile = onSavePartnerProfile,
+            onShowMessage = onShowMessage,
+            onDismiss = { showFreeSlotMatcher = false }
+        )
+    }
+
+    // Exam Detail Dialog when tapping a projected exam card on the week grid
+    selectedExamDetail?.let { exBlock ->
+        val ex = exBlock.exam
+        val daysLeft = ChronoUnit.DAYS.between(today, exBlock.date)
+        val countdownLabel = when {
+            daysLeft < 0L -> "已考完"
+            daysLeft == 0L -> "就在今天 · 加油！"
+            daysLeft == 1L -> "明天开考 · 记得带证"
+            else -> "距开考还有 $daysLeft 天"
+        }
+        AlertDialog(
+            onDismissRequest = { selectedExamDetail = null },
+            title = { Text("${ex.courseName}（${ex.examType.ifBlank { "考试" }}）") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        color = if (isDark) Color(0xFF472C10) else Color(0xFFFFF0DB),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = countdownLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color(0xFFFFCA80) else Color(0xFFB45309),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                    DetailInfoRow(
+                        icon = Icons.Rounded.AccessTime,
+                        label = "考试时间",
+                        value = ex.examTimeRaw.ifBlank { "${exBlock.date} ${exBlock.startTime}-${exBlock.endTime}" }
+                    )
+                    DetailInfoRow(
+                        icon = Icons.Rounded.LocationOn,
+                        label = "考场与座号",
+                        value = buildString {
+                            append(ex.location.ifBlank { "考场待定" })
+                            if (ex.seatNumber.isNotBlank()) append(" · ${ex.seatNumber}号座")
+                        }
+                    )
+                    if (ex.campus.isNotBlank()) {
+                        DetailInfoRow(
+                            icon = Icons.Rounded.School,
+                            label = "校区",
+                            value = ex.campus
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { selectedExamDetail = null }) { Text("知道了") }
             }
         )
     }
@@ -2337,6 +2545,7 @@ private fun DayTimelineScheduleView(
 @Composable
 private fun WeekGridScheduleView(
     courses: List<CourseItem>,
+    weekExams: List<ResolvedExamGridBlock>,
     resolvedTimeMap: Map<String, io.github.rex25415.haiyu.schedule.data.ResolvedCourseTime>,
     pinnedKeys: Set<String>,
     selectedWeek: Int,
@@ -2344,12 +2553,14 @@ private fun WeekGridScheduleView(
     nowTime: LocalTime?,
     startDateStr: String,
     campus: GdouCampus,
+    rowDensity: GridRowDensity,
     showWeekend: Boolean,
     showNonCurrentWeek: Boolean,
     isDark: Boolean,
     backgroundBitmap: ImageBitmap?,
     cardAlpha: Float,
     onCourseClick: (CourseItem) -> Unit,
+    onExamClick: (ResolvedExamGridBlock) -> Unit,
     onConflictClusterClick: (day: Int, overlappedCourses: List<CourseItem>) -> Unit,
     onEmptyCellClick: (day: Int, section: Int) -> Unit
 ) {
@@ -2375,8 +2586,8 @@ private fun WeekGridScheduleView(
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
     val baseTimeW = if (dayCount == 7) 36f else 42f
     val timeColumnWidth = (baseTimeW * (1f + (fontScale - 1f) * 0.65f)).dp
-    val rowHeight = (62f * (1f + (fontScale - 1f) * 0.55f)).dp
-    val breakGap = (14f * (1f + (fontScale - 1f) * 0.45f)).dp
+    val rowHeight = (rowDensity.baseRowDp * (1f + (fontScale - 1f) * 0.45f)).dp
+    val breakGap = (rowDensity.breakGapDp * (1f + (fontScale - 1f) * 0.35f)).dp
 
     fun yOffsetForSection(section: Int): Dp {
         val breaksBefore = (if (section > 4) 1 else 0) + (if (section > 8) 1 else 0)
@@ -2392,45 +2603,8 @@ private fun WeekGridScheduleView(
     val totalBreaks = (if (slots.size > 4) 1 else 0) + (if (slots.size > 8) 1 else 0)
     val totalGridHeight = rowHeight * slots.size + breakGap * totalBreaks
 
-    // Calculate live current-time line Y-position (ONLY on the week containing today!)
-    val liveTimeY: Dp? = remember(slots, nowTime, rowHeight, weekContainsToday) {
-        if (!weekContainsToday || nowTime == null) return@remember null
-        val firstStart = GdouTimeRules.parseLocalTime(slots.first().startTime).minusMinutes(15)
-        val lastEnd = GdouTimeRules.parseLocalTime(slots.last().endTime).plusMinutes(15)
-        if (nowTime.isBefore(firstStart) || nowTime.isAfter(lastEnd)) {
-            null
-        } else {
-            var computed: Dp? = null
-            for (i in slots.indices) {
-                val s = slots[i]
-                val st = GdouTimeRules.parseLocalTime(s.startTime)
-                val et = GdouTimeRules.parseLocalTime(s.endTime)
-                val secTop = yOffsetForSection(s.number)
-                if (!nowTime.isBefore(st) && !nowTime.isAfter(et)) {
-                    val totalMin = ChronoUnit.MINUTES.between(st, et).coerceAtLeast(1)
-                    val passed = ChronoUnit.MINUTES.between(st, nowTime).coerceIn(0, totalMin)
-                    computed = secTop + rowHeight * (passed.toFloat() / totalMin.toFloat())
-                    break
-                }
-                if (i < slots.lastIndex) {
-                    val nxt = slots[i + 1]
-                    val nxtSt = GdouTimeRules.parseLocalTime(nxt.startTime)
-                    if (nowTime.isAfter(et) && nowTime.isBefore(nxtSt)) {
-                        val gapTop = secTop + rowHeight
-                        val gapBottom = yOffsetForSection(nxt.number)
-                        val gapMin = ChronoUnit.MINUTES.between(et, nxtSt).coerceAtLeast(1)
-                        val passed = ChronoUnit.MINUTES.between(et, nowTime).coerceIn(0, gapMin)
-                        computed = gapTop + (gapBottom - gapTop) * (passed.toFloat() / gapMin.toFloat())
-                        break
-                    }
-                }
-            }
-            computed
-        }
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
-        // Sleek Day-of-Week Header Row (integrated Today pill & month indicator)
+        // Sleek Day-of-Week Header Row (clear 周一–周日 labels & integrated Today circle!)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2459,8 +2633,10 @@ private fun WeekGridScheduleView(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = GdouTimeRules.dayOfWeekLabel(day).removePrefix("周"),
-                        fontSize = 11.5.sp,
+                        text = GdouTimeRules.dayOfWeekLabel(day),
+                        fontSize = if (dayCount == 7) 10.5.sp else 11.5.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium,
                         color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2654,17 +2830,6 @@ private fun WeekGridScheduleView(
                         }
                     }
 
-                    // Subtle Current-Time Hairline BEHIND course cards (shows on free slots, NEVER cuts across course text!)
-                    if (isTodayCol && liveTimeY != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset(y = liveTimeY.coerceAtLeast(0.dp))
-                                .height(1.dp)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.48f else 0.36f))
-                        )
-                    }
-
                     // 1. Non-current-week preview cards (clean muted style)
                     outWeekCourses.forEach { course ->
                         val clampedStart = course.startSection.coerceIn(1, slots.size)
@@ -2805,6 +2970,75 @@ private fun WeekGridScheduleView(
                             }
                         }
                     }
+
+                    // 3. Projected Exam Cards for finals weeks (amber/terracotta highlight, unmistakable vs regular classes!)
+                    weekExams.filter { it.dayOfWeek == day }.forEach { exBlock ->
+                        val clampedStart = exBlock.startSection.coerceIn(1, slots.size)
+                        val clampedEnd = exBlock.endSection.coerceIn(clampedStart, slots.size)
+                        val topOffset = yOffsetForSection(clampedStart)
+                        val blockHeight = heightForSpan(clampedStart, clampedEnd)
+                        val examBg = (if (isDark) Color(0xFF472C10) else Color(0xFFFFF0DB)).copy(alpha = cardAlpha)
+                        val examFg = if (isDark) Color(0xFFFFE4BE) else Color(0xFF78350F)
+                        val examAccent = if (isDark) Color(0xFFF59E0B) else Color(0xFFD97706)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = examBg,
+                            border = BorderStroke(1.3.dp, examAccent),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(blockHeight)
+                                .offset(y = topOffset)
+                                .padding(horizontal = 1.5.dp, vertical = 1.5.dp)
+                                .clickable { onExamClick(exBlock) }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 3.5.dp, vertical = 4.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Surface(
+                                    color = examAccent,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "考试 ${exBlock.startTime}",
+                                        fontSize = 7.2.sp,
+                                        lineHeight = 8.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = exBlock.exam.courseName,
+                                    fontSize = if (dayCount == 5) 11.sp else 10.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = examFg,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val roomSeat = buildString {
+                                    append(exBlock.exam.location.ifBlank { "考场待定" })
+                                    if (exBlock.exam.seatNumber.isNotBlank()) append("·${exBlock.exam.seatNumber}座")
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = roomSeat,
+                                    fontSize = 8.2.sp,
+                                    lineHeight = 9.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = examFg.copy(alpha = 0.82f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2856,7 +3090,7 @@ private fun WeekGridCourseCard(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = if (dayCount == 5) 5.5.dp else 3.5.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.Top
+            verticalArrangement = if (span >= 3) Arrangement.Center else Arrangement.Top
         ) {
             if (conflictCount > 1) {
                 Surface(
@@ -2880,16 +3114,22 @@ private fun WeekGridCourseCard(
                     )
                 }
                 if (resolved.isSpecialStaggered && (dayCount == 7 || fontScale > 1.15f)) {
-                    Spacer(modifier = Modifier.height(1.5.dp))
-                    Text(
-                        text = if (fontScale <= 1.1f) "错峰${resolved.startTime}" else resolved.startTime,
-                        fontSize = 7.2.sp,
-                        lineHeight = 8.5.sp,
-                        fontWeight = FontWeight.Bold,
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Surface(
                         color = palette.accent,
-                        maxLines = 1,
-                        softWrap = false
-                    )
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = resolved.startTime,
+                            fontSize = 7.2.sp,
+                            lineHeight = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color(0xFF0A1614) else Color.White,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.8.dp)
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
             } else if (showInlineConflictTag) {

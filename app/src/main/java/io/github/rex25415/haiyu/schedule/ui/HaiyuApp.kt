@@ -14,8 +14,10 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -23,7 +25,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,6 +46,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.rex25415.haiyu.schedule.BuildConfig
 import io.github.rex25415.haiyu.schedule.data.AppRepository
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
@@ -56,7 +63,9 @@ import io.github.rex25415.haiyu.schedule.ui.screens.SyncPortalScreen
 import io.github.rex25415.haiyu.schedule.ui.theme.HaiyuTheme
 import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
+import io.github.rex25415.haiyu.schedule.update.LegacyPackageDetector
 import io.github.rex25415.haiyu.schedule.update.UpdateCheckResult
+import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
 import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,6 +103,24 @@ fun HaiyuApp(
     var showUpdateDialog by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateStatusSummary by remember { mutableStateOf<String?>(null) }
+
+    // Zero-permission legacy package (cn.gdou.haiyu.schedule <= v2.7.0) detection, refreshed on every resume!
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var legacyInstall by remember { mutableStateOf(LegacyPackageDetector.detectLegacyInstall(context)) }
+    var showLegacyDialog by remember {
+        mutableStateOf(legacyInstall != null && !snapshot.settings.legacyCleanupDismissed)
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val detected = LegacyPackageDetector.detectLegacyInstall(context)
+                legacyInstall = detected
+                if (detected == null) showLegacyDialog = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     if (currentTab == 1 && !hasOpenedSyncTab) {
         hasOpenedSyncTab = true
@@ -164,6 +191,7 @@ fun HaiyuApp(
 
     fun syncWidgetsAndReminders() {
         TodayScheduleWidgetProvider.refreshAllWidgets(context)
+        CountdownWidgetProvider.refreshAllWidgets(context)
         ClassReminderScheduler.rescheduleNextReminder(context)
     }
 
@@ -323,7 +351,7 @@ fun HaiyuApp(
                             selected = currentTab == idx,
                             onClick = { currentTab = idx },
                             icon = {
-                                if (idx == 3 && availableUpdate != null) {
+                                if (idx == 3 && (availableUpdate != null || legacyInstall != null)) {
                                     BadgedBox(badge = { Badge() }) {
                                         Icon(tab.icon, contentDescription = tab.label)
                                     }
@@ -389,6 +417,7 @@ fun HaiyuApp(
                                 },
                                 onExamsSynced = { exams ->
                                     repo.replaceSyncedExams(exams)
+                                    syncWidgetsAndReminders()
                                 },
                                 onShowMessage = { msg ->
                                     val skipMatch = Regex("成绩跳过\\(([^)]+)\\)").find(msg)
@@ -462,6 +491,10 @@ fun HaiyuApp(
                                     syncWidgetsAndReminders()
                                     showToast(if (pinned) "已置顶显示「${target.name}」" else "已取消置顶「${target.name}」")
                                 },
+                                onUpdateCourseNote = { courseId, note ->
+                                    repo.updateCourseNote(courseId, note)
+                                    showToast(if (note.isBlank()) "已清空本课笔记" else "已保存课堂笔记")
+                                },
                                 onAddTask = { task ->
                                     repo.upsertTask(task)
                                     syncWidgetsAndReminders()
@@ -472,9 +505,27 @@ fun HaiyuApp(
                                     syncWidgetsAndReminders()
                                 },
                                 onExportWeekImage = { weekNum -> exportScheduleImage(weekNum) },
+                                onCopyWeekScheduleText = { weekNum ->
+                                    val txt = GdouTimeRules.formatWeekScheduleAsText(
+                                        courses = snapshot.courses,
+                                        weekNumber = weekNum,
+                                        campus = snapshot.settings.campus,
+                                        termLabel = snapshot.settings.academicYearLabel,
+                                        pinnedKeys = snapshot.settings.pinnedConflictKeys.toSet()
+                                    )
+                                    clipboard.setText(AnnotatedString(txt))
+                                    showToast("已复制第 $weekNum 周课表文本，可直接发微信/QQ")
+                                },
                                 onGetShareCode = { repo.exportScheduleShareCode() },
                                 onCopyShareCode = { copyShareCode(it) },
                                 onImportShareCode = { importShareCode(it) },
+                                onParsePartnerShareCode = { raw -> repo.parseScheduleShareCode(raw) },
+                                onSavePartnerProfile = { name, code ->
+                                    repo.updateSettings {
+                                        it.copy(savedPartnerName = name, savedPartnerCode = code)
+                                    }
+                                },
+                                onShowMessage = { showToast(it) },
                                 onApplyHolidayShift = { sw, sd, tw, td, move ->
                                     val count = repo.applyHolidayShift(sw, sd, tw, td, move)
                                     syncWidgetsAndReminders()
@@ -521,23 +572,44 @@ fun HaiyuApp(
                                 },
                                 onAddExam = { ex ->
                                     repo.upsertExam(ex)
+                                    syncWidgetsAndReminders()
                                     showToast("已保存考试安排：${ex.courseName}")
                                 },
                                 onDeleteExam = { id ->
                                     repo.deleteExam(id)
+                                    syncWidgetsAndReminders()
                                     showToast("已删除该考试")
+                                },
+                                onCopyExamsText = {
+                                    val txt = GdouTimeRules.formatExamsAsText(
+                                        snapshot.exams,
+                                        snapshot.settings.academicYearLabel
+                                    )
+                                    clipboard.setText(AnnotatedString(txt))
+                                    showToast("已复制全部考试清单，可直接发微信/QQ")
                                 }
                             )
 
                             3 -> SettingsScreen(
                                 snapshot = snapshot,
                                 availableUpdate = availableUpdate,
+                                legacyInstall = legacyInstall,
                                 isCheckingUpdate = isCheckingUpdate,
                                 updateStatusSummary = updateStatusSummary,
                                 onCheckForUpdates = { checkForUpdates(manual = true) },
                                 onOpenUpdateDialog = {
                                     if (availableUpdate != null) showUpdateDialog = true
                                     else checkForUpdates(manual = true)
+                                },
+                                onLaunchLegacyApp = {
+                                    if (!LegacyPackageDetector.launchLegacyApp(context)) {
+                                        showToast("无法打开旧版应用，请从桌面手动打开复制分享码")
+                                    }
+                                },
+                                onOpenLegacyUninstall = {
+                                    if (!LegacyPackageDetector.openLegacyAppUninstallSettings(context)) {
+                                        showToast("请前往系统设置 → 应用管理卸载旧版「海屿课表」")
+                                    }
                                 },
                                 onOpenGitHubRepo = {
                                     if (!AppUpdateManager.openUrlInBrowser(context, AppUpdateManager.REPO_WEB_URL)) {
@@ -561,7 +633,7 @@ fun HaiyuApp(
                                     if (enabled) onRequestNotificationPermission()
                                     repo.updateSettings { it.copy(reminderEnabled = enabled) }
                                     ClassReminderScheduler.rescheduleNextReminder(context)
-                                    showToast(if (enabled) "已开启课前精准提醒" else "已关闭课前提醒")
+                                    showToast(if (enabled) "已开启课前与考前精准提醒" else "已关闭提醒")
                                 },
                                 onTestNotification = {
                                     onRequestNotificationPermission()
@@ -570,7 +642,8 @@ fun HaiyuApp(
                                 },
                                 onRefreshWidget = {
                                     TodayScheduleWidgetProvider.refreshAllWidgets(context)
-                                    showToast("已立即刷新海屿桌面小组件")
+                                    CountdownWidgetProvider.refreshAllWidgets(context)
+                                    showToast("已立即刷新全部海屿桌面小组件")
                                 },
                                 onExportWeekImage = {
                                     val curWeek = GdouTimeRules.calculateCurrentWeek(
@@ -623,6 +696,49 @@ fun HaiyuApp(
                     showToast("已忽略 v$ver 自动弹窗（随时可在「设置 → 应用更新」手动升级）")
                 },
                 onShowMessage = { showToast(it) }
+            )
+        }
+
+        val activeLegacy = legacyInstall
+        if (showLegacyDialog && activeLegacy != null) {
+            val hasMigrated = snapshot.courses.isNotEmpty()
+            AlertDialog(
+                onDismissRequest = {
+                    showLegacyDialog = false
+                    repo.updateSettings { it.copy(legacyCleanupDismissed = true) }
+                },
+                title = { Text("检测到旧包名版本（${activeLegacy.versionName}）") },
+                text = {
+                    Text(
+                        text = if (hasMigrated) {
+                            "因 v2.8.0+ 升级非商业开源协议并启用了全新个人开源包名，无法直接覆盖旧包。\n\n检测到当前新版已同步课表，你可以直接前往系统页面安全卸载旧版图标（卸载旧版不会影响新版里的任何数据）。"
+                        } else {
+                            "因 v2.8.0+ 升级非商业开源协议并启用了全新个人开源包名，无法直接覆盖旧包，桌面目前会有两个图标。\n\n建议先在本新版直接同步教务（或打开旧版复制「同班分享码」导入），确认数据无误后再卸载旧版。"
+                        }
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLegacyDialog = false
+                            repo.updateSettings { it.copy(legacyCleanupDismissed = true) }
+                            if (!LegacyPackageDetector.openLegacyAppUninstallSettings(context)) {
+                                showToast("请前往系统设置 → 应用管理卸载旧版「海屿课表」")
+                            }
+                        }
+                    ) { Text("去卸载旧版") }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showLegacyDialog = false
+                            repo.updateSettings { it.copy(legacyCleanupDismissed = true) }
+                            if (!hasMigrated) {
+                                LegacyPackageDetector.launchLegacyApp(context)
+                            }
+                        }
+                    ) { Text(if (hasMigrated) "稍后再说" else "先打开旧版") }
+                }
             )
         }
     }

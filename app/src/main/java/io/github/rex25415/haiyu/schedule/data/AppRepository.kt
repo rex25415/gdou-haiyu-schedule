@@ -357,6 +357,18 @@ class AppRepository(context: Context) {
     }
 
     /**
+     * 快速更新单门课的课堂笔记 / 考勤备忘（无需进入完整编辑表单）
+     */
+    fun updateCourseNote(courseId: String, newNote: String) {
+        val current = _state.value
+        val trimmed = newNote.trim()
+        val updated = current.courses.map { c ->
+            if (c.id == courseId) c.copy(note = trimmed) else c
+        }
+        persist(current.copy(courses = updated))
+    }
+
+    /**
      * 仅调本周（单次临时调课）：将该课程的指定周次独立拆分到新时间/教室，完全不影响其他周次！
      */
     fun rescheduleSingleWeek(
@@ -535,7 +547,7 @@ class AppRepository(context: Context) {
         return compactJson.encodeToString(bundle)
     }
 
-    fun importScheduleShareCode(raw: String): Result<Int> {
+    fun parseScheduleShareCode(raw: String): Result<ScheduleShareBundle> {
         return try {
             val cleaned = raw.trim()
             val startIdx = cleaned.indexOf('{')
@@ -550,25 +562,31 @@ class AppRepository(context: Context) {
             if (bundle.courses.isEmpty()) {
                 return Result.failure(IllegalArgumentException("分享码中不包含课程数据"))
             }
-            val imported = assignStableColors(
-                bundle.courses.map { it.copy(id = UUID.randomUUID().toString()) }
-            )
-            val current = _state.value
-            persist(
-                current.copy(
-                    courses = imported,
-                    settings = current.settings.copy(
-                        campus = bundle.campus,
-                        semesterStartDate = bundle.semesterStartDate.ifBlank { current.settings.semesterStartDate },
-                        totalWeeks = bundle.totalWeeks.coerceIn(1, 30),
-                        academicYearLabel = bundle.academicYearLabel.ifBlank { current.settings.academicYearLabel }
-                    )
-                )
-            )
-            Result.success(imported.size)
+            Result.success(bundle)
         } catch (e: Exception) {
             Result.failure(IllegalArgumentException("分享码格式有误：${e.message}"))
         }
+    }
+
+    fun importScheduleShareCode(raw: String): Result<Int> {
+        val parsed = parseScheduleShareCode(raw)
+        val bundle = parsed.getOrElse { return Result.failure(it) }
+        val imported = assignStableColors(
+            bundle.courses.map { it.copy(id = UUID.randomUUID().toString()) }
+        )
+        val current = _state.value
+        persist(
+            current.copy(
+                courses = imported,
+                settings = current.settings.copy(
+                    campus = bundle.campus,
+                    semesterStartDate = bundle.semesterStartDate.ifBlank { current.settings.semesterStartDate },
+                    totalWeeks = bundle.totalWeeks.coerceIn(1, 30),
+                    academicYearLabel = bundle.academicYearLabel.ifBlank { current.settings.academicYearLabel }
+                )
+            )
+        )
+        return Result.success(imported.size)
     }
 
     fun loadDemoData() {

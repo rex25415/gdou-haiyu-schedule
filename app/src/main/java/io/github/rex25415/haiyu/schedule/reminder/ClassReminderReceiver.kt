@@ -3,6 +3,7 @@ package io.github.rex25415.haiyu.schedule.reminder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
 import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
 
 class ClassReminderReceiver : BroadcastReceiver() {
@@ -12,6 +13,7 @@ class ClassReminderReceiver : BroadcastReceiver() {
         if (action == Intent.ACTION_BOOT_COMPLETED) {
             ClassReminderScheduler.rescheduleNextReminder(context)
             TodayScheduleWidgetProvider.refreshAllWidgets(context)
+            CountdownWidgetProvider.refreshAllWidgets(context)
             return
         }
         if (action == ClassReminderScheduler.ACTION_CLASS_REMINDER) {
@@ -45,6 +47,22 @@ class ClassReminderReceiver : BroadcastReceiver() {
                 dueDate = dueDate
             )
             ClassReminderScheduler.rescheduleNextReminder(context)
+            CountdownWidgetProvider.refreshAllWidgets(context)
+            return
+        }
+        if (action == ClassReminderScheduler.ACTION_EXAM_REMINDER) {
+            val course = intent.getStringExtra(ClassReminderScheduler.EXTRA_EXAM_COURSE) ?: "考试提醒"
+            val examTime = intent.getStringExtra(ClassReminderScheduler.EXTRA_EXAM_TIME) ?: ""
+            val locSeat = intent.getStringExtra(ClassReminderScheduler.EXTRA_EXAM_LOC_SEAT) ?: ""
+
+            ClassReminderScheduler.showExamNotification(
+                context = context,
+                courseName = course,
+                examTime = examTime,
+                locSeat = locSeat
+            )
+            ClassReminderScheduler.rescheduleNextReminder(context)
+            CountdownWidgetProvider.refreshAllWidgets(context)
         }
     }
 }

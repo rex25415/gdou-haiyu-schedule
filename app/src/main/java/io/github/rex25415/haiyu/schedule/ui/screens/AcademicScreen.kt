@@ -1,11 +1,14 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,10 +32,14 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Search
@@ -68,8 +75,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
@@ -105,7 +116,8 @@ fun AcademicScreen(
     onAddGrade: (GradeItem) -> Unit,
     onDeleteGrade: (String) -> Unit,
     onAddExam: (ExamItem) -> Unit,
-    onDeleteExam: (String) -> Unit
+    onDeleteExam: (String) -> Unit,
+    onCopyExamsText: () -> Unit = {}
 ) {
     var tabIndex by remember { mutableIntStateOf(requestedSubTab.coerceIn(0, 2)) } // 0 = Tasks DDL, 1 = Grades & GPA, 2 = Exams
     LaunchedEffect(subTabRequestNonce) {
@@ -261,7 +273,8 @@ fun AcademicScreen(
                         editingExam = exam
                         showAddExamDialog = true
                     },
-                    onDeleteExam = onDeleteExam
+                    onDeleteExam = onDeleteExam,
+                    onCopyExamsText = onCopyExamsText
                 )
             }
         }
@@ -525,6 +538,7 @@ private fun TasksContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GradesContent(
     grades: List<GradeItem>,
@@ -581,6 +595,45 @@ private fun GradesContent(
         Triple(gpa, avgScore, totalCredits)
     }
 
+    // Chronological per-term GPA trend & credit breakdown by course category (pure local math!)
+    val termGpaSeries = remember(grades) {
+        grades
+            .filter { it.credit > 0.0 }
+            .groupBy { "${it.academicYear} ${it.semester}" }
+            .entries
+            .sortedBy { (k, _) -> k }
+            .mapNotNull { (termKey, list) ->
+                val cr = list.sumOf { it.credit }
+                if (cr <= 0.0) null else {
+                    val gp = list.sumOf { it.gradePoint * it.credit } / cr
+                    val shortLabel = termKey
+                        .replace("20", "")
+                        .replace(" 第一学期", "①")
+                        .replace(" 第二学期", "②")
+                        .replace(" 第三学期", "③")
+                    shortLabel to gp
+                }
+            }
+    }
+    val creditByCategory = remember(filtered) {
+        filtered
+            .filter { it.credit > 0.0 }
+            .groupBy { g ->
+                val raw = g.courseType.trim()
+                when {
+                    raw.isBlank() -> "其他课程"
+                    raw.contains("必修") -> "必修课"
+                    raw.contains("选修") || raw.contains("任选") || raw.contains("限选") -> "选修课"
+                    raw.contains("实践") || raw.contains("实验") -> "实践环节"
+                    raw.contains("通识") || raw.contains("公选") -> "通识/公选"
+                    else -> raw.take(6)
+                }
+            }
+            .map { (cat, list) -> Triple(cat, list.sumOf { it.credit }, list.size) }
+            .sortedByDescending { it.second }
+    }
+    var showInsightsCard by remember { mutableStateOf(false) }
+
     LazyColumn(
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 84.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -621,6 +674,156 @@ private fun GradesContent(
                             StatSmallColumn("加权均分", String.format(Locale.US, "%.1f", stats.second))
                             StatSmallColumn("总学分", String.format(Locale.US, "%.1f", stats.third))
                             StatSmallColumn("门数", "${filtered.size}")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Collapsible GPA Trend & Credit Category Breakdown (clean & zero clutter by default!)
+        if (termGpaSeries.size >= 2 || creditByCategory.isNotEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showInsightsCard = !showInsightsCard },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Insights,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "学分分布与 GPA 走势",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (showInsightsCard) "收起" else "展开查看",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Icon(
+                                    imageVector = if (showInsightsCard) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        if (showInsightsCard) {
+                            if (termGpaSeries.size >= 2) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "各学期 GPA 趋势（共 ${termGpaSeries.size} 学期）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                val lineColor = MaterialTheme.colorScheme.primary
+                                val dotFill = MaterialTheme.colorScheme.surface
+                                val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                val minGpa = (termGpaSeries.minOf { it.second } - 0.35).coerceAtLeast(0.0)
+                                val maxGpa = (termGpaSeries.maxOf { it.second } + 0.35).coerceAtMost(5.0)
+                                val span = (maxGpa - minGpa).coerceAtLeast(0.5)
+
+                                Canvas(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(82.dp)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    val w = size.width
+                                    val h = size.height
+                                    // Subtle baseline & midline
+                                    drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
+                                    drawLine(gridColor, Offset(0f, h * 0.5f), Offset(w, h * 0.5f), strokeWidth = 1f)
+
+                                    val pts = termGpaSeries.mapIndexed { idx, (_, gp) ->
+                                        val x = if (termGpaSeries.size == 1) w / 2f else w * idx / (termGpaSeries.size - 1)
+                                        val ratio = ((gp - minGpa) / span).toFloat().coerceIn(0f, 1f)
+                                        val y = h * (1f - ratio)
+                                        Offset(x, y)
+                                    }
+                                    val path = Path().apply {
+                                        pts.forEachIndexed { idx, pt ->
+                                            if (idx == 0) moveTo(pt.x, pt.y) else lineTo(pt.x, pt.y)
+                                        }
+                                    }
+                                    drawPath(
+                                        path = path,
+                                        color = lineColor,
+                                        style = Stroke(width = 5f, cap = StrokeCap.Round)
+                                    )
+                                    pts.forEach { pt ->
+                                        drawCircle(color = lineColor, radius = 9f, center = pt)
+                                        drawCircle(color = dotFill, radius = 4.5f, center = pt)
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    termGpaSeries.forEach { (label, gp) ->
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                text = String.format(Locale.US, "%.2f", gp),
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = label,
+                                                fontSize = 9.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (creditByCategory.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "已修学分分类统计",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    creditByCategory.forEach { (cat, cr, count) ->
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "$cat ${String.format(Locale.US, "%.1f", cr)}分 · ${count}门",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -774,7 +977,8 @@ private fun ExamsContent(
     exams: List<ExamItem>,
     onJumpToSync: () -> Unit,
     onEditExam: (ExamItem) -> Unit,
-    onDeleteExam: (String) -> Unit
+    onDeleteExam: (String) -> Unit,
+    onCopyExamsText: () -> Unit
 ) {
     if (exams.isEmpty()) {
         EmptyAcademicHint(
@@ -802,6 +1006,27 @@ private fun ExamsContent(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "共 ${sortedExams.size} 场考试 · 已自动同步至对应教学周课表",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = onCopyExamsText,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("复制清单", fontSize = 12.sp)
+                }
+            }
+        }
         items(sortedExams, key = { it.id }) { exam ->
             val dt = remember(exam.examTimeRaw) { GdouTimeRules.parseExamStartDateTime(exam.examTimeRaw) }
             val daysLeft = remember(dt) {

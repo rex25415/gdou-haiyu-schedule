@@ -233,7 +233,25 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
                     views.setViewVisibility(R.id.widget_more, View.VISIBLE)
                     views.setTextViewText(R.id.widget_more, "还有 ${rowsToRender.size - 4} 节课，点击查看全部 →")
                 } else {
-                    views.setViewVisibility(R.id.widget_more, View.GONE)
+                    val nowDt = java.time.LocalDateTime.now()
+                    val nextExam = snapshot.exams
+                        .mapNotNull { ex ->
+                            val dt = GdouTimeRules.parseExamStartDateTime(ex.examTimeRaw)
+                            if (dt != null && dt.isAfter(nowDt)) ex to dt else null
+                        }
+                        .minByOrNull { it.second }
+                    if (nextExam != null) {
+                        val daysLeft = java.time.temporal.ChronoUnit.DAYS.between(today, nextExam.second.toLocalDate())
+                        if (daysLeft <= 14L) {
+                            val tag = if (daysLeft <= 0L) "今日开考" else "剩${daysLeft}天"
+                            views.setViewVisibility(R.id.widget_more, View.VISIBLE)
+                            views.setTextViewText(R.id.widget_more, "近期考试：${nextExam.first.courseName}（$tag）")
+                        } else {
+                            views.setViewVisibility(R.id.widget_more, View.GONE)
+                        }
+                    } else {
+                        views.setViewVisibility(R.id.widget_more, View.GONE)
+                    }
                 }
             }
 

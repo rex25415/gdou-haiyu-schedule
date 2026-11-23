@@ -59,6 +59,30 @@ data class CourseOverlapCluster(
     val hasConflict: Boolean get() = courses.size > 1
 }
 
+data class ResolvedExamGridBlock(
+    val exam: ExamItem,
+    val date: LocalDate,
+    val startTime: String,
+    val endTime: String,
+    val dayOfWeek: Int,
+    val startSection: Int,
+    val endSection: Int
+)
+
+enum class JointFreeState {
+    BOTH_FREE,
+    ONLY_ME_BUSY,
+    ONLY_PARTNER_BUSY,
+    BOTH_BUSY
+}
+
+data class JointFreeCell(
+    val dayOfWeek: Int,
+    val blockIndex: Int, // 0..4 (1-2, 3-4, 5-6, 7-8, 9-10)
+    val label: String,
+    val state: JointFreeState
+)
+
 object GdouTimeRules {
 
     // 广东海洋大学全校统一标准作息时间（1-10节，2026 现行）
@@ -433,20 +457,187 @@ object GdouTimeRules {
      * 解析正方考试时间字符串中的开始日期时间，例如 "2026-12-28(09:00-11:00)" 或 "2026-12-28 09:00-11:00"
      */
     fun parseExamStartDateTime(raw: String): LocalDateTime? {
-        val dateMatch = Regex("(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})").find(raw) ?: return null
+        val window = parseExamTimeWindow(raw) ?: return null
+        return LocalDateTime.of(window.first, window.second)
+    }
+
+    /**
+     * 解析考试时间段，返回 (日期, 开始时间, 结束时间)；兼容 "2026-12-28(08:30-10:30)"、"2026-12-28 14:30-16:30" 等格式
+     */
+    fun parseExamTimeWindow(raw: String): Triple<LocalDate, LocalTime, LocalTime>? {
+        val dateMatch = Regex("(\\d{4})[-/.年](\\d{1,2})[-/.月](\\d{1,2})").find(raw) ?: return null
         val year = dateMatch.groupValues[1].toIntOrNull() ?: return null
         val month = dateMatch.groupValues[2].toIntOrNull() ?: return null
         val day = dateMatch.groupValues[3].toIntOrNull() ?: return null
-
-        val timeMatch = Regex("(\\d{1,2}):(\\d{2})").find(raw)
-        val hour = timeMatch?.groupValues?.get(1)?.toIntOrNull() ?: 9
-        val minute = timeMatch?.groupValues?.get(2)?.toIntOrNull() ?: 0
-
-        return try {
-            LocalDateTime.of(year, month, day, hour, minute)
+        val date = try {
+            LocalDate.of(year, month, day)
         } catch (_: Exception) {
-            null
+            return null
         }
+
+        val times = Regex("(\\d{1,2}):(\\d{2})").findAll(raw).toList()
+        val start = if (times.isNotEmpty()) {
+            val h = times[0].groupValues[1].toIntOrNull()?.coerceIn(0, 23) ?: 9
+            val m = times[0].groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: 0
+            LocalTime.of(h, m)
+        } else {
+            LocalTime.of(9, 0)
+        }
+        val end = if (times.size >= 2) {
+            val h = times[1].groupValues[1].toIntOrNull()?.coerceIn(0, 23) ?: start.hour
+            val m = times[1].groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: start.minute
+            val parsedEnd = LocalTime.of(h, m)
+            if (parsedEnd.isAfter(start)) parsedEnd else start.plusHours(2)
+        } else {
+            start.plusHours(2)
+        }
+        return Triple(date, start, end)
+    }
+
+    /**
+     * 将落入指定教学周内的考试安排投影为周课表节次块，期末周看课表也能一眼看到考试时间与座号
+     */
+    fun resolveExamsForWeek(
+        exams: List<ExamItem>,
+        startDateStr: String,
+        weekNumber: Int,
+        campus: GdouCampus,
+        maxSection: Int = 10
+    ): List<ResolvedExamGridBlock> {
+        if (exams.isEmpty()) return emptyList()
+        val weekDates = getWeekDates(startDateStr, weekNumber)
+        val firstDay = weekDates.first()
+        val lastDay = weekDates.last()
+        val slots = slotsForCampus(campus, maxSection.coerceIn(10, 12))
+
+        val result = mutableListOf<ResolvedExamGridBlock>()
+        for (exam in exams) {
+            val (date, start, end) = parseExamTimeWindow(exam.examTimeRaw) ?: continue
+            if (date.isBefore(firstDay) || date.isAfter(lastDay)) continue
+            val dow = date.dayOfWeek.value
+
+            // Match strictly overlapping slots (touching boundary e.g. end=16:30 & slot7 start=16:30 does NOT overlap!)
+            val overlapped = slots.filter { s ->
+                val ss = parseLocalTime(s.startTime)
+                val se = parseLocalTime(s.endTime)
+                se.isAfter(start) && ss.isBefore(end)
+            }
+            val (startSec, endSec) = if (overlapped.isNotEmpty()) {
+                val s = overlapped.first().number
+                val e = maxOf(overlapped.last().number, (s + 1).coerceAtMost(slots.size))
+                s to e
+            } else {
+                val nearest = slots.minByOrNull { s ->
+                    kotlin.math.abs(ChronoUnit.MINUTES.between(parseLocalTime(s.startTime), start))
+                }?.number ?: 1
+                nearest to (nearest + 1).coerceAtMost(slots.size)
+            }
+            result.add(
+                ResolvedExamGridBlock(
+                    exam = exam,
+                    date = date,
+                    startTime = start.format(TIME_HH_MM_FORMATTER),
+                    endTime = end.format(TIME_HH_MM_FORMATTER),
+                    dayOfWeek = dow,
+                    startSection = startSec,
+                    endSection = endSec
+                )
+            )
+        }
+        return result.sortedWith(compareBy<ResolvedExamGridBlock> { it.dayOfWeek }.thenBy { it.startTime })
+    }
+
+    /**
+     * 纯离线双人/室友「空课交集」计算（5 个大节 × 7 天）
+     */
+    fun computeJointFreeMatrix(
+        myCourses: List<CourseItem>,
+        partnerCourses: List<CourseItem>,
+        weekNumber: Int
+    ): List<JointFreeCell> {
+        val blocks = listOf(
+            Triple(0, "1-2节", 1..2),
+            Triple(1, "3-4节", 3..4),
+            Triple(2, "5-6节", 5..6),
+            Triple(3, "7-8节", 7..8),
+            Triple(4, "9-10节", 9..10)
+        )
+        fun isBusy(courses: List<CourseItem>, day: Int, range: IntRange): Boolean {
+            return courses.any { c ->
+                c.dayOfWeek == day &&
+                    weekNumber in c.weeks &&
+                    c.startSection <= range.last &&
+                    range.first <= c.endSection
+            }
+        }
+        val list = mutableListOf<JointFreeCell>()
+        for (day in 1..7) {
+            for ((idx, label, range) in blocks) {
+                val me = isBusy(myCourses, day, range)
+                val other = isBusy(partnerCourses, day, range)
+                val state = when {
+                    !me && !other -> JointFreeState.BOTH_FREE
+                    me && !other -> JointFreeState.ONLY_ME_BUSY
+                    !me && other -> JointFreeState.ONLY_PARTNER_BUSY
+                    else -> JointFreeState.BOTH_BUSY
+                }
+                list.add(JointFreeCell(dayOfWeek = day, blockIndex = idx, label = label, state = state))
+            }
+        }
+        return list
+    }
+
+    /**
+     * 一键生成整洁纯文本周课表（适合发微信/QQ 给室友或家人）
+     */
+    fun formatWeekScheduleAsText(
+        courses: List<CourseItem>,
+        weekNumber: Int,
+        campus: GdouCampus,
+        termLabel: String,
+        pinnedKeys: Set<String> = emptySet()
+    ): String {
+        val sb = StringBuilder()
+        sb.appendLine("【海屿课表】第${weekNumber}周（${campus.label} · $termLabel）")
+        var anyCourse = false
+        for (day in 1..7) {
+            val active = courses.filter { it.dayOfWeek == day && weekNumber in it.weeks }
+            if (active.isEmpty()) continue
+            anyCourse = true
+            sb.appendLine("${dayOfWeekLabel(day)}：")
+            groupOverlappingCourses(active, pinnedKeys)
+                .flatMap { it.courses }
+                .forEach { c ->
+                    val t = resolveCourseTime(c, campus)
+                    val loc = c.location.ifBlank { "地点待定" }
+                    val stag = if (t.isSpecialStaggered) " [错峰]" else ""
+                    sb.appendLine("  • 第${c.startSection}-${c.endSection}节 ${t.startTime}-${t.endTime}$stag  ${c.name} @ $loc")
+                }
+        }
+        if (!anyCourse) sb.appendLine("本周暂无排课安排")
+        return sb.toString().trim()
+    }
+
+    /**
+     * 一键生成整洁纯文本考试清单
+     */
+    fun formatExamsAsText(exams: List<ExamItem>, termLabel: String): String {
+        val now = LocalDateTime.now()
+        val sorted = exams.sortedWith(
+            compareBy<ExamItem> {
+                val dt = parseExamStartDateTime(it.examTimeRaw)
+                if (dt == null) 1 else if (dt.isBefore(now)) 2 else 0
+            }.thenBy { parseExamStartDateTime(it.examTimeRaw)?.toString() ?: "9999" }
+        )
+        val sb = StringBuilder()
+        sb.appendLine("【海屿课表 · 考试清单】$termLabel（共 ${sorted.size} 场）")
+        sorted.forEachIndexed { i, ex ->
+            val seat = if (ex.seatNumber.isNotBlank()) " · ${ex.seatNumber}号座" else ""
+            val loc = ex.location.ifBlank { "考场待定" }
+            val time = ex.examTimeRaw.ifBlank { "时间待定" }
+            sb.appendLine("${i + 1}. ${ex.courseName}｜$time｜$loc$seat")
+        }
+        return sb.toString().trim()
     }
 
     /**

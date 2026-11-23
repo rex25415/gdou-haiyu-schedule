@@ -5,6 +5,7 @@ import io.github.rex25415.haiyu.schedule.data.OccurrenceState
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
+import io.github.rex25415.haiyu.schedule.model.GridRowDensity
 import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
 import io.github.rex25415.haiyu.schedule.sync.GdouJsBridge
 import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
@@ -288,5 +289,9 @@ class AppUpdateManagerTest {
         assertTrue(decoded.settings.pinnedConflictKeys.isEmpty())
         assertEquals("", decoded.settings.scheduleBgFileName)
         assertEquals(0.92f, decoded.settings.courseCardAlpha, 0.001f)
+        assertEquals(GridRowDensity.STANDARD, decoded.settings.gridRowDensity)
+        assertTrue(decoded.settings.showExamsOnTimetable)
+        assertFalse(decoded.settings.legacyCleanupDismissed)
+        assertEquals("", decoded.settings.savedPartnerCode)
     }
 }

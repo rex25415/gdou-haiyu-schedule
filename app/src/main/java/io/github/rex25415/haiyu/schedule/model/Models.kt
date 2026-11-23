@@ -31,6 +31,13 @@ enum class DarkModeOption(val id: String, val label: String) {
 }
 
 @Serializable
+enum class GridRowDensity(val id: String, val label: String, val baseRowDp: Float, val breakGapDp: Float) {
+    COMPACT("compact", "紧凑一屏", 48f, 10f),
+    STANDARD("standard", "标准舒适", 60f, 13f),
+    COMFORTABLE("comfortable", "宽松大字", 72f, 16f)
+}
+
+@Serializable
 data class TimeSlot(
     val number: Int,
     val startTime: String,
@@ -120,7 +127,12 @@ data class AppSettings(
     val ignoredUpdateVersion: String = "",
     val pinnedConflictKeys: List<String> = emptyList(),
     val scheduleBgFileName: String = "",
-    val courseCardAlpha: Float = 0.92f
+    val courseCardAlpha: Float = 0.92f,
+    val gridRowDensity: GridRowDensity = GridRowDensity.STANDARD,
+    val showExamsOnTimetable: Boolean = true,
+    val legacyCleanupDismissed: Boolean = false,
+    val savedPartnerName: String = "",
+    val savedPartnerCode: String = ""
 )
 
 @Serializable

@@ -3,4 +3,6 @@
     <string name="app_name">海屿课表</string>
     <string name="widget_today_name">海屿今日课表</string>
     <string name="widget_today_desc">广东海洋大学全校区：在桌面一眼查看今日课程、教室与错峰作息时间</string>
+    <string name="widget_countdown_name">海屿考试与 DDL 倒计时</string>
+    <string name="widget_countdown_desc">在桌面聚合展示最近 3 场考试与待办作业截止倒计时，期末周防漏考</string>
 </resources>

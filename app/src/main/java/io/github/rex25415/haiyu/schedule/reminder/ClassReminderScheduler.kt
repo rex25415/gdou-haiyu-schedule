@@ -23,6 +23,7 @@ object ClassReminderScheduler {
     const val CHANNEL_ID = "haiyu_class_reminders"
     const val ACTION_CLASS_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_CLASS_REMINDER"
     const val ACTION_DDL_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_DDL_REMINDER"
+    const val ACTION_EXAM_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_EXAM_REMINDER"
 
     const val EXTRA_COURSE_NAME = "course_name"
     const val EXTRA_LOCATION = "location"
@@ -34,8 +35,13 @@ object ClassReminderScheduler {
     const val EXTRA_DDL_COURSE = "ddl_course"
     const val EXTRA_DDL_DUE_DATE = "ddl_due_date"
 
+    const val EXTRA_EXAM_COURSE = "exam_course"
+    const val EXTRA_EXAM_TIME = "exam_time"
+    const val EXTRA_EXAM_LOC_SEAT = "exam_loc_seat"
+
     private const val REQUEST_CODE_NEXT = 202601
     private const val REQUEST_CODE_DDL = 202602
+    private const val REQUEST_CODE_EXAM = 202603
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -61,10 +67,12 @@ object ClassReminderScheduler {
 
         cancelExisting(context, am)
         cancelExistingDdl(context, am)
+        cancelExistingExam(context, am)
         if (!settings.reminderEnabled) return
 
         scheduleNextClassInternal(context, am)
         scheduleNextDdlInternal(context, am)
+        scheduleNextExamInternal(context, am)
     }
 
     private fun scheduleNextClassInternal(context: Context, am: AlarmManager) {
@@ -198,6 +206,48 @@ object ClassReminderScheduler {
         scheduleAlarmCompat(am, triggerMillis, pi)
     }
 
+    private fun scheduleNextExamInternal(context: Context, am: AlarmManager) {
+        val snapshot = AppRepository.getInstance(context).state.value
+        if (snapshot.exams.isEmpty()) return
+
+        val now = LocalDateTime.now()
+        var earliestTrigger: LocalDateTime? = null
+        var bestCourse = ""
+        var bestTime = ""
+        var bestLocSeat = ""
+
+        for (exam in snapshot.exams) {
+            val startDt = GdouTimeRules.parseExamStartDateTime(exam.examTimeRaw) ?: continue
+            val triggerAt = startDt.minusMinutes(60)
+            if (!triggerAt.isAfter(now)) continue
+            if (earliestTrigger == null || triggerAt.isBefore(earliestTrigger)) {
+                earliestTrigger = triggerAt
+                bestCourse = exam.courseName
+                bestTime = exam.examTimeRaw
+                bestLocSeat = buildString {
+                    append(exam.location.ifBlank { "考场待定" })
+                    if (exam.seatNumber.isNotBlank()) append(" · ${exam.seatNumber}号座")
+                }
+            }
+        }
+
+        val triggerTime = earliestTrigger ?: return
+        val triggerMillis = triggerTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val intent = Intent(context, ClassReminderReceiver::class.java).apply {
+            action = ACTION_EXAM_REMINDER
+            putExtra(EXTRA_EXAM_COURSE, bestCourse)
+            putExtra(EXTRA_EXAM_TIME, bestTime)
+            putExtra(EXTRA_EXAM_LOC_SEAT, bestLocSeat)
+        }
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_EXAM,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        scheduleAlarmCompat(am, triggerMillis, pi)
+    }
+
     private fun scheduleAlarmCompat(am: AlarmManager, triggerMillis: Long, pi: PendingIntent) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
@@ -230,6 +280,19 @@ object ClassReminderScheduler {
         val pi = PendingIntent.getBroadcast(
             context,
             REQUEST_CODE_DDL,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pi != null) am.cancel(pi)
+    }
+
+    private fun cancelExistingExam(context: Context, am: AlarmManager) {
+        val intent = Intent(context, ClassReminderReceiver::class.java).apply {
+            action = ACTION_EXAM_REMINDER
+        }
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_EXAM,
             intent,
             PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
@@ -323,5 +386,36 @@ object ClassReminderScheduler {
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(((System.currentTimeMillis() % 90000) + 10000).toInt(), notification)
+    }
+
+    fun showExamNotification(
+        context: Context,
+        courseName: String,
+        examTime: String,
+        locSeat: String
+    ) {
+        ensureChannel(context)
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPi = PendingIntent.getActivity(
+            context,
+            2,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val body = "$examTime · $locSeat（请提前带好校园卡/身份证与文具）"
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("即将开考：$courseName")
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(contentPi)
+            .build()
+
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(((System.currentTimeMillis() % 80000) + 20000).toInt(), notification)
     }
 }

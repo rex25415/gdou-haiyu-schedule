@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Zero-permission single-package visibility to detect legacy v2.7.0 package and guide clean migration -->
+    <queries>
+        <package android:name="cn.gdou.haiyu.schedule" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -43,13 +48,14 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Class & DDL reminder alarm receiver -->
+        <!-- Class, Exam & DDL reminder alarm receiver -->
         <receiver
             android:name=".reminder.ClassReminderReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="io.github.rex25415.haiyu.schedule.ACTION_CLASS_REMINDER" />
                 <action android:name="io.github.rex25415.haiyu.schedule.ACTION_DDL_REMINDER" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_EXAM_REMINDER" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
@@ -66,6 +72,20 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/today_schedule_widget_info" />
+        </receiver>
+
+        <!-- Home Screen Exam & DDL Countdown Widget -->
+        <receiver
+            android:name=".widget.CountdownWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_countdown_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_COUNTDOWN_WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/countdown_widget_info" />
         </receiver>
 
     </application>

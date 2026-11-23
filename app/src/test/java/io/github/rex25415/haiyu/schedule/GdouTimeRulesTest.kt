@@ -1,9 +1,11 @@
 package io.github.rex25415.haiyu.schedule
 
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
+import io.github.rex25415.haiyu.schedule.data.JointFreeState
 import io.github.rex25415.haiyu.schedule.data.TermWeekPhase
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.CourseItem
+import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.ScheduleShareBundle
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
@@ -306,5 +308,72 @@ class GdouTimeRulesTest {
         val fallback = GdouTimeRules.parseLocalTime("invalid-time")
         assertEquals(8, fallback.hour)
         assertEquals(10, fallback.minute)
+    }
+
+    @Test
+    fun resolveExamsForWeekProjectsDatesAndSectionsAccurately() {
+        val e1 = ExamItem(
+            courseName = "线性代数",
+            examTimeRaw = "2026-12-28(08:30-10:30)",
+            location = "教学楼204",
+            seatNumber = "12"
+        )
+        val e2 = ExamItem(
+            courseName = "大学物理",
+            examTimeRaw = "2026-12-30 14:30-16:30",
+            location = "教学楼305",
+            seatNumber = "28"
+        )
+        val eOther = ExamItem(
+            courseName = "下周考试",
+            examTimeRaw = "2027-01-05(09:00-11:00)",
+            location = "教学楼101"
+        )
+        // Start Monday 2026-08-31 -> Week 18 Monday is 2026-12-28
+        val week18 = GdouTimeRules.resolveExamsForWeek(
+            exams = listOf(e1, e2, eOther),
+            startDateStr = "2026-08-31",
+            weekNumber = 18,
+            campus = GdouCampus.HAIBIN
+        )
+        assertEquals(2, week18.size)
+        assertEquals(1, week18[0].dayOfWeek)
+        assertEquals(1, week18[0].startSection)
+        assertTrue(week18[0].endSection >= 3)
+        assertEquals(3, week18[1].dayOfWeek)
+        assertEquals(5, week18[1].startSection)
+        assertEquals(6, week18[1].endSection)
+    }
+
+    @Test
+    fun computeJointFreeMatrixDetectsAllFourStates() {
+        val myCourses = listOf(
+            CourseItem(name = "高数", dayOfWeek = 1, startSection = 1, endSection = 2, weeks = listOf(5)),
+            CourseItem(name = "线代", dayOfWeek = 1, startSection = 3, endSection = 4, weeks = listOf(5))
+        )
+        val partnerCourses = listOf(
+            CourseItem(name = "高数", dayOfWeek = 1, startSection = 1, endSection = 2, weeks = listOf(5)),
+            CourseItem(name = "英语", dayOfWeek = 1, startSection = 5, endSection = 6, weeks = listOf(5))
+        )
+        val matrix = GdouTimeRules.computeJointFreeMatrix(myCourses, partnerCourses, weekNumber = 5)
+        assertEquals(35, matrix.size)
+        assertEquals(JointFreeState.BOTH_BUSY, matrix.first { it.dayOfWeek == 1 && it.blockIndex == 0 }.state)
+        assertEquals(JointFreeState.ONLY_ME_BUSY, matrix.first { it.dayOfWeek == 1 && it.blockIndex == 1 }.state)
+        assertEquals(JointFreeState.ONLY_PARTNER_BUSY, matrix.first { it.dayOfWeek == 1 && it.blockIndex == 2 }.state)
+        assertEquals(JointFreeState.BOTH_FREE, matrix.first { it.dayOfWeek == 1 && it.blockIndex == 3 }.state)
+    }
+
+    @Test
+    fun formatWeekScheduleAndExamsAsCleanTextWorks() {
+        val c = CourseItem(name = "数据结构", location = "实验楼301", dayOfWeek = 1, startSection = 3, endSection = 4, weeks = listOf(1))
+        val schedTxt = GdouTimeRules.formatWeekScheduleAsText(listOf(c), 1, GdouCampus.HAIBIN, "2026-2027 第一学期")
+        assertTrue(schedTxt.contains("数据结构"))
+        assertTrue(schedTxt.contains("10:05-11:35"))
+        assertTrue(schedTxt.contains("[错峰]"))
+
+        val ex = ExamItem(courseName = "数据结构", examTimeRaw = "2026-12-28(09:00-11:00)", location = "教学楼204", seatNumber = "15")
+        val examTxt = GdouTimeRules.formatExamsAsText(listOf(ex), "2026-2027 第一学期")
+        assertTrue(examTxt.contains("数据结构"))
+        assertTrue(examTxt.contains("15号座"))
     }
 }

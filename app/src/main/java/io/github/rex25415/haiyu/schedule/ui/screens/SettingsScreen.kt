@@ -89,11 +89,13 @@ import io.github.rex25415.haiyu.schedule.model.AppSettings
 import io.github.rex25415.haiyu.schedule.model.AppThemePalette
 import io.github.rex25415.haiyu.schedule.model.DarkModeOption
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
+import io.github.rex25415.haiyu.schedule.model.GridRowDensity
 import io.github.rex25415.haiyu.schedule.ui.components.BellScheduleReferenceDialog
 import io.github.rex25415.haiyu.schedule.ui.components.OemKeepAliveGuideDialog
 import io.github.rex25415.haiyu.schedule.ui.components.ScheduleShareCodeDialog
 import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppSignatureVerifier
+import io.github.rex25415.haiyu.schedule.update.LegacyInstallInfo
 import io.github.rex25415.haiyu.schedule.update.SignatureTrustState
 import java.time.DayOfWeek
 import java.time.Instant
@@ -106,10 +108,13 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     snapshot: AppDataSnapshot,
     availableUpdate: AppReleaseInfo?,
+    legacyInstall: LegacyInstallInfo?,
     isCheckingUpdate: Boolean,
     updateStatusSummary: String?,
     onCheckForUpdates: () -> Unit,
     onOpenUpdateDialog: () -> Unit,
+    onLaunchLegacyApp: () -> Unit,
+    onOpenLegacyUninstall: () -> Unit,
     onOpenGitHubRepo: () -> Unit,
     onCopyDownloadPageLink: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
@@ -211,6 +216,67 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text("立即更新", maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 0b. Zero-Permission Legacy Package Cleanup Card (ONLY shown if old cn.gdou.haiyu.schedule is still installed!)
+        if (legacyInstall != null) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "检测到旧包名版本（${legacyInstall.versionName}）仍留在手机上",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (snapshot.courses.isEmpty()) {
+                                "因 v2.8.0+ 升级非商业开源协议并启用中性新包名，无法直接覆盖旧包。建议先打开旧版复制「同班分享码」导入本新版，再卸载旧版图标。"
+                            } else {
+                                "新版课表已就绪！因 v2.8.0+ 启用了中性新包名无法覆盖旧包，点下方按钮可直接前往系统页卸载旧版，避免桌面出现双图标。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.88f)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (snapshot.courses.isEmpty()) {
+                                OutlinedButton(
+                                    onClick = onLaunchLegacyApp,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("打开旧版", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                                }
+                            }
+                            Button(
+                                onClick = onOpenLegacyUninstall,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("前往卸载旧版", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                            }
                         }
                     }
                 }
@@ -426,6 +492,35 @@ fun SettingsScreen(
                     checked = settings.showWeekend,
                     onCheckedChange = { v -> onUpdateSettings { it.copy(showWeekend = v) } }
                 )
+                SettingSwitchRow(
+                    title = "在周课表中显示考试安排",
+                    subtitle = "期末周自动把已同步/添加的考试以醒目卡片投影到对应周课表",
+                    checked = settings.showExamsOnTimetable,
+                    onCheckedChange = { v -> onUpdateSettings { it.copy(showExamsOnTimetable = v) } }
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                Text("课表行高密度", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "选「紧凑一屏」可在手机上一眼看全 1–10 节，减少上下滑动。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    GridRowDensity.entries.forEach { density ->
+                        HaiyuChoiceChip(
+                            label = density.label,
+                            selected = settings.gridRowDensity == density,
+                            onClick = { onUpdateSettings { it.copy(gridRowDensity = density) } }
+                        )
+                    }
+                }
             }
         }
 
@@ -478,7 +573,7 @@ fun SettingsScreen(
         item {
             SettingsCard(title = "桌面小组件与数据工具", icon = Icons.Rounded.Widgets) {
                 Text(
-                    text = "在手机桌面长按空白处 → 点击「微件 / 小组件」→ 找到「海屿今日课表」即可添加到桌面，解锁一眼看当天课表！",
+                    text = "在手机桌面长按空白处 → 点击「微件 / 小组件」，可添加「海屿今日课表」与「海屿考试与 DDL 倒计时」两款深浅自适应小组件！",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

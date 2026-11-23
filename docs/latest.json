@@ -1,11 +1,11 @@
 {
-  "tagName": "v2.9.0",
-  "versionName": "2.9.0",
-  "title": "海屿课表 v2.9.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v2.9.0.apk",
-  "apkSizeBytes": 1783185,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v2.9.0/HaiyuSchedule-GDOU-v2.9.0.apk",
-  "expectedSha256": "435700f48109a65949f89778f8804aaab1bae7fba16affb82772348b8ee63d4d",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v2.9.0",
-  "releaseNotes": "- 彻底修复校外免校园网通道下「一键全同步」无法直接拉取考试与成绩的根因，登录后无需点进任何子页面，一次点击直接拉通课表、历史成绩与考场座位\n- 修复校外通道下「教务直达」（如查空教室）误跳文件管理页问题，同步精简教务顶栏控件\n- 新增「重课冲突置顶显示」、零权限「自定义课表壁纸 + 卡片不透明度调节」、「全量换机备份 / 从备份恢复」与「学期进度条」\n- 课程检索升级「按课程聚合 / 按排课展开」双视图与 1 键跳转上课周次；全面异步化本地存储与导出，切页自动暂停后台 WebView 省电更流畅"
+  "tagName": "v3.0.0",
+  "versionName": "3.0.0",
+  "title": "海屿课表 v3.0.0",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.0.0.apk",
+  "apkSizeBytes": 1819529,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.0.0/HaiyuSchedule-GDOU-v3.0.0.apk",
+  "expectedSha256": "c4fa4cd754d07047a6054c530ff9d66669ecad00f39d8e6d389db5614dccfc99",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.0.0",
+  "releaseNotes": "- 真机视觉大打磨：移除网格中孤立短绿杠（仅保留左侧当前节次高亮）、星期栏升级为「周一–周日」、修复窄屏重课卡错峰时间截断与跨 3–4 节长课滚出空白，并新增「紧凑一屏 / 标准舒适 / 宽松大字」行高密度切换\n- 零权限旧包名自动检测与清理引导：自动识别仍残留在桌面的 v2.7.0 及以前旧包名版本，温和引导数据迁移并一键前往系统页卸载旧图标\n- 期末考试周救命升级：考试安排自动投影至对应教学周课表（醒目琥珀考试卡），同步接入考前 1 小时精准提醒与全新「海屿考试与 DDL 倒计时」桌面小组件\n- 新增纯离线「双人/室友空课交集对比」、课程详情「课堂笔记 / 考核备忘」随手快记、成绩页可折叠「各学期 GPA 趋势折线图与学分分类统计」以及一键复制本周课表/考试纯文本"
 }
