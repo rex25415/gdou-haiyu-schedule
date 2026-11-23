@@ -1,6 +1,7 @@
 # 🌊 海屿课表 · 广东海洋大学全校区纯净开源课表 App
 
 [![Release](https://img.shields.io/github/v/release/rex25415/gdou-haiyu-schedule?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
+[![Android CI](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml/badge.svg)](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml)
 [![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
