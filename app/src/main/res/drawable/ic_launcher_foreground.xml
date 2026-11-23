@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Minimalist Calendar Card -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,34 C31,30.69 33.69,28 37,28 L71,28 C74.31,28 77,30.69 77,34 L77,73 C77,76.31 74.31,79 71,79 L37,79 C33.69,79 31,76.31 31,73 Z" />
+    <!-- Calendar Rings -->
+    <path
+        android:fillColor="#E2FFF6"
+        android:pathData="M42,23 C43.66,23 45,24.34 45,26 L45,32 C45,33.66 43.66,35 42,35 C40.34,35 39,33.66 39,32 L39,26 C39,24.34 40.34,23 42,23 Z" />
+    <path
+        android:fillColor="#E2FFF6"
+        android:pathData="M66,23 C67.66,23 69,24.34 69,26 L69,32 C69,33.66 67.66,35 66,35 C64.34,35 63,33.66 63,32 L63,26 C63,24.34 64.34,23 66,23 Z" />
+    <!-- Top Header Strip -->
+    <path
+        android:fillColor="#D4F5EC"
+        android:pathData="M31,34 C31,30.69 33.69,28 37,28 L71,28 C74.31,28 77,30.69 77,34 L77,42 L31,42 Z" />
+    <!-- Schedule Blocks -->
+    <path
+        android:fillColor="#0E8A7D"
+        android:pathData="M38,48 L52,48 C53.1,48 54,48.9 54,50 L54,58 C54,59.1 53.1,60 52,60 L38,60 C36.9,60 36,59.1 36,58 L36,50 C36,48.9 36.9,48 38,48 Z" />
+    <path
+        android:fillColor="#38BFA1"
+        android:pathData="M58,48 L70,48 C71.1,48 72,48.9 72,50 L72,54 C72,55.1 71.1,56 70,56 L58,56 C56.9,56 56,55.1 56,54 L56,50 C56,48.9 56.9,48 58,48 Z" />
+    <!-- Ocean Wave Accent -->
+    <path
+        android:fillColor="#0F9D8C"
+        android:pathData="M36,69 C42,64 48,64 54,68 C60,72 66,72 72,67 L72,72 C66,76 60,76 54,72 C48,68 42,68 36,73 Z" />
+</vector>

@@ -1,0 +1,23 @@
+# Local environment & signing secrets (NEVER commit!)
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# Build outputs & Gradle/Kotlin caches
+.gradle/
+.kotlin/
+build/
+app/build/
+output/
+*.apk
+*.aab
+*.ap_
+
+# IDE & OS artifacts
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
+*.hprof

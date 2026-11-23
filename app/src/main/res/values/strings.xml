@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">海屿课表</string>
+    <string name="widget_today_name">海屿今日课表</string>
+    <string name="widget_today_desc">广东海洋大学全校区：在桌面一眼查看今日课程、教室与错峰作息时间</string>
+</resources>
