@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
@@ -53,6 +54,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,12 +67,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -83,6 +90,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -117,12 +125,32 @@ fun AcademicScreen(
     onDeleteGrade: (String) -> Unit,
     onAddExam: (ExamItem) -> Unit,
     onDeleteExam: (String) -> Unit,
+    onToggleExamPin: (String) -> Unit = {},
     onCopyExamsText: () -> Unit = {}
 ) {
     var tabIndex by remember { mutableIntStateOf(requestedSubTab.coerceIn(0, 2)) } // 0 = Tasks DDL, 1 = Grades & GPA, 2 = Exams
     LaunchedEffect(subTabRequestNonce) {
         if (subTabRequestNonce > 0) {
             tabIndex = requestedSubTab.coerceIn(0, 2)
+        }
+    }
+
+    // Auto-refresh local date/time on ON_RESUME and every minute so exam & DDL countdowns tick over midnight automatically!
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var nowDateTime by remember { mutableStateOf(LocalDateTime.now()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                nowDateTime = LocalDateTime.now()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            nowDateTime = LocalDateTime.now()
         }
     }
 
@@ -187,7 +215,7 @@ fun AcademicScreen(
                                     when (tabIndex) {
                                         0 -> "记 DDL"
                                         1 -> "模拟算分"
-                                        else -> "加考试"
+                                        else -> "加倒计时"
                                     }
                                 )
                             }
@@ -246,6 +274,7 @@ fun AcademicScreen(
             when (tabIndex) {
                 0 -> TasksContent(
                     tasks = snapshot.tasks,
+                    today = nowDateTime.toLocalDate(),
                     onAddClick = {
                         editingTask = null
                         showAddTaskDialog = true
@@ -268,12 +297,14 @@ fun AcademicScreen(
 
                 else -> ExamsContent(
                     exams = snapshot.exams,
+                    now = nowDateTime,
                     onJumpToSync = onJumpToSync,
                     onEditExam = { exam ->
                         editingExam = exam
                         showAddExamDialog = true
                     },
                     onDeleteExam = onDeleteExam,
+                    onToggleExamPin = onToggleExamPin,
                     onCopyExamsText = onCopyExamsText
                 )
             }
@@ -332,6 +363,7 @@ fun AcademicScreen(
 @Composable
 private fun TasksContent(
     tasks: List<TodoTaskItem>,
+    today: LocalDate,
     onAddClick: () -> Unit,
     onEditTask: (TodoTaskItem) -> Unit,
     onToggleDone: (String) -> Unit,
@@ -358,7 +390,8 @@ private fun TasksContent(
             Text(
                 text = "随时记下实验报告、课后作业或 PPT 汇报截止时间，也可以直接在课表点任意课程一键添加；临近截止前会在课表顶部贴心提醒你。",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = onAddClick, shape = RoundedCornerShape(12.dp)) {
@@ -370,7 +403,6 @@ private fun TasksContent(
         return
     }
 
-    val today = remember { LocalDate.now() }
     val pendingCount = remember(tasks) { tasks.count { !it.isDone } }
     val doneCount = remember(tasks) { tasks.count { it.isDone } }
 
@@ -633,6 +665,29 @@ private fun GradesContent(
             .sortedByDescending { it.second }
     }
     var showInsightsCard by remember { mutableStateOf(false) }
+    var targetGpaInput by remember { mutableStateOf("3.5") }
+    var futureCreditsInput by remember { mutableStateOf("20") }
+    var showLowScoreList by remember { mutableStateOf(false) }
+
+    val allTermStats = remember(grades) {
+        var totalCr = 0.0
+        var weightedGp = 0.0
+        grades.forEach { g ->
+            if (g.credit > 0.0) {
+                totalCr += g.credit
+                weightedGp += g.gradePoint * g.credit
+            }
+        }
+        val gpa = if (totalCr > 0.0) weightedGp / totalCr else 0.0
+        gpa to totalCr
+    }
+    val lowScoreCourses = remember(grades) {
+        grades.filter { g ->
+            g.credit > 0.0 && !g.isSimulated && (
+                g.gradePoint <= 0.0 || (parseScoreNumeric(g.score)?.let { it < 60.0 } == true)
+            )
+        }
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 84.dp),
@@ -680,8 +735,8 @@ private fun GradesContent(
             }
         }
 
-        // Collapsible GPA Trend & Credit Category Breakdown (clean & zero clutter by default!)
-        if (termGpaSeries.size >= 2 || creditByCategory.isNotEmpty()) {
+        // Collapsible GPA Trend, Credit Breakdown & Target GPA Reverse Planner (clean & zero clutter by default!)
+        if (termGpaSeries.size >= 2 || creditByCategory.isNotEmpty() || allTermStats.second > 0.0) {
             item {
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -705,7 +760,7 @@ private fun GradesContent(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "学分分布与 GPA 走势",
+                                    text = "学分分布、GPA 走势与目标反推",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -745,7 +800,7 @@ private fun GradesContent(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(82.dp)
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .padding(vertical = 8.dp)
                                 ) {
                                     val w = size.width
                                     val h = size.height
@@ -753,8 +808,9 @@ private fun GradesContent(
                                     drawLine(gridColor, Offset(0f, h), Offset(w, h), strokeWidth = 1.5f)
                                     drawLine(gridColor, Offset(0f, h * 0.5f), Offset(w, h * 0.5f), strokeWidth = 1f)
 
+                                    val colW = w / termGpaSeries.size.coerceAtLeast(1)
                                     val pts = termGpaSeries.mapIndexed { idx, (_, gp) ->
-                                        val x = if (termGpaSeries.size == 1) w / 2f else w * idx / (termGpaSeries.size - 1)
+                                        val x = colW * (idx + 0.5f)
                                         val ratio = ((gp - minGpa) / span).toFloat().coerceIn(0f, 1f)
                                         val y = h * (1f - ratio)
                                         Offset(x, y)
@@ -775,21 +831,28 @@ private fun GradesContent(
                                     }
                                 }
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     termGpaSeries.forEach { (label, gp) ->
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
                                             Text(
                                                 text = String.format(Locale.US, "%.2f", gp),
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary
+                                                color = MaterialTheme.colorScheme.primary,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                             Text(
                                                 text = label,
                                                 fontSize = 9.5.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
@@ -798,8 +861,9 @@ private fun GradesContent(
 
                             if (creditByCategory.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(10.dp))
+                                val creditedCount = remember(creditByCategory) { creditByCategory.sumOf { it.third } }
                                 Text(
-                                    text = "已修学分分类统计",
+                                    text = "已修学分分类统计（计学分共 ${creditedCount} 门）",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -821,6 +885,139 @@ private fun GradesContent(
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             )
                                         }
+                                    }
+                                }
+                            }
+
+                            // Subtle low-score / retake reminder (only when present, collapsible, zero pressure)
+                            if (lowScoreCourses.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showLowScoreList = !showLowScoreList }
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "学业体检：${lowScoreCourses.size} 门课程成绩待留意（补考/重修参考）",
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                text = if (showLowScoreList) "收起" else "查看",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        if (showLowScoreList) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = lowScoreCourses.joinToString(" · ") {
+                                                    "${it.courseName}(${it.score.ifBlank { "0" }}/${it.credit}分)"
+                                                },
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Target GPA Reverse Calculator (pure local offline math!)
+                            if (allTermStats.second > 0.0) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "目标 GPA 反推测算（按全部已修 ${String.format(Locale.US, "%.1f", allTermStats.second)} 学分）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                ) {
+                                    listOf("2.5", "3.0", "3.5", "3.8", "4.0").forEach { preset ->
+                                        val sel = targetGpaInput.trim() == preset
+                                        Surface(
+                                            color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { targetGpaInput = preset }
+                                        ) {
+                                            Text(
+                                                text = "目标 $preset",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = targetGpaInput,
+                                        onValueChange = { targetGpaInput = it.filter { ch -> ch.isDigit() || ch == '.' }.take(4) },
+                                        label = { Text("目标总绩点", fontSize = 11.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = futureCreditsInput,
+                                        onValueChange = { futureCreditsInput = it.filter { ch -> ch.isDigit() || ch == '.' }.take(5) },
+                                        label = { Text("后续预计学分", fontSize = 11.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                val targetVal = targetGpaInput.toDoubleOrNull()
+                                val futureCrVal = futureCreditsInput.toDoubleOrNull()
+                                if (targetVal != null && futureCrVal != null && futureCrVal > 0.0) {
+                                    val plan = remember(allTermStats, targetVal, futureCrVal) {
+                                        GdouTimeRules.calculateTargetGpaPlan(
+                                            currentGpa = allTermStats.first,
+                                            currentCredits = allTermStats.second,
+                                            targetGpa = targetVal,
+                                            plannedFutureCredits = futureCrVal
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Surface(
+                                        color = if (plan.achievable) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                        else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = plan.summaryText,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (plan.achievable) MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                        )
                                     }
                                 }
                             }
@@ -975,26 +1172,30 @@ private fun StatSmallColumn(label: String, value: String) {
 @Composable
 private fun ExamsContent(
     exams: List<ExamItem>,
+    now: LocalDateTime,
     onJumpToSync: () -> Unit,
     onEditExam: (ExamItem) -> Unit,
     onDeleteExam: (String) -> Unit,
+    onToggleExamPin: (String) -> Unit,
     onCopyExamsText: () -> Unit
 ) {
     if (exams.isEmpty()) {
         EmptyAcademicHint(
-            title = "暂无考试安排",
-            desc = "前往「教务」页点击「一键全同步」可自动获取学校公布的考试时间与座位号，或点右上角「+ 加考试」手动添加四六级、期末考倒计时。",
+            title = "暂无考试或校园倒数日",
+            desc = "前往「教务」页点击「一键全同步」可自动获取学校公布的考试时间与座位号，或点右上角「+ 加倒计时」添加四六级、体测、放假倒计时。",
             onJumpToSync = onJumpToSync
         )
         return
     }
 
-    val now = remember { LocalDateTime.now() }
+    val today = now.toLocalDate()
     val sortedExams = remember(exams, now) {
         exams.sortedWith(
             compareBy<ExamItem> {
                 val dt = GdouTimeRules.parseExamStartDateTime(it.examTimeRaw)
                 if (dt == null) 1 else if (dt.isBefore(now)) 2 else 0
+            }.thenByDescending {
+                it.isPinned
             }.thenBy {
                 GdouTimeRules.parseExamStartDateTime(it.examTimeRaw)?.toString() ?: "9999"
             }
@@ -1013,9 +1214,10 @@ private fun ExamsContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "共 ${sortedExams.size} 场考试 · 已自动同步至对应教学周课表",
+                    text = "共 ${sortedExams.size} 项 · 点图钉可置顶到桌面倒计时组件首行",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
                 )
                 TextButton(
                     onClick = onCopyExamsText,
@@ -1029,8 +1231,8 @@ private fun ExamsContent(
         }
         items(sortedExams, key = { it.id }) { exam ->
             val dt = remember(exam.examTimeRaw) { GdouTimeRules.parseExamStartDateTime(exam.examTimeRaw) }
-            val daysLeft = remember(dt) {
-                dt?.let { ChronoUnit.DAYS.between(LocalDate.now(), it.toLocalDate()) }
+            val daysLeft = remember(dt, today) {
+                dt?.let { ChronoUnit.DAYS.between(today, it.toLocalDate()) }
             }
             val isPast = dt != null && dt.isBefore(now)
 
@@ -1064,7 +1266,7 @@ private fun ExamsContent(
                         ) {
                             when {
                                 isPast -> {
-                                    Text("已考完", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("已结束", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 daysLeft == null -> {
                                     Text("待定", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -1093,12 +1295,30 @@ private fun ExamsContent(
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = exam.courseName,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = exam.courseName,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (exam.isPinned) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "置顶",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Event, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
@@ -1109,42 +1329,55 @@ private fun ExamsContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.LocationOn, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = buildString {
-                                    append(exam.location.ifBlank { "考场待定" })
-                                    if (exam.seatNumber.isNotBlank()) append(" · ${exam.seatNumber}号座")
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                        if (exam.location.isNotBlank() || exam.seatNumber.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.LocationOn, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = buildString {
+                                        append(exam.location.ifBlank { "考场待定" })
+                                        if (exam.seatNumber.isNotBlank()) append(" · ${exam.seatNumber}号座")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
 
                     IconButton(
+                        onClick = { onToggleExamPin(exam.id) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.PushPin,
+                            contentDescription = if (exam.isPinned) "取消置顶" else "置顶到小组件首行",
+                            tint = if (exam.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    IconButton(
                         onClick = { onEditExam(exam) },
-                        modifier = Modifier.size(30.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             Icons.Rounded.Edit,
-                            contentDescription = "编辑考试",
+                            contentDescription = "编辑",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                     IconButton(
                         onClick = { onDeleteExam(exam.id) },
-                        modifier = Modifier.size(30.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             Icons.Rounded.DeleteOutline,
-                            contentDescription = "删除考试",
+                            contentDescription = "删除",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                 }
@@ -1303,6 +1536,7 @@ private fun AddExamDialog(
 ) {
     val fmt = remember { DateTimeFormatter.ISO_LOCAL_DATE }
     var name by remember(existingExam) { mutableStateOf(existingExam?.courseName.orEmpty()) }
+    var examType by remember(existingExam) { mutableStateOf(existingExam?.examType ?: "期末考试") }
     var timeRaw by remember(existingExam) {
         mutableStateOf(existingExam?.examTimeRaw?.ifBlank { "${LocalDate.now().plusDays(7)}(09:00-11:00)" } ?: "${LocalDate.now().plusDays(7)}(09:00-11:00)")
     }
@@ -1314,16 +1548,54 @@ private fun AddExamDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existingExam == null) "添加自定义考试倒计时" else "编辑考试安排") },
+        title = { Text(if (existingExam == null) "添加考试 / 校园倒数日" else "编辑考试与倒数日") },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (existingExam == null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        listOf(
+                            Triple("英语四级", "考证倒计时", defaultLocation),
+                            Triple("英语六级", "考证倒计时", defaultLocation),
+                            Triple("放假倒计时", "放假倒数日", ""),
+                            Triple("体能测试", "体测倒计时", "田径场"),
+                            Triple("计算机二级", "考证倒计时", defaultLocation),
+                            Triple("考研初试", "考试倒计时", "")
+                        ).forEach { (presetName, presetType, presetLoc) ->
+                            val sel = name == presetName
+                            Surface(
+                                color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerLow,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        name = presetName
+                                        examType = presetType
+                                        location = presetLoc
+                                    }
+                            ) {
+                                Text(
+                                    text = presetName,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("考试科目（如 英语四级 / 期末考）*") },
+                    label = { Text("名称（如 英语四级 / 放假倒计时）*") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1332,7 +1604,7 @@ private fun AddExamDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("考试日期与时段", style = MaterialTheme.typography.labelMedium)
+                    Text("日期与时段", style = MaterialTheme.typography.labelMedium)
                     TextButton(onClick = { showDatePicker = true }) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1342,14 +1614,14 @@ private fun AddExamDialog(
                 OutlinedTextField(
                     value = timeRaw,
                     onValueChange = { timeRaw = it },
-                    label = { Text("考试时间（YYYY-MM-DD(HH:MM-HH:MM)）") },
+                    label = { Text("时间（YYYY-MM-DD(HH:MM-HH:MM)）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = location,
                     onValueChange = { location = it },
-                    label = { Text("考场地点") },
+                    label = { Text("地点 / 考场（放假等倒数日可留空）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1373,6 +1645,7 @@ private fun AddExamDialog(
                                 examTimeRaw = timeRaw.trim(),
                                 location = location.trim(),
                                 seatNumber = seat.trim(),
+                                examType = examType,
                                 isDemo = false
                             )
                         } else {
@@ -1381,7 +1654,7 @@ private fun AddExamDialog(
                                 examTimeRaw = timeRaw.trim(),
                                 location = location.trim(),
                                 seatNumber = seat.trim(),
-                                examType = "自定义考试",
+                                examType = examType,
                                 isManual = true
                             )
                         }

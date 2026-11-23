@@ -22,7 +22,7 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:text="海屿课表 · 今日"
+            android:text="海屿空间 · 今日"
             android:textColor="@color/widget_title"
             android:textSize="14sp"
             android:textStyle="bold" />

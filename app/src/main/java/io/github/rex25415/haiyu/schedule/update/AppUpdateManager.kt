@@ -74,8 +74,11 @@ object AppUpdateManager {
     const val REPO_OWNER = "rex25415"
     const val REPO_NAME = "gdou-haiyu-schedule"
     const val REPO_WEB_URL = "https://github.com/$REPO_OWNER/$REPO_NAME"
+    const val ISSUES_URL = "$REPO_WEB_URL/issues"
+    const val ISSUES_NEW_URL = "$REPO_WEB_URL/issues/new/choose"
     const val DOWNLOAD_PAGE_URL = "https://$REPO_OWNER.github.io/$REPO_NAME/"
     const val LATEST_RELEASE_WEB_URL = "$REPO_WEB_URL/releases/latest"
+    const val PRIMARY_MIRROR_PREFIX = "https://gh-proxy.com/"
     private const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
     private const val RAW_LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/docs/latest.json"
     private const val PAGES_LATEST_MANIFEST_URL = "${DOWNLOAD_PAGE_URL}latest.json"
@@ -160,7 +163,7 @@ object AppUpdateManager {
             val tagName = root["tag_name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             if (tagName.isEmpty()) return null
             val versionName = normalizeVersion(tagName)
-            val title = root["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿课表 v$versionName" }
+            val title = root["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿空间 v$versionName" }
             val body = root["body"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             val htmlUrl = root["html_url"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
                 .ifBlank { "$REPO_WEB_URL/releases/tag/$tagName" }
@@ -230,7 +233,7 @@ object AppUpdateManager {
                 ?: normalizeVersion(tagName)
             if (versionName.isEmpty()) return null
             val finalTag = tagName.ifBlank { "v$versionName" }
-            val title = root["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿课表 v$versionName" }
+            val title = root["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿空间 v$versionName" }
             val notes = root["releaseNotes"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             val htmlUrl = root["htmlUrl"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
                 .ifBlank { "$REPO_WEB_URL/releases/tag/$finalTag" }
@@ -287,7 +290,8 @@ object AppUpdateManager {
                     t.contains("中文极速下载主页") ||
                     t.contains("点击下方") ||
                     t.contains("若你已安装") ||
-                    t.startsWith("## 🌊 海屿课表")
+                    t.startsWith("## 🌊 海屿课表") ||
+                    t.startsWith("## 🌊 海屿空间")
             }
             .joinToString("\n") { line ->
                 line
@@ -389,7 +393,7 @@ object AppUpdateManager {
                     val fallbackRelease = AppReleaseInfo(
                         tagName = tag,
                         versionName = ver,
-                        title = "海屿课表 v$ver",
+                        title = "海屿空间 v$ver",
                         releaseNotes = "检测到新版本 v$ver，建议立即更新以获取最新功能与体验优化。",
                         htmlUrl = "$REPO_WEB_URL/releases/tag/$tag",
                         apkDownloadUrl = "$REPO_WEB_URL/releases/download/$tag/$fileName",
@@ -615,6 +619,64 @@ object AppUpdateManager {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /**
+     * 调起系统原生分享面板（微信 / QQ / 系统分享纯文本）
+     */
+    fun sharePlainText(context: Context, chooserTitle: String, text: String): Boolean {
+        return try {
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            val chooser = Intent.createChooser(sendIntent, chooserTitle).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 生成克制、实用的同学分享文案与免翻下载链接（零广告感）
+     */
+    fun buildAppShareText(): String {
+        return "分享一个纯本地、无广告的广海三校区学业工具「海屿空间」（原名海屿课表，免校园网可一键同步课表、成绩/GPA、考试倒计时、DDL 与三款桌面小组件）：\n" +
+            "中文高速下载页（免翻 GitHub）：$DOWNLOAD_PAGE_URL"
+    }
+
+    /**
+     * 构造指定版本的国内高速直链（优先复用已知官方 Release APK 链接）
+     */
+    fun buildMirrorApkUrl(versionName: String, officialApkUrl: String? = null): String {
+        val cleanVer = normalizeVersion(versionName).ifBlank { "3.1.0" }
+        val official = officialApkUrl?.trim().orEmpty().ifBlank {
+            "$REPO_WEB_URL/releases/download/v$cleanVer/HaiyuSchedule-GDOU-v$cleanVer.apk"
+        }
+        return if (official.startsWith("https://github.com/", ignoreCase = true)) {
+            "$PRIMARY_MIRROR_PREFIX$official"
+        } else {
+            official
+        }
+    }
+
+    /**
+     * 生成纯脱敏排障环境信息（严格不含学号、姓名、课程、成绩等任何个人隐私）
+     */
+    fun buildDiagnosticInfo(
+        versionName: String,
+        versionCode: Int,
+        androidRelease: String,
+        sdkInt: Int,
+        campusLabel: String,
+        densityLabel: String,
+        darkModeLabel: String
+    ): String {
+        return "海屿空间 v$versionName (build $versionCode) | Android $androidRelease (API $sdkInt) | " +
+            "校区：$campusLabel | 课表密度：$densityLabel | 外观：$darkModeLabel"
     }
 
     /**

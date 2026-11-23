@@ -598,7 +598,7 @@ object GdouTimeRules {
         pinnedKeys: Set<String> = emptySet()
     ): String {
         val sb = StringBuilder()
-        sb.appendLine("【海屿课表】第${weekNumber}周（${campus.label} · $termLabel）")
+        sb.appendLine("【海屿空间】第${weekNumber}周（${campus.label} · $termLabel）")
         var anyCourse = false
         for (day in 1..7) {
             val active = courses.filter { it.dayOfWeek == day && weekNumber in it.weeks }
@@ -630,7 +630,7 @@ object GdouTimeRules {
             }.thenBy { parseExamStartDateTime(it.examTimeRaw)?.toString() ?: "9999" }
         )
         val sb = StringBuilder()
-        sb.appendLine("【海屿课表 · 考试清单】$termLabel（共 ${sorted.size} 场）")
+        sb.appendLine("【海屿空间 · 考试清单】$termLabel（共 ${sorted.size} 场）")
         sorted.forEachIndexed { i, ex ->
             val seat = if (ex.seatNumber.isNotBlank()) " · ${ex.seatNumber}号座" else ""
             val loc = ex.location.ifBlank { "考场待定" }
@@ -638,6 +638,96 @@ object GdouTimeRules {
             sb.appendLine("${i + 1}. ${ex.courseName}｜$time｜$loc$seat")
         }
         return sb.toString().trim()
+    }
+
+    /**
+     * 纯本地目标 GPA 反推计算（按广海 5 分制：score ≈ gpa * 10 + 50）
+     */
+    data class TargetGpaPlan(
+        val alreadyReached: Boolean,
+        val achievable: Boolean,
+        val requiredFutureGpa: Double,
+        val estimatedScore: Double,
+        val summaryText: String
+    )
+
+    fun calculateTargetGpaPlan(
+        currentGpa: Double,
+        currentCredits: Double,
+        targetGpa: Double,
+        plannedFutureCredits: Double
+    ): TargetGpaPlan {
+        val safeCurCr = currentCredits.coerceAtLeast(0.0)
+        val safeFutureCr = plannedFutureCredits.coerceAtLeast(0.5)
+        val safeTarget = targetGpa.coerceIn(0.0, 5.0)
+        if (safeCurCr <= 0.0) {
+            val est = (safeTarget * 10.0 + 50.0).coerceIn(60.0, 100.0)
+            return TargetGpaPlan(
+                alreadyReached = false,
+                achievable = true,
+                requiredFutureGpa = safeTarget,
+                estimatedScore = est,
+                summaryText = String.format(
+                    java.util.Locale.US,
+                    "后续 %.1f 学分平均达到 GPA %.2f（约 %.0f 分）即可达成",
+                    safeFutureCr, safeTarget, est
+                )
+            )
+        }
+        val neededGpa = ((safeTarget * (safeCurCr + safeFutureCr)) - (currentGpa * safeCurCr)) / safeFutureCr
+        return when {
+            neededGpa <= 0.0 -> TargetGpaPlan(
+                alreadyReached = true,
+                achievable = true,
+                requiredFutureGpa = 0.0,
+                estimatedScore = 60.0,
+                summaryText = String.format(
+                    java.util.Locale.US,
+                    "当前总绩点（%.2f）已高于目标，后续 %.1f 学分正常及格即可稳稳保持",
+                    currentGpa, safeFutureCr
+                )
+            )
+            neededGpa > 5.0 -> {
+                val extraCreditsAt40 = if (safeTarget < 4.0) {
+                    ((safeTarget - currentGpa) * safeCurCr / (4.0 - safeTarget)).coerceAtLeast(1.0)
+                } else null
+                val hint = if (extraCreditsAt40 != null) {
+                    String.format(
+                        java.util.Locale.US,
+                        "仅靠 %.1f 学分需 GPA %.2f（超过满绩 5.0）；若后续按均绩 4.0（90分）计算，约需 %.0f 学分可拉至 %.2f",
+                        safeFutureCr, neededGpa, extraCreditsAt40, safeTarget
+                    )
+                } else {
+                    String.format(
+                        java.util.Locale.US,
+                        "仅靠 %.1f 学分需 GPA %.2f（超过满绩 5.0），可适当调高预计后续学分或分阶段设定目标",
+                        safeFutureCr, neededGpa
+                    )
+                }
+                TargetGpaPlan(
+                    alreadyReached = false,
+                    achievable = false,
+                    requiredFutureGpa = neededGpa,
+                    estimatedScore = 100.0,
+                    summaryText = hint
+                )
+            }
+            else -> {
+                val estScore = if (neededGpa < 1.0) 60.0 else (neededGpa * 10.0 + 50.0).coerceIn(60.0, 100.0)
+                val prefix = if (currentGpa >= safeTarget) "当前已达标；后续" else "后续"
+                TargetGpaPlan(
+                    alreadyReached = currentGpa >= safeTarget,
+                    achievable = true,
+                    requiredFutureGpa = neededGpa,
+                    estimatedScore = estScore,
+                    summaryText = String.format(
+                        java.util.Locale.US,
+                        "%s %.1f 学分平均达到 GPA %.2f（广海 5 分制约合 %.1f 分）即可达到 %.2f",
+                        prefix, safeFutureCr, neededGpa, estScore, safeTarget
+                    )
+                )
+            }
+        }
     }
 
     /**

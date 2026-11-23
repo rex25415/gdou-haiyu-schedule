@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">海屿课表</string>
+    <string name="app_name">海屿空间</string>
     <string name="widget_today_name">海屿今日课表</string>
     <string name="widget_today_desc">广东海洋大学全校区：在桌面一眼查看今日课程、教室与错峰作息时间</string>
     <string name="widget_countdown_name">海屿考试与 DDL 倒计时</string>
     <string name="widget_countdown_desc">在桌面聚合展示最近 3 场考试与待办作业截止倒计时，期末周防漏考</string>
+    <string name="widget_next_class_name">海屿下一节课（极简）</string>
+    <string name="widget_next_class_desc">极简 4×1 单行胶囊，一眼查看下一节课时间与教室，不占桌面空间</string>
 </resources>

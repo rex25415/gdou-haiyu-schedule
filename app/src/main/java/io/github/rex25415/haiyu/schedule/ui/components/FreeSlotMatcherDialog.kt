@@ -159,7 +159,7 @@ fun FreeSlotMatcherBottomSheet(
 
             if (showEditInput || parsedBundle == null) {
                 Text(
-                    text = "粘贴室友、对象或小组成员的「海屿课表分享码」，纯离线算出本周两人都没课的空闲时段（不上传任何数据）。",
+                    text = "粘贴室友、对象或小组成员的「海屿分享码」，纯离线算出本周两人都没课的空闲时段（不上传任何数据）。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -176,7 +176,7 @@ fun FreeSlotMatcherBottomSheet(
                         codeInput = it
                         parseError = null
                     },
-                    placeholder = { Text("粘贴对方的海屿课表分享码...") },
+                    placeholder = { Text("粘贴对方的海屿分享码...") },
                     minLines = 2,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth()

@@ -376,4 +376,40 @@ class GdouTimeRulesTest {
         assertTrue(examTxt.contains("数据结构"))
         assertTrue(examTxt.contains("15号座"))
     }
+
+    @Test
+    fun calculateTargetGpaPlanHandlesAchievableReachedAndImpossibleCases() {
+        // Current 3.0 over 40 credits, target 3.5 with 20 future credits -> needs (3.5*60 - 3.0*40)/20 = 4.5 (95分)
+        val normal = GdouTimeRules.calculateTargetGpaPlan(
+            currentGpa = 3.0,
+            currentCredits = 40.0,
+            targetGpa = 3.5,
+            plannedFutureCredits = 20.0
+        )
+        assertTrue(normal.achievable)
+        assertFalse(normal.alreadyReached)
+        assertEquals(4.5, normal.requiredFutureGpa, 0.001)
+        assertEquals(95.0, normal.estimatedScore, 0.1)
+
+        // Already high enough (4.0 over 50 credits, target 3.0 with 10 credits -> neededGpa = -2.0 <= 0)
+        val reached = GdouTimeRules.calculateTargetGpaPlan(
+            currentGpa = 4.0,
+            currentCredits = 50.0,
+            targetGpa = 3.0,
+            plannedFutureCredits = 10.0
+        )
+        assertTrue(reached.alreadyReached)
+        assertTrue(reached.achievable)
+
+        // Impossible in 10 credits (1.5 over 50 credits, target 3.5 -> needs 13.5 > 5.0)
+        val impossible = GdouTimeRules.calculateTargetGpaPlan(
+            currentGpa = 1.5,
+            currentCredits = 50.0,
+            targetGpa = 3.5,
+            plannedFutureCredits = 10.0
+        )
+        assertFalse(impossible.achievable)
+        assertTrue(impossible.summaryText.contains("超过满绩 5.0"))
+        assertTrue(impossible.summaryText.contains("约需"))
+    }
 }

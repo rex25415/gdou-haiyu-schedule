@@ -66,6 +66,7 @@ import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
 import io.github.rex25415.haiyu.schedule.update.LegacyPackageDetector
 import io.github.rex25415.haiyu.schedule.update.UpdateCheckResult
 import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
 import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -192,6 +193,7 @@ fun HaiyuApp(
     fun syncWidgetsAndReminders() {
         TodayScheduleWidgetProvider.refreshAllWidgets(context)
         CountdownWidgetProvider.refreshAllWidgets(context)
+        NextClassWidgetProvider.refreshAllWidgets(context)
         ClassReminderScheduler.rescheduleNextReminder(context)
     }
 
@@ -244,7 +246,7 @@ fun HaiyuApp(
                 }
                 when {
                     !res.ok -> showToast("当前没有课程可生成图片，请先同步课表")
-                    res.savedToGallery -> showToast("高清课表图已保存至手机相册（Pictures/海屿课表）")
+                    res.savedToGallery -> showToast("高清课表图已保存至手机相册（Pictures/海屿空间）")
                     else -> showToast("已生成第 $weekNumber 周高清课表图")
                 }
             } catch (e: Exception) {
@@ -495,6 +497,9 @@ fun HaiyuApp(
                                     repo.updateCourseNote(courseId, note)
                                     showToast(if (note.isBlank()) "已清空本课笔记" else "已保存课堂笔记")
                                 },
+                                onUpdateCourseAttendance = { courseId, absDelta, bonusDelta ->
+                                    repo.updateCourseAttendance(courseId, absDelta, bonusDelta)
+                                },
                                 onAddTask = { task ->
                                     repo.upsertTask(task)
                                     syncWidgetsAndReminders()
@@ -578,7 +583,12 @@ fun HaiyuApp(
                                 onDeleteExam = { id ->
                                     repo.deleteExam(id)
                                     syncWidgetsAndReminders()
-                                    showToast("已删除该考试")
+                                    showToast("已删除该项")
+                                },
+                                onToggleExamPin = { id ->
+                                    val pinned = repo.toggleExamPin(id)
+                                    syncWidgetsAndReminders()
+                                    showToast(if (pinned) "已置顶，将优先显示在桌面倒计时组件首行" else "已取消置顶")
                                 },
                                 onCopyExamsText = {
                                     val txt = GdouTimeRules.formatExamsAsText(
@@ -616,9 +626,38 @@ fun HaiyuApp(
                                         showToast("未检测到可用浏览器，仓库地址：${AppUpdateManager.REPO_WEB_URL}")
                                     }
                                 },
+                                onOpenGitHubIssues = {
+                                    if (!AppUpdateManager.openUrlInBrowser(context, AppUpdateManager.ISSUES_NEW_URL)) {
+                                        clipboard.setText(AnnotatedString(AppUpdateManager.ISSUES_URL))
+                                        showToast("未检测到浏览器，已复制反馈页地址至剪贴板")
+                                    }
+                                },
+                                onCopyIssuesLink = {
+                                    clipboard.setText(AnnotatedString(AppUpdateManager.ISSUES_URL))
+                                    showToast("已复制 GitHub 问题反馈页链接")
+                                },
+                                onSystemShareApp = {
+                                    val shareText = AppUpdateManager.buildAppShareText()
+                                    if (!AppUpdateManager.sharePlainText(context, "分享海屿空间给同学", shareText)) {
+                                        clipboard.setText(AnnotatedString(shareText))
+                                        showToast("已复制推荐文案与下载链接，可直接粘贴发送")
+                                    }
+                                },
+                                onCopyShareAppText = {
+                                    clipboard.setText(AnnotatedString(AppUpdateManager.buildAppShareText()))
+                                    showToast("已复制推荐文案与下载页链接，直接粘贴发给同学即可")
+                                },
                                 onCopyDownloadPageLink = {
                                     clipboard.setText(AnnotatedString(AppUpdateManager.DOWNLOAD_PAGE_URL))
-                                    showToast("已复制中文多线下载主页链接，直接发给广海同学免翻 GitHub 下载！")
+                                    showToast("已复制中文多线下载主页链接（免翻 GitHub）")
+                                },
+                                onCopyDirectApkLink = { url ->
+                                    clipboard.setText(AnnotatedString(url))
+                                    showToast("已复制国内加速安装包直链")
+                                },
+                                onCopyDiagnosticInfo = { diag ->
+                                    clipboard.setText(AnnotatedString(diag))
+                                    showToast("已复制脱敏环境信息（不含任何个人隐私）")
                                 },
                                 onUpdateSettings = { transform ->
                                     repo.updateSettings(transform)
@@ -643,7 +682,9 @@ fun HaiyuApp(
                                 onRefreshWidget = {
                                     TodayScheduleWidgetProvider.refreshAllWidgets(context)
                                     CountdownWidgetProvider.refreshAllWidgets(context)
-                                    showToast("已立即刷新全部海屿桌面小组件")
+                                    NextClassWidgetProvider.refreshAllWidgets(context)
+                                    ClassReminderScheduler.scheduleMidnightWidgetRefresh(context)
+                                    showToast("已立即刷新全部 3 款海屿桌面小组件")
                                 },
                                 onExportWeekImage = {
                                     val curWeek = GdouTimeRules.calculateCurrentWeek(
@@ -702,18 +743,19 @@ fun HaiyuApp(
         val activeLegacy = legacyInstall
         if (showLegacyDialog && activeLegacy != null) {
             val hasMigrated = snapshot.courses.isNotEmpty()
+            val legacyVer = activeLegacy.versionName.removePrefix("v").removePrefix("V")
             AlertDialog(
                 onDismissRequest = {
                     showLegacyDialog = false
                     repo.updateSettings { it.copy(legacyCleanupDismissed = true) }
                 },
-                title = { Text("检测到旧包名版本（${activeLegacy.versionName}）") },
+                title = { Text("检测到旧版海屿课表（v$legacyVer）") },
                 text = {
                     Text(
                         text = if (hasMigrated) {
-                            "因 v2.8.0+ 升级非商业开源协议并启用了全新个人开源包名，无法直接覆盖旧包。\n\n检测到当前新版已同步课表，你可以直接前往系统页面安全卸载旧版图标（卸载旧版不会影响新版里的任何数据）。"
+                            "因 v2.8.0 起升级开源协议并迁移独立应用标识（现已升级为「海屿空间」），无法直接覆盖旧版图标。\n\n检测到海屿空间已同步课表，你可以直接前往系统页面安全卸载旧版（卸载旧版不会影响当前的任何数据）。"
                         } else {
-                            "因 v2.8.0+ 升级非商业开源协议并启用了全新个人开源包名，无法直接覆盖旧包，桌面目前会有两个图标。\n\n建议先在本新版直接同步教务（或打开旧版复制「同班分享码」导入），确认数据无误后再卸载旧版。"
+                            "因 v2.8.0 起升级开源协议并迁移独立应用标识（现已升级为「海屿空间」），无法直接覆盖旧版，桌面目前会有两个图标。\n\n建议先在海屿空间同步教务（或打开旧版复制「同班分享码」导入），确认课表无误后再卸载旧版。"
                         }
                     )
                 },

@@ -74,7 +74,7 @@ fun AppUpdateDialog(
             val opened = AppUpdateManager.openInstallPermissionSettings(context)
             onShowMessage(
                 if (opened) "请开启「允许来自此来源的应用」后返回，点「立即安装」即可升级"
-                else "请在系统设置中允许海屿课表安装未知应用后重试"
+                else "请在系统设置中允许海屿空间安装未知应用后重试"
             )
             return
         }

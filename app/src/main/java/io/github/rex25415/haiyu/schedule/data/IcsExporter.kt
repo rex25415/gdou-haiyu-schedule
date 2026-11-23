@@ -26,7 +26,7 @@ object IcsExporter {
         sb.append("VERSION:2.0\r\n")
         sb.append("PRODID:-//HaiyuSchedule//OpenSource//CN\r\n")
         sb.append("CALSCALE:GREGORIAN\r\n")
-        sb.append("X-WR-CALNAME:海屿课表-${snapshot.settings.academicYearLabel}\r\n")
+        sb.append("X-WR-CALNAME:海屿空间-${snapshot.settings.academicYearLabel}\r\n")
         sb.append("X-WR-TIMEZONE:Asia/Shanghai\r\n")
 
         val alarmMins = snapshot.settings.reminderMinutesBefore.coerceIn(5, 60)
@@ -71,7 +71,7 @@ object IcsExporter {
         sb.append("END:VCALENDAR\r\n")
 
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
-        val icsFile = File(exportDir, "海屿课表_广海_${System.currentTimeMillis()}.ics")
+        val icsFile = File(exportDir, "海屿空间_广海_${System.currentTimeMillis()}.ics")
         icsFile.writeText(sb.toString(), Charsets.UTF_8)
 
         val uri = FileProvider.getUriForFile(
@@ -82,8 +82,8 @@ object IcsExporter {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/calendar"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "海屿课表 (.ics)")
-            clipData = ClipData.newRawUri("海屿课表.ics", uri)
+            putExtra(Intent.EXTRA_SUBJECT, "海屿空间课程日历 (.ics)")
+            clipData = ClipData.newRawUri("海屿空间.ics", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }

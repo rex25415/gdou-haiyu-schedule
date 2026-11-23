@@ -279,16 +279,16 @@ object ScheduleImageExporter {
             textSize = 24f
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("由「海屿课表」生成 · 广东海洋大学全校区纯净课表助手", width / 2f, height - 34f, footPaint)
+        canvas.drawText("由「海屿空间」生成 · 广东海洋大学全校区纯净学业助手", width / 2f, height - 34f, footPaint)
 
-        val fileName = "海屿课表_第${weekNumber}周_${System.currentTimeMillis()}.png"
+        val fileName = "海屿空间_第${weekNumber}周_${System.currentTimeMillis()}.png"
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val imgFile = File(exportDir, fileName)
         FileOutputStream(imgFile).use { out ->
             bitmap.compress(Bitmap.CompressFormat.PNG, 96, out)
         }
 
-        // Save directly to System Gallery (Pictures/海屿课表) on Android 10+ with zero extra permissions
+        // Save directly to System Gallery (Pictures/海屿空间) on Android 10+ with zero extra permissions
         // Copy the already-encoded PNG bytes instead of encoding a second 1080x1920 PNG (2x faster!)
         var savedToGallery = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -296,7 +296,7 @@ object ScheduleImageExporter {
                 val values = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                     put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/海屿课表")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/海屿空间")
                     put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
                 val resolver = context.contentResolver
@@ -323,7 +323,7 @@ object ScheduleImageExporter {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, "第${weekNumber}周课程表")
-                clipData = ClipData.newRawUri("海屿课表", uri)
+                clipData = ClipData.newRawUri("海屿空间", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             val receivers = context.packageManager.queryIntentActivities(sendIntent, 0)

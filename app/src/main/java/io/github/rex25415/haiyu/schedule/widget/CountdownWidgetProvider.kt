@@ -39,6 +39,7 @@ class CountdownWidgetProvider : AppWidgetProvider() {
     }
 
     private data class CountdownRow(
+        val isPinned: Boolean,
         val sortDays: Long,
         val badgeText: String,
         val titleText: String,
@@ -47,6 +48,12 @@ class CountdownWidgetProvider : AppWidgetProvider() {
 
     companion object {
         const val ACTION_REFRESH = "io.github.rex25415.haiyu.schedule.ACTION_COUNTDOWN_WIDGET_REFRESH"
+
+        fun hasAnyWidget(context: Context): Boolean {
+            val manager = AppWidgetManager.getInstance(context)
+            val cn = ComponentName(context, CountdownWidgetProvider::class.java)
+            return manager.getAppWidgetIds(cn).isNotEmpty()
+        }
 
         fun refreshAllWidgets(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
@@ -106,11 +113,17 @@ class CountdownWidgetProvider : AppWidgetProvider() {
                     if (ex.location.isNotBlank()) append(" · ${ex.location}")
                     if (ex.seatNumber.isNotBlank()) append(" ${ex.seatNumber}座")
                 }
+                val typeTag = when {
+                    ex.isPinned -> "置顶"
+                    ex.examType.contains("放假") || ex.examType.contains("倒数") -> "倒数"
+                    else -> "考试"
+                }
                 items.add(
                     CountdownRow(
+                        isPinned = ex.isPinned,
                         sortDays = days,
                         badgeText = badge,
-                        titleText = "考试｜${ex.courseName}",
+                        titleText = "$typeTag｜${ex.courseName}",
                         subText = sub
                     )
                 )
@@ -132,6 +145,7 @@ class CountdownWidgetProvider : AppWidgetProvider() {
                 }
                 items.add(
                     CountdownRow(
+                        isPinned = false,
                         sortDays = days,
                         badgeText = badge,
                         titleText = "DDL｜${t.title}",
@@ -140,7 +154,9 @@ class CountdownWidgetProvider : AppWidgetProvider() {
                 )
             }
 
-            val sorted = items.sortedBy { it.sortDays }
+            val sorted = items.sortedWith(
+                compareByDescending<CountdownRow> { it.isPinned }.thenBy { it.sortDays }
+            )
             views.setTextViewText(R.id.cd_widget_badge, "共 ${sorted.size} 项")
 
             val rowIds = listOf(

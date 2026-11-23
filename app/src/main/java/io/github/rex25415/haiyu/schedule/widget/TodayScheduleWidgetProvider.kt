@@ -46,6 +46,12 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
     companion object {
         const val ACTION_REFRESH = "io.github.rex25415.haiyu.schedule.ACTION_WIDGET_REFRESH"
 
+        fun hasAnyWidget(context: Context): Boolean {
+            val manager = AppWidgetManager.getInstance(context)
+            val cn = ComponentName(context, TodayScheduleWidgetProvider::class.java)
+            return manager.getAppWidgetIds(cn).isNotEmpty()
+        }
+
         fun refreshAllWidgets(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
             val cn = ComponentName(context, TodayScheduleWidgetProvider::class.java)
@@ -108,7 +114,7 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
 
             // 1. Vacation / Pre-Term / Empty Courses check
             if (snapshot.courses.isEmpty()) {
-                views.setTextViewText(R.id.widget_title, "海屿课表 · $dateStr $dowLabel")
+                views.setTextViewText(R.id.widget_title, "海屿空间 · $dateStr $dowLabel")
                 views.setTextViewText(R.id.widget_week_badge, "待同步")
                 views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
                 views.setTextViewText(R.id.widget_empty, "尚未同步课表，点此进入教务一键导入~")
@@ -119,7 +125,7 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
             }
 
             if (weekInfo.phase != TermWeekPhase.IN_TERM) {
-                views.setTextViewText(R.id.widget_title, "海屿课表 · $dateStr $dowLabel")
+                views.setTextViewText(R.id.widget_title, "海屿空间 · $dateStr $dowLabel")
                 val badge = if (weekInfo.phase == TermWeekPhase.BEFORE_TERM) "未开学" else "假期中"
                 val msg = if (weekInfo.phase == TermWeekPhase.BEFORE_TERM) {
                     "距离开学还有 ${weekInfo.daysUntilStart} 天，提前规划好新学期吧~"
@@ -159,7 +165,7 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
             }
 
             val rowsToRender: List<WidgetCourseRow> = if (remainingToday.isNotEmpty()) {
-                views.setTextViewText(R.id.widget_title, "海屿课表 · $dateStr $dowLabel")
+                views.setTextViewText(R.id.widget_title, "海屿空间 · $dateStr $dowLabel")
                 views.setTextViewText(R.id.widget_week_badge, "第${weekInfo.rawWeek}周")
                 val src = if (todayCourses.size > 4) remainingToday else todayCourses
                 src.map { item ->
@@ -201,7 +207,7 @@ class TodayScheduleWidgetProvider : AppWidgetProvider() {
                     )
                 }
             } else {
-                views.setTextViewText(R.id.widget_title, "海屿课表 · $dateStr $dowLabel")
+                views.setTextViewText(R.id.widget_title, "海屿空间 · $dateStr $dowLabel")
                 views.setTextViewText(R.id.widget_week_badge, "第${weekInfo.rawWeek}周")
                 emptyList()
             }

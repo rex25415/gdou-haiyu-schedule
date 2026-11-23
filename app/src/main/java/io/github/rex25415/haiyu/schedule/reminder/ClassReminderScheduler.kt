@@ -6,13 +6,18 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import io.github.rex25415.haiyu.schedule.MainActivity
 import io.github.rex25415.haiyu.schedule.R
 import io.github.rex25415.haiyu.schedule.data.AppRepository
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.TermWeekPhase
+import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -24,6 +29,7 @@ object ClassReminderScheduler {
     const val ACTION_CLASS_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_CLASS_REMINDER"
     const val ACTION_DDL_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_DDL_REMINDER"
     const val ACTION_EXAM_REMINDER = "io.github.rex25415.haiyu.schedule.ACTION_EXAM_REMINDER"
+    const val ACTION_MIDNIGHT_WIDGET_REFRESH = "io.github.rex25415.haiyu.schedule.ACTION_MIDNIGHT_WIDGET_REFRESH"
 
     const val EXTRA_COURSE_NAME = "course_name"
     const val EXTRA_LOCATION = "location"
@@ -42,16 +48,43 @@ object ClassReminderScheduler {
     private const val REQUEST_CODE_NEXT = 202601
     private const val REQUEST_CODE_DDL = 202602
     private const val REQUEST_CODE_EXAM = 202603
+    private const val REQUEST_CODE_MIDNIGHT_WIDGET = 202604
+
+    fun canScheduleExactAlarms(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.canScheduleExactAlarms()
+        } else {
+            true
+        }
+    }
+
+    fun openExactAlarmPermissionSettings(context: Context): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "上课与作业 DDL 提醒",
+                "上课、考试与作业 DDL 提醒",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "海屿课表按广海三校区精准错峰作息发送上课提醒与临近作业 DDL 通知"
+                description = "海屿空间按广海三校区精准错峰作息发送上课提醒、考前 1 小时提醒与临近作业 DDL 通知"
                 enableVibration(true)
             }
             nm.createNotificationChannel(channel)
@@ -68,11 +101,47 @@ object ClassReminderScheduler {
         cancelExisting(context, am)
         cancelExistingDdl(context, am)
         cancelExistingExam(context, am)
+        scheduleMidnightWidgetRefresh(context)
         if (!settings.reminderEnabled) return
 
         scheduleNextClassInternal(context, am)
         scheduleNextDdlInternal(context, am)
         scheduleNextExamInternal(context, am)
+    }
+
+    /**
+     * 只要桌面添加了任意海屿小组件，安排一次零耗电的次日 00:05 刷新，确保早上醒来倒计时与今日课表已跨天更新
+     */
+    fun scheduleMidnightWidgetRefresh(context: Context) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(context, ClassReminderReceiver::class.java).apply {
+            action = ACTION_MIDNIGHT_WIDGET_REFRESH
+        }
+        val hasWidget = TodayScheduleWidgetProvider.hasAnyWidget(context) ||
+            CountdownWidgetProvider.hasAnyWidget(context) ||
+            NextClassWidgetProvider.hasAnyWidget(context)
+        if (!hasWidget) {
+            val existing = PendingIntent.getBroadcast(
+                context,
+                REQUEST_CODE_MIDNIGHT_WIDGET,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (existing != null) am.cancel(existing)
+            return
+        }
+        val nextMidnight = LocalDate.now().plusDays(1).atTime(0, 5)
+        val triggerMillis = nextMidnight.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_MIDNIGHT_WIDGET,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            am.setAndAllowWhileIdle(AlarmManager.RTC, triggerMillis, pi)
+        } catch (_: Exception) {
+        }
     }
 
     private fun scheduleNextClassInternal(context: Context, am: AlarmManager) {
@@ -310,10 +379,10 @@ object ClassReminderScheduler {
         val sampleTime = if (campus == io.github.rex25415.haiyu.schedule.model.GdouCampus.YANGJIANG) "10:10-11:40" else "10:05-11:35"
         showClassNotification(
             context = context,
-            courseName = "海屿课表 · 提醒测试成功",
+            courseName = "海屿空间 · 提醒测试成功",
             location = sampleLoc,
             timeText = sampleTime,
-            teacher = "广海全校区课表助手",
+            teacher = "广海全校区学业与课表空间",
             isStaggered = true
         )
     }

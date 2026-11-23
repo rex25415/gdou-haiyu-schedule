@@ -15,6 +15,9 @@ if (Test-Path $wrapper) {
 } else {
     gradle @gradleArgs
 }
+if ($LASTEXITCODE -ne 0) {
+    throw "Gradle build failed with exit code $LASTEXITCODE"
+}
 
 $outDir = Join-Path $PSScriptRoot "output"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
@@ -28,6 +31,6 @@ $apkSrc = if (-not [string]::IsNullOrWhiteSpace($CustomBuildRoot)) {
 $gradleFile = Join-Path $PSScriptRoot "app\build.gradle.kts"
 $verMatch = [regex]::Match((Get-Content $gradleFile -Raw), 'versionName\s*=\s*"([^"]+)"')
 $versionName = if ($verMatch.Success) { $verMatch.Groups[1].Value } else { "latest" }
-$apkDst = Join-Path $outDir "海屿课表-广东海洋大学-v$versionName.apk"
+$apkDst = Join-Path $outDir "海屿空间-广东海洋大学-v$versionName.apk"
 Copy-Item -Force $apkSrc $apkDst
 Write-Host "APK ready at: $apkDst" -ForegroundColor Green

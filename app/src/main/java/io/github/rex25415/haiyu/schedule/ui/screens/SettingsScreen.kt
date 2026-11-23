@@ -1,6 +1,7 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.BatterySaver
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Code
@@ -70,6 +72,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,8 +83,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.rex25415.haiyu.schedule.BuildConfig
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
@@ -90,11 +97,15 @@ import io.github.rex25415.haiyu.schedule.model.AppThemePalette
 import io.github.rex25415.haiyu.schedule.model.DarkModeOption
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.GridRowDensity
+import io.github.rex25415.haiyu.schedule.reminder.ClassReminderScheduler
 import io.github.rex25415.haiyu.schedule.ui.components.BellScheduleReferenceDialog
+import io.github.rex25415.haiyu.schedule.ui.components.FeedbackGuideDialog
 import io.github.rex25415.haiyu.schedule.ui.components.OemKeepAliveGuideDialog
 import io.github.rex25415.haiyu.schedule.ui.components.ScheduleShareCodeDialog
+import io.github.rex25415.haiyu.schedule.ui.components.ShareAppDialog
 import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppSignatureVerifier
+import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
 import io.github.rex25415.haiyu.schedule.update.LegacyInstallInfo
 import io.github.rex25415.haiyu.schedule.update.SignatureTrustState
 import java.time.DayOfWeek
@@ -116,7 +127,13 @@ fun SettingsScreen(
     onLaunchLegacyApp: () -> Unit,
     onOpenLegacyUninstall: () -> Unit,
     onOpenGitHubRepo: () -> Unit,
+    onOpenGitHubIssues: () -> Unit,
+    onCopyIssuesLink: () -> Unit,
+    onSystemShareApp: () -> Unit,
+    onCopyShareAppText: () -> Unit,
     onCopyDownloadPageLink: () -> Unit,
+    onCopyDirectApkLink: (String) -> Unit,
+    onCopyDiagnosticInfo: (String) -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onPickWallpaperUri: (Uri) -> Unit,
     onClearWallpaper: () -> Unit,
@@ -135,7 +152,18 @@ fun SettingsScreen(
     onClearAllData: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val signatureInfo = remember { AppSignatureVerifier.verifyCurrentApp(context) }
+    var exactAlarmGranted by remember { mutableStateOf(ClassReminderScheduler.canScheduleExactAlarms(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                exactAlarmGranted = ClassReminderScheduler.canScheduleExactAlarms(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val settings = snapshot.settings
     var showDatePicker by remember { mutableStateOf(false) }
     var showTermMetaDialog by remember { mutableStateOf(false) }
@@ -143,6 +171,8 @@ fun SettingsScreen(
     var showBellRefDialog by remember { mutableStateOf(false) }
     var showShareCodeDialog by remember { mutableStateOf(false) }
     var showOemGuideDialog by remember { mutableStateOf(false) }
+    var showShareAppDialog by remember { mutableStateOf(false) }
+    var showFeedbackDialog by remember { mutableStateOf(false) }
 
     val wallpaperPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -172,7 +202,7 @@ fun SettingsScreen(
             Column {
                 Text("我的与设置", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    text = "海屿课表 v${BuildConfig.VERSION_NAME} · 广东海洋大学全校区支持" +
+                    text = "海屿空间 v${BuildConfig.VERSION_NAME} · 广东海洋大学全校区支持" +
                         if (settings.lastSyncTime.isNotBlank()) " · 上次同步 ${settings.lastSyncTime}" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -239,8 +269,9 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
+                            val legacyVer = legacyInstall.versionName.removePrefix("v").removePrefix("V")
                             Text(
-                                text = "检测到旧包名版本（${legacyInstall.versionName}）仍留在手机上",
+                                text = "检测到旧版海屿课表（v$legacyVer）仍留在手机上",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -249,9 +280,9 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = if (snapshot.courses.isEmpty()) {
-                                "因 v2.8.0+ 升级非商业开源协议并启用中性新包名，无法直接覆盖旧包。建议先打开旧版复制「同班分享码」导入本新版，再卸载旧版图标。"
+                                "因 v2.8.0 起升级开源协议并迁移独立应用标识，无法直接覆盖旧版图标。建议先打开旧版复制「同班分享码」导入海屿空间，确认课表就绪后再卸载旧版。"
                             } else {
-                                "新版课表已就绪！因 v2.8.0+ 启用了中性新包名无法覆盖旧包，点下方按钮可直接前往系统页卸载旧版，避免桌面出现双图标。"
+                                "海屿空间数据已就绪！因旧版无法直接覆盖升级，点下方按钮可直接前往系统页安全卸载旧版图标（卸载旧版不会影响当前任何数据）。"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.88f)
@@ -524,12 +555,12 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Class Reminder Notifications
+        // 4. Class & Exam Reminder Notifications
         item {
-            SettingsCard(title = "课前精准提醒", icon = Icons.Rounded.NotificationsActive) {
+            SettingsCard(title = "课前与考前精准提醒", icon = Icons.Rounded.NotificationsActive) {
                 SettingSwitchRow(
-                    title = "开启上课前自动弹窗通知",
-                    subtitle = "自动按所在校区错峰时间提前推送教室提醒",
+                    title = "开启上课与考试前自动提醒",
+                    subtitle = "按所在校区错峰时间推送教室提醒，考前 1 小时同步推送考场与座号",
                     checked = settings.reminderEnabled,
                     onCheckedChange = onToggleReminder
                 )
@@ -548,13 +579,49 @@ fun SettingsScreen(
                         )
                     }
                 }
+                if (settings.reminderEnabled && !exactAlarmGranted) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "未开启系统「精准闹钟」权限",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                Text(
+                                    text = "Android 12+ 默认会延迟省电闹钟，开启后可按错峰时间准点提醒。",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                            TextButton(
+                                onClick = { ClassReminderScheduler.openExactAlarmPermissionSettings(context) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("去开启", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            }
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = onTestNotification,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("发送一条测试提醒（验证通知权限）")
+                    Text("发送一条测试提醒（验证通知权限）", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 FilledTonalButton(
@@ -564,7 +631,7 @@ fun SettingsScreen(
                 ) {
                     Icon(Icons.Rounded.BatterySaver, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("收不到提醒 / 小组件不刷新？各品牌防杀后台指南", fontSize = 12.sp)
+                    Text("收不到提醒 / 小组件不刷新？各品牌防杀后台指南", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -573,7 +640,7 @@ fun SettingsScreen(
         item {
             SettingsCard(title = "桌面小组件与数据工具", icon = Icons.Rounded.Widgets) {
                 Text(
-                    text = "在手机桌面长按空白处 → 点击「微件 / 小组件」，可添加「海屿今日课表」与「海屿考试与 DDL 倒计时」两款深浅自适应小组件！",
+                    text = "在手机桌面长按空白处 → 点击「微件 / 小组件」，可添加「海屿今日课表」、「海屿下一节课（极简）」与「海屿考试与 DDL 倒计时」三款深浅自适应小组件！",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -584,19 +651,21 @@ fun SettingsScreen(
                 ) {
                     FilledTonalButton(
                         onClick = onRefreshWidget,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("刷新桌面组件", fontSize = 12.5.sp)
+                        Text("刷新桌面组件", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     FilledTonalButton(
                         onClick = onExportWeekImage,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("生成课表长图", fontSize = 12.5.sp)
+                        Text("生成课表长图", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -606,21 +675,23 @@ fun SettingsScreen(
                 ) {
                     FilledTonalButton(
                         onClick = onExportIcs,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("导出 .ics 日历", fontSize = 12.5.sp)
+                        Text("导出 .ics 日历", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     FilledTonalButton(
                         onClick = { showShareCodeDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("同班分享码", fontSize = 12.5.sp)
+                        Text("同班分享码", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -630,17 +701,19 @@ fun SettingsScreen(
                 ) {
                     FilledTonalButton(
                         onClick = onExportFullBackup,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("导出全量备份", fontSize = 12.5.sp)
+                        Text("导出全量备份", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                     FilledTonalButton(
                         onClick = {
                             backupRestorePicker.launch(arrayOf("application/json", "text/plain", "*/*"))
                         },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
@@ -685,9 +758,9 @@ fun SettingsScreen(
             }
         }
 
-        // 6. In-App Self-Update & Open Source Repository
+        // 6. In-App Self-Update, Classmate Sharing & Open Source Repository
         item {
-            SettingsCard(title = "应用更新与开源项目", icon = Icons.Rounded.SystemUpdate) {
+            SettingsCard(title = "应用更新、分享与开源项目", icon = Icons.Rounded.SystemUpdate) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(12.dp),
@@ -695,7 +768,7 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            text = "当前版本：v${BuildConfig.VERSION_NAME}（build ${BuildConfig.VERSION_CODE}）",
+                            text = "海屿空间 v${BuildConfig.VERSION_NAME}（build ${BuildConfig.VERSION_CODE}）",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -703,10 +776,16 @@ fun SettingsScreen(
                         Text(
                             text = updateStatusSummary
                                 ?: if (availableUpdate != null) "可升级至最新版本 v${availableUpdate.versionName}"
-                                else "采用海屿开源统一发布签名打包，后续覆盖升级自动保留你的全部课表与设置。",
+                                else "采用海屿开源统一发布签名打包，后续覆盖升级自动保留你的全部数据与设置。",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (availableUpdate != null) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "开源维护：GitHub @${AppUpdateManager.REPO_OWNER} · 非商业开源（PolyForm）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
                         )
                     }
                 }
@@ -721,47 +800,66 @@ fun SettingsScreen(
                             else onCheckForUpdates()
                         },
                         enabled = !isCheckingUpdate,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(15.dp),
                                 strokeWidth = 2.dp,
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("检查中...", fontSize = 12.5.sp)
-                        } else {
-                            Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(5.dp))
+                            Text("检查中...", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                        } else {
+                            Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (availableUpdate != null) "更新至 v${availableUpdate.versionName}" else "检查新版本",
                                 fontSize = 12.5.sp,
                                 maxLines = 1,
-                                softWrap = false
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                    OutlinedButton(
-                        onClick = onOpenGitHubRepo,
+                    FilledTonalButton(
+                        onClick = { showShareAppDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("GitHub 开源", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
+                        Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("分享给同学", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                FilledTonalButton(
-                    onClick = onCopyDownloadPageLink,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("复制中文下载主页（发同学免翻 GitHub）", fontSize = 12.5.sp)
+                    OutlinedButton(
+                        onClick = { showFeedbackDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.BugReport, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("反馈与建议", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = onOpenGitHubRepo,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Code, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("GitHub 开源", fontSize = 12.5.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 SettingSwitchRow(
@@ -781,7 +879,7 @@ fun SettingsScreen(
                         bg = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
                         fg = MaterialTheme.colorScheme.onPrimaryContainer,
                         icon = Icons.Rounded.VerifiedUser,
-                        title = "安装包签名验真通过（海屿原版纯净构建）",
+                        title = "安装包签名验真通过（海屿空间原版纯净构建）",
                         desc = "证书指纹：${signatureInfo.shortFingerprint} · 包名 ${BuildConfig.APPLICATION_ID}"
                     )
                     SignatureTrustState.DEBUG_LOCAL_BUILD -> SigCardStyle(
@@ -833,7 +931,7 @@ fun SettingsScreen(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "1. 非校方官方声明：海屿课表为个人学习与技术交流开发的独立纯本地开源客户端，与任何高校官方无隶属或授权关系。\n" +
+                    text = "1. 非校方官方声明：海屿空间（原名海屿课表）为个人学习与技术交流开发的独立纯本地开源工具，与任何高校官方无隶属或授权关系。\n" +
                         "2. 非商业开源许可（PolyForm Noncommercial 1.0.0）：源码公开免费供个人自用与安全审计，严禁任何商业盈利、付费分发、植入广告或冒充原作者重打包。\n" +
                         "3. 零后端零中转：无自建服务器、无广告统计 SDK、不收集/不上传学号密码，教务登录仅在系统原生 WebView 中通过严格 HTTPS 直连 *.gdou.edu.cn，纯只读无选课/抢课/后台爬虫。\n" +
                         "4. 本地隔离：所有数据仅存于本机私有目录，已禁用系统云备份与换机导出；换号或借出设备前可随时点击下方按钮彻底清除登录态。",
@@ -970,6 +1068,63 @@ fun SettingsScreen(
     if (showOemGuideDialog) {
         OemKeepAliveGuideDialog(
             onDismiss = { showOemGuideDialog = false }
+        )
+    }
+
+    if (showShareAppDialog) {
+        val targetVer = availableUpdate?.versionName ?: BuildConfig.VERSION_NAME
+        val directMirrorUrl = remember(targetVer, availableUpdate) {
+            AppUpdateManager.buildMirrorApkUrl(targetVer, availableUpdate?.apkDownloadUrl)
+        }
+        ShareAppDialog(
+            targetVersionName = targetVer,
+            directMirrorApkUrl = directMirrorUrl,
+            onSystemShare = {
+                showShareAppDialog = false
+                onSystemShareApp()
+            },
+            onCopyShareText = {
+                onCopyShareAppText()
+            },
+            onCopyDownloadPageUrl = {
+                onCopyDownloadPageLink()
+            },
+            onCopyDirectApkUrl = {
+                onCopyDirectApkLink(directMirrorUrl)
+            },
+            onDismiss = { showShareAppDialog = false }
+        )
+    }
+
+    if (showFeedbackDialog) {
+        val diagInfo = remember(settings.campus, settings.gridRowDensity, settings.darkMode) {
+            AppUpdateManager.buildDiagnosticInfo(
+                versionName = BuildConfig.VERSION_NAME,
+                versionCode = BuildConfig.VERSION_CODE,
+                androidRelease = Build.VERSION.RELEASE ?: "Unknown",
+                sdkInt = Build.VERSION.SDK_INT,
+                campusLabel = settings.campus.label,
+                densityLabel = settings.gridRowDensity.label,
+                darkModeLabel = settings.darkMode.label
+            )
+        }
+        FeedbackGuideDialog(
+            diagnosticInfo = diagInfo,
+            onOpenGitHubIssues = {
+                showFeedbackDialog = false
+                onOpenGitHubIssues()
+            },
+            onCopyDiagnosticInfo = {
+                onCopyDiagnosticInfo(diagInfo)
+            },
+            onCopyIssuesUrl = {
+                onCopyIssuesLink()
+            },
+            onOpenGitHubRepo = {
+                showFeedbackDialog = false
+                onOpenGitHubRepo()
+            },
+            onDismiss = { showFeedbackDialog = false }
         )
     }
 }

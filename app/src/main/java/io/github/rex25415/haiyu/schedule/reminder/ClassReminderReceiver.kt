@@ -1,19 +1,38 @@
 package io.github.rex25415.haiyu.schedule.reminder
 
+import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
 import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
 
 class ClassReminderReceiver : BroadcastReceiver() {
 
+    private fun refreshAllDesktopWidgets(context: Context) {
+        TodayScheduleWidgetProvider.refreshAllWidgets(context)
+        CountdownWidgetProvider.refreshAllWidgets(context)
+        NextClassWidgetProvider.refreshAllWidgets(context)
+    }
+
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
-        if (action == Intent.ACTION_BOOT_COMPLETED) {
+        if (
+            action == Intent.ACTION_BOOT_COMPLETED ||
+            action == Intent.ACTION_MY_PACKAGE_REPLACED ||
+            action == Intent.ACTION_TIME_CHANGED ||
+            action == Intent.ACTION_TIMEZONE_CHANGED ||
+            action == Intent.ACTION_DATE_CHANGED ||
+            action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        ) {
             ClassReminderScheduler.rescheduleNextReminder(context)
-            TodayScheduleWidgetProvider.refreshAllWidgets(context)
-            CountdownWidgetProvider.refreshAllWidgets(context)
+            refreshAllDesktopWidgets(context)
+            return
+        }
+        if (action == ClassReminderScheduler.ACTION_MIDNIGHT_WIDGET_REFRESH) {
+            refreshAllDesktopWidgets(context)
+            ClassReminderScheduler.scheduleMidnightWidgetRefresh(context)
             return
         }
         if (action == ClassReminderScheduler.ACTION_CLASS_REMINDER) {
@@ -32,7 +51,7 @@ class ClassReminderReceiver : BroadcastReceiver() {
                 isStaggered = staggered
             )
             ClassReminderScheduler.rescheduleNextReminder(context)
-            TodayScheduleWidgetProvider.refreshAllWidgets(context)
+            refreshAllDesktopWidgets(context)
             return
         }
         if (action == ClassReminderScheduler.ACTION_DDL_REMINDER) {

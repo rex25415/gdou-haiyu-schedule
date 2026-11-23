@@ -48,7 +48,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Class, Exam & DDL reminder alarm receiver -->
+        <!-- Class, Exam, DDL & Midnight Widget Refresh receiver -->
         <receiver
             android:name=".reminder.ClassReminderReceiver"
             android:exported="false">
@@ -56,7 +56,13 @@
                 <action android:name="io.github.rex25415.haiyu.schedule.ACTION_CLASS_REMINDER" />
                 <action android:name="io.github.rex25415.haiyu.schedule.ACTION_DDL_REMINDER" />
                 <action android:name="io.github.rex25415.haiyu.schedule.ACTION_EXAM_REMINDER" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_MIDNIGHT_WIDGET_REFRESH" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -86,6 +92,20 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/countdown_widget_info" />
+        </receiver>
+
+        <!-- Home Screen Minimal 4x1 Next Class Widget -->
+        <receiver
+            android:name=".widget.NextClassWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_next_class_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="io.github.rex25415.haiyu.schedule.ACTION_NEXT_CLASS_WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/next_class_widget_info" />
         </receiver>
 
     </application>

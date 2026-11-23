@@ -858,10 +858,60 @@ object GdouSyncScript {
             }
 
             let workingEp = null;
+            let lastHttpError = 0;
+            let htmlInterceptHint = "";
+
+            function classifyNonJsonHtml(rawText) {
+                const t = String(rawText || "");
+                if (/未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(t)) {
+                    return "需先在上方教务页确认通知或完成评教（也可切「校外免校园网」同步）";
+                }
+                if (/统一身份认证|cas\/login|请先登录|登录超时|会话超时/.test(t)) {
+                    return "登录状态已过期，请刷新教务页重新登录";
+                }
+                if (/无操作权限|无权限|未开放|非查询时间/.test(t)) {
+                    return "教务当前暂未开放考试查询入口";
+                }
+                return "教务返回了非数据页，建议切「校外免校园网」或先点进「查考场座位」后重试";
+            }
+
             for (const ep of endpoints) {
                 try {
-                    const exams = await queryExamsOnce(ep, xnm, xqm);
-                    if (exams === null) continue;
+                    const form = "xnm=" + encodeURIComponent(xnm) + "&xqm=" + encodeURIComponent(xqm) +
+                        "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
+                        "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+                    const resp = await fetchJwJsonWithFallback(ep, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                            "x-requested-with": "XMLHttpRequest"
+                        },
+                        body: form,
+                        credentials: "include"
+                    });
+                    if (!resp.ok) {
+                        if (resp.status >= 400) lastHttpError = resp.status;
+                        continue;
+                    }
+                    const rawText = await resp.text();
+                    let json;
+                    try {
+                        json = JSON.parse(rawText);
+                    } catch (_) {
+                        if (!htmlInterceptHint) htmlInterceptHint = classifyNonJsonHtml(rawText);
+                        continue;
+                    }
+                    const rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                    const exams = rawItems.map(it => ({
+                        academicYear: String(it.xnmc || xnm).trim(),
+                        semester: String(it.xqmmc || (xqm === "3" ? "第一学期" : (xqm === "12" ? "第二学期" : ""))).trim(),
+                        courseName: String(it.kcmc || "").trim(),
+                        examTimeRaw: String(it.kssj || "").trim(),
+                        location: String(it.cdmc || it.ksmc || "").trim(),
+                        seatNumber: String(it.zwh || "").trim(),
+                        examType: String(it.ksmc || it.ksfs || "期末考试").trim(),
+                        campus: String(it.cdxqmc || "").trim()
+                    })).filter(ex => ex.courseName.length > 0);
                     if (!workingEp) workingEp = ep;
                     if (exams.length > 0) {
                         return { ok: true, exams };
@@ -871,7 +921,7 @@ object GdouSyncScript {
                 }
             }
 
-            // Fallback: if term-scoped query returned 0, try whole-year query once
+            // Fallback 1: if term-scoped query returned 0, try whole-year query once
             if (workingEp && xqm) {
                 try {
                     const yearExams = await queryExamsOnce(workingEp, xnm, "");
@@ -881,7 +931,27 @@ object GdouSyncScript {
                 } catch (_) {}
             }
 
-            return { ok: false, error: "当前学期暂未公布考试安排" };
+            // Fallback 2: if current year also returned 0, try unrestricted query once (catches cross-term / retake exams)
+            if (workingEp) {
+                try {
+                    const allExams = await queryExamsOnce(workingEp, "", "");
+                    if (allExams && allExams.length > 0) {
+                        return { ok: true, exams: allExams };
+                    }
+                } catch (_) {}
+                return { ok: false, error: "教务已联通，当前学期暂未公布考场安排" };
+            }
+
+            if (htmlInterceptHint) {
+                return { ok: false, error: htmlInterceptHint };
+            }
+
+            return {
+                ok: false,
+                error: lastHttpError >= 400
+                    ? ("考试接口请求失败(HTTP " + lastHttpError + ")，请刷新教务页后重试")
+                    : "考试接口暂不可达（可能登录已过期或网络波动，请刷新教务页后重试）"
+            };
         }
     """
 }

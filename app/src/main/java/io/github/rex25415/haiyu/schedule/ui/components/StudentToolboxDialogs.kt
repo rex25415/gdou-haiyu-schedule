@@ -230,7 +230,7 @@ fun ScheduleShareCodeDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -262,7 +262,7 @@ fun ScheduleShareCodeDialog(
                 OutlinedTextField(
                     value = pasteInput,
                     onValueChange = { pasteInput = it },
-                    placeholder = { Text("粘贴海屿课表分享码...") },
+                    placeholder = { Text("粘贴海屿分享码（兼容旧版海屿课表）...") },
                     minLines = 2,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth()

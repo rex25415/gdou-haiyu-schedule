@@ -294,4 +294,63 @@ class AppUpdateManagerTest {
         assertFalse(decoded.settings.legacyCleanupDismissed)
         assertEquals("", decoded.settings.savedPartnerCode)
     }
+
+    @Test
+    fun shareTextMirrorLinkAndDiagnosticInfoAreCleanAndPrivacySafe() {
+        val shareText = AppUpdateManager.buildAppShareText()
+        assertTrue(shareText.contains("海屿空间"))
+        assertTrue(shareText.contains(AppUpdateManager.DOWNLOAD_PAGE_URL))
+
+        val mirrorDefault = AppUpdateManager.buildMirrorApkUrl("3.1.0")
+        assertEquals(
+            "https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.1.0/HaiyuSchedule-GDOU-v3.1.0.apk",
+            mirrorDefault
+        )
+        val mirrorCustom = AppUpdateManager.buildMirrorApkUrl(
+            "3.1.0",
+            "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.1.0/Custom.apk"
+        )
+        assertEquals(
+            "https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.1.0/Custom.apk",
+            mirrorCustom
+        )
+
+        val diag = AppUpdateManager.buildDiagnosticInfo(
+            versionName = "3.1.0",
+            versionCode = 310,
+            androidRelease = "15",
+            sdkInt = 35,
+            campusLabel = "海滨校区",
+            densityLabel = "标准舒适",
+            darkModeLabel = "跟随系统"
+        )
+        assertTrue(diag.contains("海屿空间 v3.1.0 (build 310)"))
+        assertTrue(diag.contains("Android 15 (API 35)"))
+        assertTrue(diag.contains("海滨校区"))
+        assertTrue(AppUpdateManager.ISSUES_NEW_URL.endsWith("/issues/new/choose"))
+    }
+
+    @Test
+    fun v310ModelBackwardCompatibilityAndExamSyncDiagnosticsWork() {
+        val legacyCourseAndExamJson = """
+            {
+              "courses": [
+                {"name": "电路原理", "dayOfWeek": 1, "startSection": 1, "endSection": 2, "weeks": [1, 2]}
+              ],
+              "exams": [
+                {"courseName": "线性代数", "examTimeRaw": "2026-12-07(19:10-21:10)"}
+              ]
+            }
+        """.trimIndent()
+        val decoded = lenientJson.decodeFromString(AppDataSnapshot.serializer(), legacyCourseAndExamJson)
+        assertEquals(0, decoded.courses.first().absenceCount)
+        assertEquals(0, decoded.courses.first().bonusCount)
+        assertFalse(decoded.exams.first().isPinned)
+
+        val syncJs = GdouSyncScript.buildSyncScript("exams", "2026", "3", "2026-2027 第一学期")
+        assertTrue(syncJs.contains("教务已联通，当前学期暂未公布考场安排"))
+        assertTrue(syncJs.contains("classifyNonJsonHtml"))
+        assertTrue(syncJs.contains("需先在上方教务页确认通知或完成评教"))
+        assertTrue(syncJs.contains("queryExamsOnce(workingEp, \"\", \"\")"))
+    }
 }

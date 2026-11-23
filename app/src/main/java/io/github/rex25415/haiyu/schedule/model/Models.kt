@@ -32,9 +32,9 @@ enum class DarkModeOption(val id: String, val label: String) {
 
 @Serializable
 enum class GridRowDensity(val id: String, val label: String, val baseRowDp: Float, val breakGapDp: Float) {
-    COMPACT("compact", "紧凑一屏", 48f, 10f),
-    STANDARD("standard", "标准舒适", 60f, 13f),
-    COMFORTABLE("comfortable", "宽松大字", 72f, 16f)
+    COMPACT("compact", "紧凑一屏", 48f, 14f),
+    STANDARD("standard", "标准舒适", 60f, 16f),
+    COMFORTABLE("comfortable", "宽松大字", 72f, 18f)
 }
 
 @Serializable
@@ -57,6 +57,8 @@ data class CourseItem(
     val colorIndex: Int = -1,
     val credit: String = "",
     val note: String = "",
+    val absenceCount: Int = 0,
+    val bonusCount: Int = 0,
     val customStartTime: String? = null,
     val customEndTime: String? = null,
     val isManual: Boolean = false
@@ -90,7 +92,8 @@ data class ExamItem(
     val examType: String = "期末考试",
     val campus: String = "",
     val isManual: Boolean = false,
-    val isDemo: Boolean = false
+    val isDemo: Boolean = false,
+    val isPinned: Boolean = false
 )
 
 @Serializable

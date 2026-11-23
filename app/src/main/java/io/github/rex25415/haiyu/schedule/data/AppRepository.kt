@@ -57,11 +57,20 @@ class AppRepository(context: Context) {
     val state: StateFlow<AppDataSnapshot> = _state.asStateFlow()
 
     private fun loadInitialSnapshot(): AppDataSnapshot {
-        if (dataFile.exists()) {
+        val tmpFile = File(appContext.filesDir, "haiyu_schedule_v1.json.tmp")
+        val sourceFile = when {
+            dataFile.exists() && dataFile.length() > 0L -> dataFile
+            tmpFile.exists() && tmpFile.length() > 0L -> tmpFile
+            else -> null
+        }
+        if (sourceFile != null) {
             try {
-                val content = dataFile.readText(Charsets.UTF_8)
+                val content = sourceFile.readText(Charsets.UTF_8)
                 if (content.isNotBlank()) {
                     val decoded = storageJson.decodeFromString(AppDataSnapshot.serializer(), content)
+                    if (sourceFile == tmpFile) {
+                        tmpFile.renameTo(dataFile)
+                    }
                     // One-time v2.3.0 migration: ensure 7-day Mon-Sun week view stays consistent on every week page
                     if (decoded.settings.settingsVersion < 2) {
                         val migrated = decoded.copy(
@@ -126,8 +135,10 @@ class AppRepository(context: Context) {
                 val encoded = storageJson.encodeToString(snapshot)
                 val tmpFile = File(appContext.filesDir, "haiyu_schedule_v1.json.tmp")
                 tmpFile.writeText(encoded, Charsets.UTF_8)
-                if (dataFile.exists()) dataFile.delete()
-                tmpFile.renameTo(dataFile)
+                if (!tmpFile.renameTo(dataFile)) {
+                    if (dataFile.exists()) dataFile.delete()
+                    tmpFile.renameTo(dataFile)
+                }
             } catch (_: Exception) {
             }
         }
@@ -161,7 +172,7 @@ class AppRepository(context: Context) {
         val text = prettyJson.encodeToString(sanitized)
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
-        val backupFile = File(exportDir, "海屿课表全量备份_$stamp.json")
+        val backupFile = File(exportDir, "海屿空间全量备份_$stamp.json")
         backupFile.writeText(text, Charsets.UTF_8)
 
         val uri = FileProvider.getUriForFile(
@@ -172,8 +183,8 @@ class AppRepository(context: Context) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/json"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "海屿课表全量备份 ($stamp)")
-            clipData = ClipData.newRawUri("海屿课表全量备份.json", uri)
+            putExtra(Intent.EXTRA_SUBJECT, "海屿空间全量备份 ($stamp)")
+            clipData = ClipData.newRawUri("海屿空间全量备份.json", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -290,7 +301,25 @@ class AppRepository(context: Context) {
     ): GdouCampus? {
         val current = _state.value
         val manualCourses = current.courses.filter { it.isManual }
-        val coloredCourses = assignStableColors(courses)
+        // Preserve user's local notes & attendance counts across re-syncs!
+        val prevBySlot = current.courses.filterNot { it.isManual }.associateBy {
+            "${it.name.trim()}|${it.dayOfWeek}|${it.startSection}|${it.endSection}"
+        }
+        val prevByName = current.courses.filterNot { it.isManual }
+            .filter { it.note.isNotBlank() || it.absenceCount > 0 || it.bonusCount > 0 }
+            .associateBy { it.name.trim() }
+        val mergedCourses = courses.map { c ->
+            val matched = prevBySlot["${c.name.trim()}|${c.dayOfWeek}|${c.startSection}|${c.endSection}"]
+                ?: prevByName[c.name.trim()]
+            if (matched != null) {
+                c.copy(
+                    note = c.note.ifBlank { matched.note },
+                    absenceCount = if (c.absenceCount > 0) c.absenceCount else matched.absenceCount,
+                    bonusCount = if (c.bonusCount > 0) c.bonusCount else matched.bonusCount
+                )
+            } else c
+        }
+        val coloredCourses = assignStableColors(mergedCourses)
         val nowLabel = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         val detectedCampus = GdouCampus.fromIdOrNull(detectedCampusId)
         val nextSettings = current.settings.copy(
@@ -364,6 +393,23 @@ class AppRepository(context: Context) {
         val trimmed = newNote.trim()
         val updated = current.courses.map { c ->
             if (c.id == courseId) c.copy(note = trimmed) else c
+        }
+        persist(current.copy(courses = updated))
+    }
+
+    /**
+     * 快速更新单门课的考勤/平时分小记（请假/缺勤 或 发言/加分次数，同步应用至同名课程便于跨节统计）
+     */
+    fun updateCourseAttendance(courseId: String, absenceDelta: Int, bonusDelta: Int) {
+        val current = _state.value
+        val targetName = current.courses.firstOrNull { it.id == courseId }?.name?.trim() ?: return
+        val updated = current.courses.map { c ->
+            if (c.id == courseId || c.name.trim() == targetName) {
+                c.copy(
+                    absenceCount = (c.absenceCount + absenceDelta).coerceIn(0, 99),
+                    bonusCount = (c.bonusCount + bonusDelta).coerceIn(0, 99)
+                )
+            } else c
         }
         persist(current.copy(courses = updated))
     }
@@ -510,13 +556,39 @@ class AppRepository(context: Context) {
     fun replaceSyncedExams(exams: List<ExamItem>) {
         val current = _state.value
         val manual = current.exams.filter { it.isManual }
+        val pinnedKeys = current.exams
+            .filter { !it.isManual && it.isPinned }
+            .map { "${it.courseName.trim()}|${it.examTimeRaw.trim()}" }
+            .toSet()
+        val pinnedNames = current.exams
+            .filter { !it.isManual && it.isPinned }
+            .map { it.courseName.trim() }
+            .toSet()
+        val merged = exams.map { ex ->
+            val wasPinned = "${ex.courseName.trim()}|${ex.examTimeRaw.trim()}" in pinnedKeys ||
+                ex.courseName.trim() in pinnedNames
+            if (wasPinned) ex.copy(isPinned = true) else ex
+        }
         val nowLabel = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         persist(
             current.copy(
-                exams = exams + manual,
+                exams = merged + manual,
                 settings = current.settings.copy(lastSyncTime = nowLabel)
             )
         )
+    }
+
+    fun toggleExamPin(examId: String): Boolean {
+        val current = _state.value
+        var nextPinned = false
+        val updated = current.exams.map { ex ->
+            if (ex.id == examId) {
+                nextPinned = !ex.isPinned
+                ex.copy(isPinned = nextPinned)
+            } else ex
+        }
+        persist(current.copy(exams = updated))
+        return nextPinned
     }
 
     fun upsertExam(exam: ExamItem) {
