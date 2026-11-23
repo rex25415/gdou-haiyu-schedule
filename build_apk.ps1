@@ -25,6 +25,9 @@ $apkSrc = if (-not [string]::IsNullOrWhiteSpace($CustomBuildRoot)) {
     Join-Path $PSScriptRoot "app\build\outputs\apk\release\app-release.apk"
 }
 
-$apkDst = Join-Path $outDir "海屿课表-广东海洋大学-v2.4.0.apk"
+$gradleFile = Join-Path $PSScriptRoot "app\build.gradle.kts"
+$verMatch = [regex]::Match((Get-Content $gradleFile -Raw), 'versionName\s*=\s*"([^"]+)"')
+$versionName = if ($verMatch.Success) { $verMatch.Groups[1].Value } else { "latest" }
+$apkDst = Join-Path $outDir "海屿课表-广东海洋大学-v$versionName.apk"
 Copy-Item -Force $apkSrc $apkDst
 Write-Host "APK ready at: $apkDst" -ForegroundColor Green

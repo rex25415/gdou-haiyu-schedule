@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -33,11 +34,13 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -74,6 +77,7 @@ import cn.gdou.haiyu.schedule.model.GdouCampus
 import cn.gdou.haiyu.schedule.ui.components.BellScheduleReferenceDialog
 import cn.gdou.haiyu.schedule.ui.components.OemKeepAliveGuideDialog
 import cn.gdou.haiyu.schedule.ui.components.ScheduleShareCodeDialog
+import cn.gdou.haiyu.schedule.update.AppReleaseInfo
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneOffset
@@ -83,6 +87,12 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun SettingsScreen(
     snapshot: AppDataSnapshot,
+    availableUpdate: AppReleaseInfo?,
+    isCheckingUpdate: Boolean,
+    updateStatusSummary: String?,
+    onCheckForUpdates: () -> Unit,
+    onOpenUpdateDialog: () -> Unit,
+    onOpenGitHubRepo: () -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onToggleReminder: (Boolean) -> Unit,
     onTestNotification: () -> Unit,
@@ -126,6 +136,48 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+
+        // 0. Instant New-Version Banner (shown prominently whenever a newer GitHub Release exists!)
+        if (availableUpdate != null) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenUpdateDialog() }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                            Text(
+                                text = "发现新版本 v${availableUpdate.versionName}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "点击即可应用内一键下载升级，保留全部课表与作业记录",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                        Button(
+                            onClick = onOpenUpdateDialog,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("立即更新", maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
             }
         }
 
@@ -404,7 +456,85 @@ fun SettingsScreen(
             }
         }
 
-        // 6. Account Privacy & Public Release Statement
+        // 6. In-App Self-Update & Open Source Repository
+        item {
+            SettingsCard(title = "应用更新与开源项目", icon = Icons.Rounded.SystemUpdate) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "当前版本：v${BuildConfig.VERSION_NAME}（build ${BuildConfig.VERSION_CODE}）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = updateStatusSummary
+                                ?: if (availableUpdate != null) "可升级至最新版本 v${availableUpdate.versionName}"
+                                else "官方统一正式签名打包，后续覆盖安装自动保留你的全部课表与设置。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (availableUpdate != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = {
+                            if (availableUpdate != null) onOpenUpdateDialog()
+                            else onCheckForUpdates()
+                        },
+                        enabled = !isCheckingUpdate,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("检查中...", fontSize = 12.5.sp)
+                        } else {
+                            Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (availableUpdate != null) "更新至 v${availableUpdate.versionName}" else "检查新版本",
+                                fontSize = 12.5.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onOpenGitHubRepo,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Code, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("GitHub 开源", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                SettingSwitchRow(
+                    title = "启动时自动检查更新",
+                    subtitle = "每隔 12 小时静默检查 GitHub Releases，发现新版第一时间提醒",
+                    checked = settings.autoCheckUpdates,
+                    onCheckedChange = { v -> onUpdateSettings { it.copy(autoCheckUpdates = v) } }
+                )
+            }
+        }
+
+        // 7. Account Privacy & Public Release Statement
         item {
             SettingsCard(title = "账号隐私与安全声明", icon = Icons.Rounded.Security) {
                 Text(

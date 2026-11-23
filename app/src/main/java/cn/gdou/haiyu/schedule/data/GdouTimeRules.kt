@@ -305,7 +305,11 @@ object GdouTimeRules {
 
         return courses
             .filter { it.dayOfWeek == todayDow && currentWeek in it.weeks }
-            .sortedBy { it.startSection }
+            .sortedWith(
+                compareBy<CourseItem> { it.startSection }
+                    .thenBy { it.endSection }
+                    .thenBy { it.name }
+            )
             .map { course ->
                 val resolved = resolveCourseTime(course, campus)
                 val start = parseLocalTime(resolved.startTime)

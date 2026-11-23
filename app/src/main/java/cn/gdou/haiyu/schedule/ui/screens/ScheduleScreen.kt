@@ -111,8 +111,10 @@ import cn.gdou.haiyu.schedule.ui.components.BellScheduleReferenceDialog
 import cn.gdou.haiyu.schedule.ui.components.QuickAddTaskDialog
 import cn.gdou.haiyu.schedule.ui.components.ScheduleShareCodeDialog
 import cn.gdou.haiyu.schedule.ui.theme.coursePaletteFor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 
@@ -139,7 +141,16 @@ fun ScheduleScreen(
     onApplyHolidayShift: (sourceWeek: Int, sourceDay: Int, targetWeek: Int, targetDay: Int, move: Boolean) -> Unit
 ) {
     val settings = snapshot.settings
-    val today = remember { LocalDate.now() }
+    // Live 30s clock ticker so Hero countdown, Today pill, & current-section highlight stay accurate!
+    var nowDateTime by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            nowDateTime = LocalDateTime.now()
+        }
+    }
+    val today = nowDateTime.toLocalDate()
+    val nowTime = nowDateTime.toLocalTime()
     val totalWeeks = settings.totalWeeks.coerceIn(1, 30)
     val actualCurrentWeek = remember(settings.semesterStartDate, totalWeeks, today) {
         GdouTimeRules.calculateCurrentWeek(settings.semesterStartDate, totalWeeks, today)
@@ -181,12 +192,13 @@ fun ScheduleScreen(
         GdouTimeRules.findConflictClustersForWeek(snapshot.courses, selectedWeek)
     }
 
-    val todayStatuses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus) {
+    val todayStatuses = remember(snapshot.courses, settings.semesterStartDate, totalWeeks, settings.campus, nowDateTime) {
         GdouTimeRules.getTodayCoursesWithStatus(
             courses = snapshot.courses,
             startDateStr = settings.semesterStartDate,
             totalWeeks = totalWeeks,
-            campus = settings.campus
+            campus = settings.campus,
+            now = nowDateTime
         )
     }
 
@@ -423,7 +435,10 @@ fun ScheduleScreen(
             NextClassHeroBanner(
                 todayStatuses = todayStatuses,
                 isDark = isDark,
-                onCourseClick = { detailCourse = it }
+                onCourseClick = { detailCourse = it },
+                onConflictClick = { overlapped ->
+                    conflictSheetData = today.dayOfWeek.value to overlapped
+                }
             )
 
             // Unified Smart Status Pill Row (compact side-by-side DDL + Conflict chips, zero vertical bloat!)
@@ -504,7 +519,11 @@ fun ScheduleScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = buildString {
-                                        append("DDL ${topTask.title.take(10)} · $dueTag")
+                                        val raw = topTask.title.trim()
+                                        val shortTitle = if (raw.length > 10) {
+                                            raw.take(9).trimEnd('（', '(', '【', '[', ' ', '·') + "…"
+                                        } else raw
+                                        append("DDL $shortTitle · $dueTag")
                                         if (urgentTasks.size > 1) append(" +${urgentTasks.size - 1}")
                                     },
                                     fontSize = 11.sp,
@@ -544,6 +563,8 @@ fun ScheduleScreen(
                     WeekGridScheduleView(
                         courses = snapshot.courses,
                         selectedWeek = pageWeek,
+                        today = today,
+                        nowTime = nowTime,
                         startDateStr = settings.semesterStartDate,
                         campus = settings.campus,
                         showWeekend = settings.showWeekend,
@@ -691,7 +712,7 @@ fun ScheduleScreen(
                                 ) {
                                     Text(
                                         text = "错峰作息",
-                                        color = Color.White,
+                                        color = if (isDark) Color(0xFF0A1614) else Color.White,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
@@ -725,7 +746,7 @@ fun ScheduleScreen(
                 }
                 if (peersInConflict.isNotEmpty()) {
                     Surface(
-                        color = Color(0xFFFFEFE2),
+                        color = if (isDark) Color(0xFF4A2516) else Color(0xFFFFEFE2),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -738,14 +759,14 @@ fun ScheduleScreen(
                             Icon(
                                 imageVector = Icons.Rounded.WarningAmber,
                                 contentDescription = null,
-                                tint = Color(0xFFC84B00),
+                                tint = if (isDark) Color(0xFFFFB085) else Color(0xFFC84B00),
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "第${selectedWeek}周与「${peersInConflict.joinToString("、") { it.name }}」时间重叠，可点下方「仅调第${selectedWeek}周」错开。",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF8C3200)
+                                color = if (isDark) Color(0xFFFFD8C2) else Color(0xFF8C3200)
                             )
                         }
                     }
@@ -889,7 +910,7 @@ fun ScheduleScreen(
                     Icon(
                         imageVector = Icons.Rounded.WarningAmber,
                         contentDescription = null,
-                        tint = Color(0xFFC84B00),
+                        tint = if (isDark) Color(0xFFFFB085) else Color(0xFFC84B00),
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -942,7 +963,7 @@ fun ScheduleScreen(
                                         text = "第${c.startSection}-${c.endSection}节 ${resolved.startTime}-${resolved.endTime}",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
+                                        color = if (isDark) Color(0xFF0A1614) else Color.White,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -1021,7 +1042,7 @@ fun ScheduleScreen(
                                 text = "${GdouTimeRules.dayOfWeekLabel(day)} 第${cluster.minStartSection}-${cluster.maxEndSection}节（${cluster.courses.size} 门课重叠）",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFC84B00)
+                                color = if (isDark) Color(0xFFFFB085) else Color(0xFFC84B00)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             cluster.courses.forEach { c ->
@@ -1266,10 +1287,26 @@ private fun EmptyScheduleOnboarding(
 private fun NextClassHeroBanner(
     todayStatuses: List<cn.gdou.haiyu.schedule.data.CourseOccurrenceStatus>,
     isDark: Boolean,
-    onCourseClick: (CourseItem) -> Unit
+    onCourseClick: (CourseItem) -> Unit,
+    onConflictClick: (List<CourseItem>) -> Unit
 ) {
-    val active = todayStatuses.firstOrNull { it.state == OccurrenceState.ONGOING }
-        ?: todayStatuses.firstOrNull { it.state == OccurrenceState.UPCOMING }
+    val ongoingList = todayStatuses.filter { it.state == OccurrenceState.ONGOING }
+    val activeGroup = if (ongoingList.isNotEmpty()) {
+        ongoingList
+    } else {
+        val nextUpcoming = todayStatuses.firstOrNull { it.state == OccurrenceState.UPCOMING }
+        if (nextUpcoming != null) {
+            todayStatuses.filter {
+                it.state == OccurrenceState.UPCOMING &&
+                    (it.course.startSection <= nextUpcoming.course.endSection &&
+                        nextUpcoming.course.startSection <= it.course.endSection)
+            }
+        } else {
+            emptyList()
+        }
+    }
+    val active = activeGroup.firstOrNull()
+    val hasActiveConflict = activeGroup.size > 1
 
     val startBg = if (isDark) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary
     val endBg = if (isDark) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.tertiary
@@ -1282,7 +1319,11 @@ private fun NextClassHeroBanner(
             .clip(RoundedCornerShape(13.dp))
             .background(Brush.horizontalGradient(listOf(startBg, endBg)))
             .clickable(enabled = active != null) {
-                active?.let { onCourseClick(it.course) }
+                if (hasActiveConflict) {
+                    onConflictClick(activeGroup.map { it.course })
+                } else {
+                    active?.let { onCourseClick(it.course) }
+                }
             }
             .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
@@ -1334,6 +1375,21 @@ private fun NextClassHeroBanner(
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
                             )
                         }
+                        if (hasActiveConflict) {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Surface(
+                                color = Color(0xFFD94A1E),
+                                shape = RoundedCornerShape(999.dp)
+                            ) {
+                                Text(
+                                    text = "重×${activeGroup.size}",
+                                    color = Color.White,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
                         if (active.time.isSpecialStaggered) {
                             Spacer(modifier = Modifier.width(5.dp))
                             Surface(
@@ -1352,7 +1408,11 @@ private fun NextClassHeroBanner(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = active.course.name,
+                        text = if (hasActiveConflict) {
+                            "${active.course.name} 等 ${activeGroup.size} 门重课"
+                        } else {
+                            active.course.name
+                        },
                         color = fgColor,
                         fontSize = 14.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -1368,7 +1428,7 @@ private fun NextClassHeroBanner(
                         fontSize = 12.5.sp
                     )
                     Text(
-                        text = active.course.location.ifBlank { "地点待定" },
+                        text = if (hasActiveConflict) "点此切换查看" else active.course.location.ifBlank { "地点待定" },
                         color = fgColor.copy(alpha = 0.88f),
                         fontSize = 11.sp,
                         maxLines = 1,
@@ -1557,7 +1617,7 @@ private fun DayTimelineScheduleView(
                                         ) {
                                             Text(
                                                 text = "错峰",
-                                                color = Color.White,
+                                                color = if (isDark) Color(0xFF0A1614) else Color.White,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
@@ -1587,6 +1647,8 @@ private fun DayTimelineScheduleView(
 private fun WeekGridScheduleView(
     courses: List<CourseItem>,
     selectedWeek: Int,
+    today: LocalDate,
+    nowTime: LocalTime,
     startDateStr: String,
     campus: GdouCampus,
     showWeekend: Boolean,
@@ -1606,8 +1668,15 @@ private fun WeekGridScheduleView(
     val weekDates = remember(startDateStr, selectedWeek) {
         GdouTimeRules.getWeekDates(startDateStr, selectedWeek)
     }
-    val today = remember { LocalDate.now() }
-    val nowTime = remember { LocalTime.now() }
+    val weekContainsToday = remember(weekDates, today) { weekDates.any { it == today } }
+    val activeSectionNumber: Int? = remember(slots, nowTime, weekContainsToday) {
+        if (!weekContainsToday) null
+        else slots.firstOrNull { slot ->
+            val st = GdouTimeRules.parseLocalTime(slot.startTime)
+            val et = GdouTimeRules.parseLocalTime(slot.endTime)
+            !nowTime.isBefore(st) && !nowTime.isAfter(et)
+        }?.number
+    }
     val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
     val baseTimeW = if (dayCount == 7) 36f else 42f
     val timeColumnWidth = (baseTimeW * (1f + (fontScale - 1f) * 0.65f)).dp
@@ -1729,9 +1798,10 @@ private fun WeekGridScheduleView(
                 .verticalScroll(rememberScrollState())
                 .padding(end = 3.dp, bottom = 20.dp)
         ) {
-            // Left Time Slots Column (with subtle 午休 / 晚间 rhythm separators!)
+            // Left Time Slots Column (highlights current section cleanly — zero line slashing over course cards!)
             Column(modifier = Modifier.width(timeColumnWidth)) {
                 slots.forEach { slot ->
+                    val isCurrentSlot = activeSectionNumber == slot.number
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1739,15 +1809,33 @@ private fun WeekGridScheduleView(
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "${slot.number}",
-                            fontSize = 11.sp,
-                            lineHeight = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (isCurrentSlot) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "${slot.number}",
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "${slot.number}",
+                                fontSize = 11.sp,
+                                lineHeight = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                         Spacer(modifier = Modifier.height(1.5.dp))
                         Text(
                             text = slot.startTime,
@@ -1755,7 +1843,8 @@ private fun WeekGridScheduleView(
                             lineHeight = 10.sp,
                             maxLines = 1,
                             softWrap = false,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = if (isCurrentSlot) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isCurrentSlot) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
                             text = slot.endTime,
@@ -1763,7 +1852,7 @@ private fun WeekGridScheduleView(
                             lineHeight = 10.sp,
                             maxLines = 1,
                             softWrap = false,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                            color = if (isCurrentSlot) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
                         )
                     }
                     if (slot.number == 4 || slot.number == 8) {
@@ -1850,6 +1939,17 @@ private fun WeekGridScheduleView(
                                 )
                             }
                         }
+                    }
+
+                    // Subtle Current-Time Hairline BEHIND course cards (shows on free slots, NEVER cuts across course text!)
+                    if (isTodayCol && liveTimeY != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset(y = liveTimeY.coerceAtLeast(0.dp))
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.48f else 0.36f))
+                        )
                     }
 
                     // 1. Non-current-week preview cards (clean muted style)
@@ -1988,29 +2088,6 @@ private fun WeekGridScheduleView(
                             }
                         }
                     }
-
-                    // 3. Live Current-Time Indicator Line on Today's column!
-                    if (isTodayCol && liveTimeY != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset(y = (liveTimeY - 3.dp).coerceAtLeast(0.dp))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFE53935))
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(1.5.dp)
-                                    .background(Color(0xFFE53935).copy(alpha = 0.85f))
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -2067,8 +2144,13 @@ private fun WeekGridCourseCard(
                     color = Color(0xFFD94A1E),
                     shape = RoundedCornerShape(4.dp)
                 ) {
+                    val badgeLabel = when {
+                        resolved.isSpecialStaggered && fontScale <= 1.15f && dayCount == 5 -> "重×$conflictCount · ${resolved.startTime}"
+                        fontScale <= 1.15f -> "重×$conflictCount"
+                        else -> "×$conflictCount"
+                    }
                     Text(
-                        text = if (fontScale <= 1.15f) "重×$conflictCount" else "×$conflictCount",
+                        text = badgeLabel,
                         fontSize = 8.sp,
                         lineHeight = 9.5.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -2076,6 +2158,18 @@ private fun WeekGridCourseCard(
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.padding(horizontal = 3.5.dp, vertical = 1.dp)
+                    )
+                }
+                if (resolved.isSpecialStaggered && (dayCount == 7 || fontScale > 1.15f)) {
+                    Spacer(modifier = Modifier.height(1.5.dp))
+                    Text(
+                        text = "错峰${resolved.startTime}",
+                        fontSize = 7.2.sp,
+                        lineHeight = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.accent,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
                 Spacer(modifier = Modifier.height(2.dp))
@@ -2116,7 +2210,7 @@ private fun WeekGridCourseCard(
                         fontSize = 7.5.sp,
                         lineHeight = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = if (isDark) Color(0xFF0A1614) else Color.White,
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.padding(horizontal = 3.5.dp, vertical = 1.dp)
@@ -2171,7 +2265,7 @@ private fun CourseEditorBottomSheet(
     var dayOfWeek by remember { mutableIntStateOf(initial?.dayOfWeek ?: defaultDay) }
     var startSection by remember { mutableStateOf((initial?.startSection ?: defaultStartSection).toString()) }
     var endSection by remember {
-        mutableStateOf((initial?.endSection ?: (defaultStartSection + 1).coerceAtMost(10)).toString())
+        mutableStateOf((initial?.endSection ?: (defaultStartSection + 1).coerceAtMost(12)).toString())
     }
     var weeksInput by remember {
         mutableStateOf(
@@ -2235,7 +2329,7 @@ private fun CourseEditorBottomSheet(
                     OutlinedTextField(
                         value = startSection,
                         onValueChange = { startSection = it.filter(Char::isDigit) },
-                        label = { Text("开始节(1-10)") },
+                        label = { Text("开始节(1-12)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -2243,7 +2337,7 @@ private fun CourseEditorBottomSheet(
                     OutlinedTextField(
                         value = endSection,
                         onValueChange = { endSection = it.filter(Char::isDigit) },
-                        label = { Text("结束节(1-10)") },
+                        label = { Text("结束节(1-12)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         modifier = Modifier.weight(1f)

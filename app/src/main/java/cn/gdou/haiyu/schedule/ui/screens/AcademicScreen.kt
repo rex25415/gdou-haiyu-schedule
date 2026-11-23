@@ -368,10 +368,10 @@ private fun TasksContent(
             val (badgeText, badgeBg, badgeFg) = when {
                 task.isDone -> Triple("已完成", MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
                 daysLeft == null -> Triple("无期限", MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
-                daysLeft < 0L -> Triple("逾期${-daysLeft}天", Color(0xFFFFE1DF), Color(0xFFBA1A1A))
-                daysLeft == 0L -> Triple("今天截止", Color(0xFFFFE1DF), Color(0xFFBA1A1A))
-                daysLeft == 1L -> Triple("明天截止", Color(0xFFFFE7D1), Color(0xFFB84500))
-                daysLeft <= 3L -> Triple("剩${daysLeft}天", Color(0xFFFFF0D4), Color(0xFF9C6500))
+                daysLeft < 0L -> Triple("逾期${-daysLeft}天", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                daysLeft == 0L -> Triple("今天截止", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                daysLeft == 1L -> Triple("明天截止", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+                daysLeft <= 3L -> Triple("剩${daysLeft}天", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
                 else -> Triple("剩${daysLeft}天", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
             }
 
@@ -754,7 +754,7 @@ private fun ExamsContent(
                         shape = RoundedCornerShape(14.dp),
                         color = when {
                             isPast -> MaterialTheme.colorScheme.surfaceContainerHigh
-                            daysLeft != null && daysLeft <= 3 -> Color(0xFFFFE1DF)
+                            daysLeft != null && daysLeft <= 3 -> MaterialTheme.colorScheme.errorContainer
                             else -> MaterialTheme.colorScheme.primaryContainer
                         },
                         modifier = Modifier.width(68.dp)
@@ -771,20 +771,20 @@ private fun ExamsContent(
                                     Text("待定", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                                 daysLeft == 0L -> {
-                                    Text("今天", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFBA1A1A))
-                                    Text("加油!", fontSize = 10.sp, color = Color(0xFFBA1A1A))
+                                    Text("今天", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    Text("加油!", fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer)
                                 }
                                 else -> {
                                     Text(
                                         text = "$daysLeft",
                                         fontSize = 20.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = if (daysLeft <= 3) Color(0xFFBA1A1A) else MaterialTheme.colorScheme.primary
+                                        color = if (daysLeft <= 3) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary
                                     )
                                     Text(
                                         text = "天后",
                                         fontSize = 10.sp,
-                                        color = if (daysLeft <= 3) Color(0xFFBA1A1A) else MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (daysLeft <= 3) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
                             }

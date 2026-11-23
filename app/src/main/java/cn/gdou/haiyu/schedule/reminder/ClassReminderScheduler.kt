@@ -60,11 +60,9 @@ object ClassReminderScheduler {
         val minutesBefore = settings.reminderMinutesBefore.coerceIn(5, 60)
 
         var earliestTrigger: LocalDateTime? = null
-        var bestTitle = ""
-        var bestLoc = ""
+        val earliestCourses = mutableListOf<Triple<String, String, Boolean>>() // (name, loc+time, staggered)
         var bestTimeText = ""
         var bestTeacher = ""
-        var bestStaggered = false
 
         // Look ahead up to 14 days to find the very next scheduled class trigger
         for (dayOffset in 0L..14L) {
@@ -76,19 +74,22 @@ object ClassReminderScheduler {
 
             snapshot.courses
                 .filter { it.dayOfWeek == dow && weekNum in it.weeks }
+                .sortedWith(compareBy({ it.startSection }, { it.endSection }, { it.name }))
                 .forEach { course ->
                     val resolved = GdouTimeRules.resolveCourseTime(course, settings.campus)
                     val startTime = GdouTimeRules.parseLocalTime(resolved.startTime)
                     val classDateTime = LocalDateTime.of(date, startTime)
                     val triggerAt = classDateTime.minusMinutes(minutesBefore.toLong())
                     if (triggerAt.isAfter(now)) {
+                        val locText = course.location.ifBlank { "地点待定" }
                         if (earliestTrigger == null || triggerAt.isBefore(earliestTrigger)) {
                             earliestTrigger = triggerAt
-                            bestTitle = course.name
-                            bestLoc = course.location.ifBlank { "地点待定" }
+                            earliestCourses.clear()
+                            earliestCourses.add(Triple(course.name, locText, resolved.isSpecialStaggered))
                             bestTimeText = "${resolved.startTime}-${resolved.endTime}"
                             bestTeacher = course.teacher
-                            bestStaggered = resolved.isSpecialStaggered
+                        } else if (triggerAt == earliestTrigger) {
+                            earliestCourses.add(Triple(course.name, locText, resolved.isSpecialStaggered))
                         }
                     }
                 }
@@ -96,6 +97,18 @@ object ClassReminderScheduler {
         }
 
         val triggerTime = earliestTrigger ?: return
+        val first = earliestCourses.firstOrNull() ?: return
+        val bestTitle = if (earliestCourses.size > 1) {
+            "${first.first}（另有${earliestCourses.size - 1}门重课）"
+        } else {
+            first.first
+        }
+        val bestLoc = if (earliestCourses.size > 1) {
+            earliestCourses.joinToString(" / ") { "${it.first}@${it.second}" }
+        } else {
+            first.second
+        }
+        val bestStaggered = earliestCourses.any { it.third }
         val triggerMillis = triggerTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         val intent = Intent(context, ClassReminderReceiver::class.java).apply {

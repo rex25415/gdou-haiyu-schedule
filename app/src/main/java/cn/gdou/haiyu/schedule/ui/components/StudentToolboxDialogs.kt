@@ -158,14 +158,14 @@ fun BellScheduleReferenceDialog(
                             modifier = Modifier.weight(1f)
                         )
                         Surface(
-                            color = if (isStaggered) Color(0xFFFFE5D4) else Color.Transparent,
+                            color = if (isStaggered) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent,
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
                                 text = staggeredNote,
                                 fontSize = 11.sp,
                                 fontWeight = if (isStaggered) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isStaggered) Color(0xFFB84500) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                color = if (isStaggered) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                                 modifier = Modifier.padding(horizontal = if (isStaggered) 6.dp else 0.dp, vertical = 2.dp)
                             )
                         }
@@ -436,7 +436,7 @@ fun OemKeepAliveGuideDialog(
             ) {
                 Surface(
                     color = if (canExactAlarm) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-                    else Color(0xFFFFE7E5),
+                    else MaterialTheme.colorScheme.errorContainer,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -446,7 +446,7 @@ fun OemKeepAliveGuideDialog(
                             else "精准闹钟权限：暂未授权（可能导致提醒延迟数分钟）",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (canExactAlarm) MaterialTheme.colorScheme.primary else Color(0xFFBA1A1A)
+                            color = if (canExactAlarm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onErrorContainer
                         )
                         if (!canExactAlarm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             Spacer(modifier = Modifier.height(8.dp))

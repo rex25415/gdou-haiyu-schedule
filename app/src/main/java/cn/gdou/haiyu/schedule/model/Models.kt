@@ -111,7 +111,10 @@ data class AppSettings(
     val reminderMinutesBefore: Int = 15,
     val lastSyncTime: String = "",
     val preferOffCampusChannel: Boolean = true,
-    val preferDesktopUa: Boolean = false
+    val preferDesktopUa: Boolean = false,
+    val autoCheckUpdates: Boolean = true,
+    val lastUpdateCheckEpochMs: Long = 0L,
+    val ignoredUpdateVersion: String = ""
 )
 
 @Serializable

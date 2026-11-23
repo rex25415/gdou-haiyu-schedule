@@ -11,6 +11,8 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -35,18 +37,25 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.zIndex
+import cn.gdou.haiyu.schedule.BuildConfig
 import cn.gdou.haiyu.schedule.data.AppRepository
 import cn.gdou.haiyu.schedule.data.GdouTimeRules
 import cn.gdou.haiyu.schedule.data.IcsExporter
 import cn.gdou.haiyu.schedule.data.ScheduleImageExporter
 import cn.gdou.haiyu.schedule.reminder.ClassReminderScheduler
+import cn.gdou.haiyu.schedule.ui.components.AppUpdateDialog
 import cn.gdou.haiyu.schedule.ui.screens.AcademicScreen
 import cn.gdou.haiyu.schedule.ui.screens.ScheduleScreen
 import cn.gdou.haiyu.schedule.ui.screens.SettingsScreen
 import cn.gdou.haiyu.schedule.ui.screens.SyncPortalScreen
 import cn.gdou.haiyu.schedule.ui.theme.HaiyuTheme
+import cn.gdou.haiyu.schedule.update.AppReleaseInfo
+import cn.gdou.haiyu.schedule.update.AppUpdateManager
+import cn.gdou.haiyu.schedule.update.UpdateCheckResult
 import cn.gdou.haiyu.schedule.widget.TodayScheduleWidgetProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class NavTab(
     val label: String,
@@ -74,6 +83,12 @@ fun HaiyuApp(
     var academicRequestedSubTab by rememberSaveable { mutableIntStateOf(0) }
     var academicSubTabNonce by rememberSaveable { mutableIntStateOf(0) }
 
+    // In-App GitHub Releases Updater state
+    var availableUpdate by remember { mutableStateOf<AppReleaseInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateStatusSummary by remember { mutableStateOf<String?>(null) }
+
     if (currentTab == 1 && !hasOpenedSyncTab) {
         hasOpenedSyncTab = true
     }
@@ -91,6 +106,53 @@ fun HaiyuApp(
         scope.launch {
             snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(msg)
+        }
+    }
+
+    fun checkForUpdates(manual: Boolean) {
+        if (isCheckingUpdate) return
+        isCheckingUpdate = true
+        if (manual) updateStatusSummary = "正在连接 GitHub Releases 检查最新版本..."
+        scope.launch {
+            val result = AppUpdateManager.checkLatestRelease(BuildConfig.VERSION_NAME)
+            isCheckingUpdate = false
+            val nowMs = System.currentTimeMillis()
+            when (result) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    availableUpdate = result.release
+                    updateStatusSummary = "发现新版本 v${result.release.versionName}"
+                    repo.updateSettings { it.copy(lastUpdateCheckEpochMs = nowMs) }
+                    if (manual || result.release.versionName != snapshot.settings.ignoredUpdateVersion) {
+                        showUpdateDialog = true
+                    }
+                }
+                is UpdateCheckResult.UpToDate -> {
+                    availableUpdate = null
+                    updateStatusSummary = "当前已是最新版本（v${BuildConfig.VERSION_NAME}）"
+                    repo.updateSettings { it.copy(lastUpdateCheckEpochMs = nowMs) }
+                    if (manual) {
+                        showToast("当前 v${BuildConfig.VERSION_NAME} 已是最新版本")
+                    }
+                }
+                is UpdateCheckResult.Error -> {
+                    updateStatusSummary = if (manual) result.message else null
+                    if (manual) {
+                        showToast(result.message)
+                    }
+                }
+            }
+        }
+    }
+
+    // Cold-start housekeeping: clean old update APKs + silent 12h auto-check
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            AppUpdateManager.cleanupCachedApks(context, BuildConfig.VERSION_NAME)
+        }
+        val st = snapshot.settings
+        val due = System.currentTimeMillis() - st.lastUpdateCheckEpochMs >= AppUpdateManager.AUTO_CHECK_INTERVAL_MS
+        if (st.autoCheckUpdates && due) {
+            checkForUpdates(manual = false)
         }
     }
 
@@ -159,7 +221,15 @@ fun HaiyuApp(
                         NavigationBarItem(
                             selected = currentTab == idx,
                             onClick = { currentTab = idx },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            icon = {
+                                if (idx == 3 && availableUpdate != null) {
+                                    BadgedBox(badge = { Badge() }) {
+                                        Icon(tab.icon, contentDescription = tab.label)
+                                    }
+                                } else {
+                                    Icon(tab.icon, contentDescription = tab.label)
+                                }
+                            },
                             label = { Text(tab.label) }
                         )
                     }
@@ -337,6 +407,19 @@ fun HaiyuApp(
 
                             3 -> SettingsScreen(
                                 snapshot = snapshot,
+                                availableUpdate = availableUpdate,
+                                isCheckingUpdate = isCheckingUpdate,
+                                updateStatusSummary = updateStatusSummary,
+                                onCheckForUpdates = { checkForUpdates(manual = true) },
+                                onOpenUpdateDialog = {
+                                    if (availableUpdate != null) showUpdateDialog = true
+                                    else checkForUpdates(manual = true)
+                                },
+                                onOpenGitHubRepo = {
+                                    if (!AppUpdateManager.openUrlInBrowser(context, AppUpdateManager.REPO_WEB_URL)) {
+                                        showToast("未检测到可用浏览器，仓库地址：${AppUpdateManager.REPO_WEB_URL}")
+                                    }
+                                },
                                 onUpdateSettings = { transform ->
                                     repo.updateSettings(transform)
                                     syncWidgetsAndReminders()
@@ -396,6 +479,19 @@ fun HaiyuApp(
                     }
                 }
             }
+        }
+
+        val pendingRelease = availableUpdate
+        if (showUpdateDialog && pendingRelease != null) {
+            AppUpdateDialog(
+                release = pendingRelease,
+                onDismiss = { showUpdateDialog = false },
+                onIgnoreVersion = { ver ->
+                    repo.updateSettings { it.copy(ignoredUpdateVersion = ver) }
+                    showToast("已忽略 v$ver 自动弹窗（随时可在「设置 → 应用更新」手动升级）")
+                },
+                onShowMessage = { showToast(it) }
+            )
         }
     }
 }
