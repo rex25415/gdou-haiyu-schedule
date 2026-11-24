@@ -15,11 +15,45 @@ object IcsExporter {
     private val DT_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
 
     fun exportToIcsAndShare(context: Context, snapshot: AppDataSnapshot): Boolean {
-        if (snapshot.courses.isEmpty()) return false
+        val icsContent = buildIcsCalendarContent(snapshot)
+        if (icsContent.isEmpty()) return false
+
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val icsFile = File(exportDir, "海屿空间_广海_${System.currentTimeMillis()}.ics")
+        icsFile.writeText(icsContent, Charsets.UTF_8)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            icsFile
+        )
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/calendar"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "海屿空间课程日历 (.ics)")
+            clipData = ClipData.newRawUri("海屿空间.ics", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "分享/导入到系统日历").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+        return true
+    }
+
+    /**
+     * 生成遵循 RFC 5545 规范的纯净 .ics 日历文本，方便在无 Android Context 下做单测验证。
+     */
+    internal fun buildIcsCalendarContent(
+        snapshot: AppDataSnapshot,
+        nowStamp: String = LocalDateTime.now().format(DT_FORMAT)
+    ): String {
+        if (snapshot.courses.isEmpty()) return ""
         val startMonday = GdouTimeRules.parseLocalDate(snapshot.settings.semesterStartDate)
             .with(DayOfWeek.MONDAY)
         val campus = snapshot.settings.campus
-        val nowStamp = LocalDateTime.now().format(DT_FORMAT)
+        val alarmMins = snapshot.settings.reminderMinutesBefore.coerceIn(5, 60)
 
         val sb = StringBuilder()
         sb.append("BEGIN:VCALENDAR\r\n")
@@ -28,8 +62,6 @@ object IcsExporter {
         sb.append("CALSCALE:GREGORIAN\r\n")
         sb.append("X-WR-CALNAME:海屿空间-${snapshot.settings.academicYearLabel}\r\n")
         sb.append("X-WR-TIMEZONE:Asia/Shanghai\r\n")
-
-        val alarmMins = snapshot.settings.reminderMinutesBefore.coerceIn(5, 60)
 
         snapshot.courses.forEach { course ->
             val resolved = GdouTimeRules.resolveCourseTime(course, campus)
@@ -69,29 +101,7 @@ object IcsExporter {
             }
         }
         sb.append("END:VCALENDAR\r\n")
-
-        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
-        val icsFile = File(exportDir, "海屿空间_广海_${System.currentTimeMillis()}.ics")
-        icsFile.writeText(sb.toString(), Charsets.UTF_8)
-
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            icsFile
-        )
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/calendar"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "海屿空间课程日历 (.ics)")
-            clipData = ClipData.newRawUri("海屿空间.ics", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(Intent.createChooser(shareIntent, "分享/导入到系统日历").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        })
-        return true
+        return sb.toString()
     }
 
     private fun escapeIcs(text: String): String {

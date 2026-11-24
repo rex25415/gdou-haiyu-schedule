@@ -114,4 +114,28 @@ class GdouSyncScriptTest {
         assertTrue(syncScript.contains("hasLoggedInPortalDom"))
         assertTrue(GdouSyncScript.DOM_PORTAL_PROBE_SCRIPT.contains("LOGGED_IN"))
     }
+
+    @Test
+    fun urlClassifiersAndEmptyClassroomScriptsHandleAllPortalVariants() {
+        assertTrue(GdouSyncScript.isMfaUrl("https://authserver.gdou.edu.cn/authserver/reauthCheck.html"))
+        assertTrue(GdouSyncScript.isMfaUrl("https://authserver.gdou.edu.cn/authserver/reauthLoginView.html"))
+        assertFalse(GdouSyncScript.isMfaUrl("https://jw.gdou.edu.cn/xtgl/index_initMenu.html"))
+
+        assertTrue(GdouSyncScript.isUrlOnPortalLoginPath("https://wfw.gdou.edu.cn/https/foo/xtgl/login_slogin.html"))
+        assertTrue(GdouSyncScript.isUrlOnPortalLoginPath("https://jw.gdou.edu.cn/xtgl/login_tickitLogin.html"))
+        assertFalse(GdouSyncScript.isUrlOnPortalLoginPath("https://jw.gdou.edu.cn/kbcx/xskbcx_cxXskbcxIndex.html"))
+
+        val roomQueryJs = GdouSyncScript.buildQueryEmptyClassroomsScript(
+            campusKeyword = "海滨",
+            weekNumber = 13,
+            dayOfWeek = 3,
+            startSection = 3,
+            endSection = 4,
+            buildingKeyword = "教学楼"
+        )
+        assertTrue(roomQueryJs.contains("resolveEmptyRoomQueryContext"))
+        assertTrue(roomQueryJs.contains("__haiyuRoomQuerySeq"))
+        assertTrue(roomQueryJs.contains("ensureWfwJwSessionIfNeeded"))
+        assertTrue(roomQueryJs.contains("zcdMask"))
+    }
 }

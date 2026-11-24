@@ -204,7 +204,8 @@ data class AppSettings(
     val savedPartnerCode: String = "",
     val creditTargets: GraduationCreditTargets = GraduationCreditTargets(),
     val favoriteBuildings: List<String> = emptyList(),
-    val favoriteClassrooms: List<String> = emptyList()
+    val favoriteClassrooms: List<String> = emptyList(),
+    val receiveBetaUpdates: Boolean = false
 )
 
 @Serializable

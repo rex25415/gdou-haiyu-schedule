@@ -33,8 +33,12 @@ class AppUpdateManagerTest {
         assertTrue(AppUpdateManager.isNewerVersion("2.10.0", "2.9.9"))
         assertTrue(AppUpdateManager.isNewerVersion("v3.0", "2.9.9"))
         assertTrue(AppUpdateManager.isNewerVersion("2.5.1", "2.5.0"))
+        assertTrue(AppUpdateManager.isNewerVersion("v3.4.0-beta.1", "3.3.0"))
+        assertTrue(AppUpdateManager.isNewerVersion("v3.4.0-beta.2", "3.4.0-beta.1"))
+        assertTrue(AppUpdateManager.isNewerVersion("v3.4.0", "3.4.0-beta.2"))
 
         assertFalse(AppUpdateManager.isNewerVersion("v2.5.0", "2.5.0"))
+        assertFalse(AppUpdateManager.isNewerVersion("v3.4.0-beta.1", "3.4.0"))
         assertFalse(AppUpdateManager.isNewerVersion("2.4.9", "2.5.0"))
         assertFalse(AppUpdateManager.isNewerVersion("1.9.9", "2.0.0"))
         assertFalse(AppUpdateManager.isNewerVersion("", "2.5.0"))
@@ -681,5 +685,53 @@ class AppUpdateManagerTest {
         )
         assertTrue(extDiag.contains("机型：Xiaomi 15"))
         assertTrue(extDiag.contains("通道：校外免校园网"))
+    }
+
+    @Test
+    fun releasesListParserRespectsDraftsAndBetaChannelOptIn() {
+        val releasesJson = """
+            [
+              {
+                "tag_name": "v3.5.0-draft.1",
+                "draft": true,
+                "prerelease": true,
+                "body": "草稿不应展示",
+                "assets": []
+              },
+              {
+                "tag_name": "v3.4.0-beta.1",
+                "draft": false,
+                "prerelease": true,
+                "name": "海屿空间 v3.4.0-beta.1",
+                "body": "<!-- APP_NOTES_START -->\n- 预览版：测试全新课表导出\n<!-- APP_NOTES_END -->",
+                "assets": [
+                  {
+                    "name": "HaiyuSchedule-GDOU-v3.4.0-beta.1.apk",
+                    "size": 2012000,
+                    "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "browser_download_url": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0-beta.1/HaiyuSchedule-GDOU-v3.4.0-beta.1.apk"
+                  }
+                ]
+              },
+              {
+                "tag_name": "v3.3.0",
+                "draft": false,
+                "prerelease": false,
+                "name": "海屿空间 v3.3.0",
+                "body": "- 正式稳定版",
+                "assets": []
+              }
+            ]
+        """.trimIndent()
+
+        val betaPick = AppUpdateManager.parseLatestReleaseFromListJson(releasesJson, includePrerelease = true)
+        assertNotNull(betaPick)
+        assertEquals("3.4.0-beta.1", betaPick!!.versionName)
+        assertTrue(betaPick.releaseNotes.contains("预览版"))
+        assertTrue(AppUpdateManager.isNewerVersion(betaPick.versionName, "3.3.0"))
+
+        val stablePick = AppUpdateManager.parseLatestReleaseFromListJson(releasesJson, includePrerelease = false)
+        assertNotNull(stablePick)
+        assertEquals("3.3.0", stablePick!!.versionName)
     }
 }

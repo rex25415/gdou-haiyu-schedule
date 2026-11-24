@@ -81,6 +81,7 @@ object AppUpdateManager {
     const val LATEST_RELEASE_WEB_URL = "$REPO_WEB_URL/releases/latest"
     const val PRIMARY_MIRROR_PREFIX = "https://gh-proxy.com/"
     private const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+    private const val RELEASES_LIST_API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases?per_page=8"
     private const val RAW_LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/docs/latest.json"
     private const val PAGES_LATEST_MANIFEST_URL = "${DOWNLOAD_PAGE_URL}latest.json"
 
@@ -152,6 +153,36 @@ object AppUpdateManager {
         }
     }
 
+    private fun extractPrereleaseTag(raw: String): String? {
+        val noBuild = raw.trim().removePrefix("v").removePrefix("V").substringBefore('+').trim()
+        val dashIdx = noBuild.indexOf('-')
+        if (dashIdx < 0) return null
+        return noBuild.substring(dashIdx + 1).trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun comparePrereleaseTags(remotePre: String?, currentPre: String?): Int {
+        if (remotePre == null && currentPre == null) return 0
+        if (remotePre == null) return 1 // Stable > Pre-release for same X.Y.Z
+        if (currentPre == null) return -1
+        val aParts = remotePre.split('.', '-')
+        val bParts = currentPre.split('.', '-')
+        val maxLen = maxOf(aParts.size, bParts.size)
+        for (i in 0 until maxLen) {
+            val a = aParts.getOrNull(i) ?: return -1
+            val b = bParts.getOrNull(i) ?: return 1
+            val aNum = a.toIntOrNull()
+            val bNum = b.toIntOrNull()
+            val cmp = when {
+                aNum != null && bNum != null -> aNum.compareTo(bNum)
+                aNum != null -> -1 // SemVer: numeric identifiers have lower precedence than non-numeric
+                bNum != null -> 1
+                else -> a.compareTo(b, ignoreCase = true)
+            }
+            if (cmp != 0) return cmp
+        }
+        return 0
+    }
+
     fun isNewerVersion(remoteVersion: String, currentVersion: String): Boolean {
         val remote = parseVersionParts(remoteVersion)
         val current = parseVersionParts(currentVersion)
@@ -162,7 +193,72 @@ object AppUpdateManager {
             val c = current.getOrElse(i) { 0 }
             if (r != c) return r > c
         }
-        return false
+        return comparePrereleaseTags(
+            extractPrereleaseTag(remoteVersion),
+            extractPrereleaseTag(currentVersion)
+        ) > 0
+    }
+
+    private fun parseReleaseObject(root: JsonObject): AppReleaseInfo? {
+        val tagName = root["tag_name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (tagName.isEmpty()) return null
+        val coreVer = normalizeVersion(tagName)
+        if (coreVer.isEmpty()) return null
+        val preTag = extractPrereleaseTag(tagName)
+        val versionName = if (preTag != null) "$coreVer-$preTag" else coreVer
+        val title = root["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿空间 v$versionName" }
+        val body = root["body"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        val htmlUrl = root["html_url"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            .ifBlank { "$REPO_WEB_URL/releases/tag/$tagName" }
+
+        val assets: JsonArray? = root["assets"]?.jsonArray
+        var apkUrl = ""
+        var apkName = "HaiyuSchedule-GDOU-v$versionName.apk"
+        var apkSize = 0L
+        var apiDigestSha256: String? = null
+
+        if (assets != null) {
+            for (el in assets) {
+                val obj = el.jsonObject
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val url = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
+                    apkName = name
+                    apkUrl = url
+                    apkSize = obj["size"]?.jsonPrimitive?.longOrNull ?: 0L
+                    val digest = obj["digest"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    if (digest.startsWith("sha256:", ignoreCase = true)) {
+                        val candidate = digest.substringAfter(':').trim().lowercase(Locale.US)
+                        if (candidate.length == 64 && candidate.all { it in '0'..'9' || it in 'a'..'f' }) {
+                            apiDigestSha256 = candidate
+                        }
+                    }
+                    break
+                }
+            }
+        }
+
+        if (apkUrl.isBlank()) {
+            apkUrl = "$REPO_WEB_URL/releases/download/$tagName/$apkName"
+        }
+
+        val bodySha256 = if (apiDigestSha256 == null) {
+            sha256Regex.find(body)?.groupValues?.get(1)?.lowercase(Locale.US)
+        } else {
+            null
+        }
+
+        return AppReleaseInfo(
+            tagName = tagName,
+            versionName = versionName,
+            title = title,
+            releaseNotes = cleanReleaseNotes(body),
+            htmlUrl = htmlUrl,
+            apkDownloadUrl = apkUrl,
+            apkFileName = apkName,
+            apkSizeBytes = apkSize,
+            expectedSha256 = apiDigestSha256 ?: bodySha256
+        )
     }
 
     /**
@@ -170,63 +266,30 @@ object AppUpdateManager {
      */
     fun parseReleaseJson(rawJson: String): AppReleaseInfo? {
         return try {
-            val root: JsonObject = json.parseToJsonElement(rawJson).jsonObject
-            val tagName = root["tag_name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-            if (tagName.isEmpty()) return null
-            val versionName = normalizeVersion(tagName)
-            val title = root["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "海屿空间 v$versionName" }
-            val body = root["body"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-            val htmlUrl = root["html_url"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-                .ifBlank { "$REPO_WEB_URL/releases/tag/$tagName" }
+            parseReleaseObject(json.parseToJsonElement(rawJson).jsonObject)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-            val assets: JsonArray? = root["assets"]?.jsonArray
-            var apkUrl = ""
-            var apkName = "HaiyuSchedule-GDOU-v$versionName.apk"
-            var apkSize = 0L
-            var apiDigestSha256: String? = null
-
-            if (assets != null) {
-                for (el in assets) {
-                    val obj = el.jsonObject
-                    val name = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                    val url = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                    if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
-                        apkName = name
-                        apkUrl = url
-                        apkSize = obj["size"]?.jsonPrimitive?.longOrNull ?: 0L
-                        val digest = obj["digest"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                        if (digest.startsWith("sha256:", ignoreCase = true)) {
-                            val candidate = digest.substringAfter(':').trim().lowercase(Locale.US)
-                            if (candidate.length == 64 && candidate.all { it in '0'..'9' || it in 'a'..'f' }) {
-                                apiDigestSha256 = candidate
-                            }
-                        }
-                        break
-                    }
-                }
+    /**
+     * 解析 GitHub `/releases` 列表 JSON：自动过滤 draft 草稿，并按是否订阅 Beta 选择首个匹配版本。
+     */
+    internal fun parseLatestReleaseFromListJson(
+        rawJson: String,
+        includePrerelease: Boolean
+    ): AppReleaseInfo? {
+        return try {
+            val arr = json.parseToJsonElement(rawJson).jsonArray
+            for (element in arr) {
+                val obj = element.jsonObject
+                val isDraft = obj["draft"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                if (isDraft) continue
+                val isPre = obj["prerelease"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                if (!includePrerelease && isPre) continue
+                return parseReleaseObject(obj)
             }
-
-            if (apkUrl.isBlank()) {
-                apkUrl = "$REPO_WEB_URL/releases/download/$tagName/$apkName"
-            }
-
-            val bodySha256 = if (apiDigestSha256 == null) {
-                sha256Regex.find(body)?.groupValues?.get(1)?.lowercase(Locale.US)
-            } else {
-                null
-            }
-
-            AppReleaseInfo(
-                tagName = tagName,
-                versionName = versionName,
-                title = title,
-                releaseNotes = cleanReleaseNotes(body),
-                htmlUrl = htmlUrl,
-                apkDownloadUrl = apkUrl,
-                apkFileName = apkName,
-                apkSizeBytes = apkSize,
-                expectedSha256 = apiDigestSha256 ?: bodySha256
-            )
+            null
         } catch (_: Exception) {
             null
         }
@@ -370,28 +433,42 @@ object AppUpdateManager {
         return cleaned.ifBlank { "优化体验并修复已知问题，建议更新到最新版本。" }
     }
 
+    private fun fetchGitHubApiText(apiUrl: String, currentVersion: String): Pair<Int, String?> {
+        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 5500
+            readTimeout = 7000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "HaiyuSchedule-Android/$currentVersion")
+        }
+        return try {
+            val code = conn.responseCode
+            val text = if (code == HttpURLConnection.HTTP_OK) {
+                conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            } else null
+            code to text
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /**
      * 检查最新 Release：
-     * 1. 优先查 GitHub Releases API；
+     * 1. 若开启 Beta 预览通道，先查 GitHub Releases 列表（支持 Pre-release）；否则查正式版 `/releases/latest`；
      * 2. 若国内 5G/校园网遇到 DNS 或 API 限流，自动按序走 GitHub Pages / 国内镜像拉取 docs/latest.json（含完整 SHA-256 摘要）；
      * 3. 兜底走 /releases/latest 重定向探测。
      */
-    suspend fun checkLatestRelease(currentVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
+    suspend fun checkLatestRelease(
+        currentVersion: String,
+        includePrerelease: Boolean = false
+    ): UpdateCheckResult = withContext(Dispatchers.IO) {
         var lastError: String? = null
-        // 1. Official GitHub Releases API
-        try {
-            val conn = (URL(LATEST_RELEASE_API_URL).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5500
-                readTimeout = 7000
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "HaiyuSchedule-Android/$currentVersion")
-            }
+        // 1a. Optional Beta channel probe (/releases?per_page=8 includes pre-releases)
+        if (includePrerelease) {
             try {
-                val code = conn.responseCode
-                if (code == HttpURLConnection.HTTP_OK) {
-                    val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val parsed = parseReleaseJson(text)
+                val (code, text) = fetchGitHubApiText(RELEASES_LIST_API_URL, currentVersion)
+                if (code == HttpURLConnection.HTTP_OK && text != null) {
+                    val parsed = parseLatestReleaseFromListJson(text, includePrerelease = true)
                     if (parsed != null) {
                         return@withContext if (isNewerVersion(parsed.versionName, currentVersion)) {
                             UpdateCheckResult.UpdateAvailable(parsed)
@@ -399,12 +476,32 @@ object AppUpdateManager {
                             UpdateCheckResult.UpToDate(parsed.versionName)
                         }
                     }
-                    lastError = "版本信息解析失败"
+                    lastError = "版本列表解析失败"
                 } else {
                     lastError = "官方接口返回 HTTP $code"
                 }
-            } finally {
-                conn.disconnect()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = friendlyNetworkError(e)
+            }
+        }
+
+        // 1b. Official GitHub Latest Release API
+        try {
+            val (code, text) = fetchGitHubApiText(LATEST_RELEASE_API_URL, currentVersion)
+            if (code == HttpURLConnection.HTTP_OK && text != null) {
+                val parsed = parseReleaseJson(text)
+                if (parsed != null) {
+                    return@withContext if (isNewerVersion(parsed.versionName, currentVersion)) {
+                        UpdateCheckResult.UpdateAvailable(parsed)
+                    } else {
+                        UpdateCheckResult.UpToDate(parsed.versionName)
+                    }
+                }
+                lastError = "版本信息解析失败"
+            } else {
+                lastError = "官方接口返回 HTTP $code"
             }
         } catch (e: CancellationException) {
             throw e

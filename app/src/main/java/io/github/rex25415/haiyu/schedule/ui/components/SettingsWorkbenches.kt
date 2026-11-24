@@ -756,6 +756,12 @@ fun AboutUpdateWorkbenchSheet(
                         checked = settings.autoCheckUpdates,
                         onCheckedChange = { v -> onUpdateSettings { it.copy(autoCheckUpdates = v) } }
                     )
+                    SettingSwitchRow(
+                        title = "接收抢先体验版（Beta）",
+                        subtitle = "开启后可提前获取 GitHub Pre-release 预览版本，关闭后仅接收正式版",
+                        checked = settings.receiveBetaUpdates,
+                        onCheckedChange = { v -> onUpdateSettings { it.copy(receiveBetaUpdates = v) } }
+                    )
                 }
             }
 

@@ -147,7 +147,10 @@ fun HaiyuApp(
         isCheckingUpdate = true
         if (manual) updateStatusSummary = "正在连接 GitHub Releases 检查最新版本..."
         scope.launch {
-            val result = AppUpdateManager.checkLatestRelease(BuildConfig.VERSION_NAME)
+            val result = AppUpdateManager.checkLatestRelease(
+                currentVersion = BuildConfig.VERSION_NAME,
+                includePrerelease = snapshot.settings.receiveBetaUpdates
+            )
             isCheckingUpdate = false
             val nowMs = System.currentTimeMillis()
             when (result) {
