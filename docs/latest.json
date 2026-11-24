@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.3.0",
-  "versionName": "3.3.0",
-  "title": "海屿空间 v3.3.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.3.0.apk",
-  "apkSizeBytes": 2011377,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk",
-  "expectedSha256": "29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.3.0",
+  "tagName": "v3.4.0",
+  "versionName": "3.4.0",
+  "title": "海屿空间 v3.4.0",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.4.0.apk",
+  "apkSizeBytes": 2093333,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk",
+  "expectedSha256": "bd56ba13df2d604a0f22c1ae0a1ac6b92cbdcb59c5ca133013d61f4492d527f9",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.0",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "💬 致各位海大同学：这一版重点打磨「找自习室」「成绩绩点算准」「2×2 极简方卡」以及同学们反馈的壁纸导入问题，覆盖安装零数据丢失！\n\n- 查空教室 2.0：支持搜教室号看今日全天 5 大节哪几节空、三校区楼栋与楼层识别，还能收藏置顶常去教学楼和教室\n- 成绩与 GPA 科学去重：自动合并初修与补考/重修记录（避免挂科被双倍算入分母），支持切换「有效去重 / 仅已通过 / 原始全计」三种统计口径\n- 新增「海屿极简方卡（2×2）」：正式扩充为 4 款桌面小组件，设置工作台支持一键「放到桌面」，窄屏排版更清晰\n- 修复新版系统壁纸导入失败（响应 #3）：支持 Android 8–17 照片选择器、HEIC 图片及系统文件兜底选图，选不了图的问题已解决\n- 切换校外免校园网 / 校园网通道更稳定，减少报错干扰"
+  "releaseNotes": "💬 致各位海大同学：v3.4.0 带来「广海官方服务与公告」、校内外双通道智能提速、面对面离线扫码/直传安装包分享，以及十余处真机竖屏与深色模式细节精修，覆盖安装课表数据零丢失！\n\n- 🏛️ 新增广海官方服务与公告：直连官网拉取教务通知与校历原表，支持公告 1 键转为 DDL 提醒\n- ⚡ 校内外双通道探测升级：校外 1.8 秒极速切线、校内冷连接抖动自动容错，新增评教/选课动态子菜单直达\n- 📱 更顺手的面对面分享：新增零权限离线下载二维码与「直接传安装包（.apk）」功能，优化同班分享码、长图页脚与微信拦截防呆指引\n- ✨ 全面竖屏/深色排版与精度打磨：支持全量 .ics 日历导出、消除十余处小屏文案截断并覆盖 65 项核心测试"
 }

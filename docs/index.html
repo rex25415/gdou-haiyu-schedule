@@ -336,14 +336,14 @@
       </div>
 
       <div class="badges">
-        <span class="badge" id="verBadge">v3.3.0 正式版</span>
-        <span class="badge" id="sizeBadge">包体 1.92 MB</span>
+        <span class="badge" id="verBadge">v3.4.0 正式版</span>
+        <span class="badge" id="sizeBadge">包体 2.00 MB</span>
         <span class="badge">免校园网一键全同步</span>
         <span class="badge">Android 8–17 / 鸿蒙 4.x</span>
         <span class="badge">零广告 · 零后端 · 非商业开源</span>
       </div>
 
-      <a id="dlPrimary" class="dl-primary" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">
+      <a id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk">
         <span>立即下载安卓版</span>
         <span class="dl-sub">国内加速线路 1（ghfast）· 推荐</span>
       </a>
@@ -353,9 +353,9 @@
       <div class="dl-meta" id="dlMeta">包名 io.github.rex25415.haiyu.schedule · 海屿开源统一发布签名 · 内置运行时签名验真</div>
 
       <div class="alt-links">
-        <a id="dlMirror2" class="alt-btn" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 2</a>
-        <a id="dlMirror3" class="alt-btn" href="https://ghproxy.net/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 3</a>
-        <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">GitHub 官方直链</a>
+        <a id="dlMirror2" class="alt-btn" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk">国内加速线路 2</a>
+        <a id="dlMirror3" class="alt-btn" href="https://ghproxy.net/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk">国内加速线路 3</a>
+        <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk">GitHub 官方直链</a>
         <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">更新日志与源码</a>
       </div>
     </section>
@@ -407,7 +407,7 @@
         与需要自建服务器代登录的第三方小程序截然不同：海屿空间<strong>没有后端服务器、不收集任何学号或密码、无广告统计 SDK、不含选课/抢课或后台爬虫</strong>。教务登录完全在手机系统 WebView 中通过严格 HTTPS 直连 <code>*.gdou.edu.cn</code>，所有数据仅保存在本机并禁止系统云备份；同时内置运行时<strong>签名证书验真</strong>，防止第三方二次打包植入广告冒充原版。
       </p>
       <div style="font-size:12.5px;font-weight:700;margin-top:8px;">当前安装包 SHA-256 校验值：</div>
-      <div class="hash-box" id="shaBox">29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27</div>
+      <div class="hash-box" id="shaBox">bd56ba13df2d604a0f22c1ae0a1ac6b92cbdcb59c5ca133013d61f4492d527f9</div>
       <div class="sec-actions">
         <button class="copy-btn" id="copyShaBtn" type="button">复制 SHA-256 校验值</button>
         <a class="sec-link" href="https://github.com/rex25415/gdou-haiyu-schedule/blob/main/SECURITY.md">查看完整安全合规白皮书 →</a>
@@ -615,7 +615,7 @@
 
       function applyRelease(tag, official, sizeBytes, htmlUrl, sha256) {
         if (!tag || !official) return;
-        var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 1.92 MB";
+        var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 2.00 MB";
         document.getElementById("verBadge").textContent = tag + " 正式版";
         document.getElementById("sizeBadge").textContent = "包体 " + mb;
         document.getElementById("dlPrimary").href = "https://ghfast.top/" + official;
