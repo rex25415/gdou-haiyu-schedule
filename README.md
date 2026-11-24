@@ -1,6 +1,6 @@
 # 🌊 海屿空间（原名海屿课表）· 广海全校区纯净开源学业与课表工具
 
-[![Release](https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v3.3.0-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
+[![Release](https://img.shields.io/badge/Release-v3.3.0-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
 [![Android CI](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml/badge.svg)](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml)
 [![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://rex25415.github.io/gdou-haiyu-schedule/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-0C7D72)](LICENSE)
@@ -77,8 +77,8 @@
 # 编译 Debug 安装包
 ./gradlew assembleDebug
 
-# 编译 Release 安装包
-# 如需自定义正式签名，可参考 keystore.properties.example 创建 keystore.properties
+# 编译 Release 安装包（如需自定义正式签名，
+# 可参考 keystore.properties.example 创建 keystore.properties）
 ./gradlew assembleRelease
 ```
 

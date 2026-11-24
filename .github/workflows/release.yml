@@ -273,8 +273,8 @@ jobs:
               if readme_path.exists():
                   readme = readme_path.read_text(encoding="utf-8")
                   readme = re.sub(
-                      r'badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v[0-9A-Za-z._-]+-0C7D72',
-                      f'badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-{tag}-0C7D72',
+                      r'badge/Release-v[0-9A-Za-z._-]+-0C7D72',
+                      f'badge/Release-{tag}-0C7D72',
                       readme,
                   )
                   readme_path.write_text(readme, encoding="utf-8")
