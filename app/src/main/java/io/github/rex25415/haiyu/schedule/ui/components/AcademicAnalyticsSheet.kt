@@ -371,7 +371,7 @@ fun AcademicAnalyticsBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "已获学分 ${String.format(Locale.US, "%.1f", dedup.earnedCredits)} 分 · 修读总学分 ${String.format(Locale.US, "%.1f", dedup.attemptedDistinctCredits)} 分 · 已通过课程 GPA ${String.format(Locale.US, "%.2f", passedMetrics.gpa)}",
+                        text = "已获 ${String.format(Locale.US, "%.1f", dedup.earnedCredits)} 分 · 修读 ${String.format(Locale.US, "%.1f", dedup.attemptedDistinctCredits)} 分 · 已通过 GPA\u00A0${String.format(Locale.US, "%.2f", passedMetrics.gpa)}",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -660,9 +660,7 @@ fun AcademicAnalyticsBottomSheet(
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             listOf("2.0", "2.5", "3.0", "3.5", "3.8").forEach { preset ->
                                 val sel = targetGpaInput.trim() == preset
@@ -670,16 +668,25 @@ fun AcademicAnalyticsBottomSheet(
                                     color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerLowest,
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
+                                        .weight(1f)
                                         .clip(RoundedCornerShape(8.dp))
                                         .clickable { targetGpaInput = preset }
                                 ) {
-                                    Text(
-                                        text = "目标 $preset",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                                    )
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = preset,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (sel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
                                 }
                             }
                         }

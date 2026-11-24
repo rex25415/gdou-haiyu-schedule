@@ -8,6 +8,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CloudSync
@@ -18,9 +19,11 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -38,11 +41,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.zIndex
@@ -358,7 +363,17 @@ fun HaiyuApp(
         }
 
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            snackbarHost = {
+                SnackbarHost(snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        shape = RoundedCornerShape(14.dp),
+                        containerColor = if (isDark) Color(0xFF1F2D2B) else MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = if (isDark) Color(0xFFE2EEEC) else MaterialTheme.colorScheme.inverseOnSurface,
+                        actionColor = if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
+                    )
+                }
+            },
             bottomBar = {
                 NavigationBar {
                     tabs.forEachIndexed { idx, tab ->
@@ -689,6 +704,15 @@ fun HaiyuApp(
                                 onCopyIssuesLink = {
                                     clipboard.setText(AnnotatedString(AppUpdateManager.ISSUES_URL))
                                     showToast("已复制 GitHub 问题反馈页链接")
+                                },
+                                onShareApkFile = {
+                                    val ok = AppUpdateManager.shareInstalledApk(
+                                        context = context,
+                                        versionName = io.github.rex25415.haiyu.schedule.BuildConfig.VERSION_NAME
+                                    )
+                                    if (!ok) {
+                                        showToast("未能调起文件分享，可改用「发下载页链接」或复制直链")
+                                    }
                                 },
                                 onSystemShareApp = {
                                     val shareText = AppUpdateManager.buildAppShareText()

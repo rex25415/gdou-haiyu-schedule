@@ -151,7 +151,7 @@ fun CampusServicesBottomSheet(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "直连 jwc.gdou.edu.cn 等官方门户 · 无需额外登录",
+                                text = "直连广海教务与校园官网 · 免重复登录",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -215,15 +215,16 @@ fun CampusServicesBottomSheet(
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "本机设为 ${academicYearLabel} · 始于 $semesterStartDate" +
-                                        if (cal != null && cal.publishDate.isNotBlank()) " · 官网发布 ${cal.publishDate}" else "",
+                                        if (cal != null && cal.publishDate.isNotBlank()) " · 校方\u00A0${cal.publishDate}" else "",
                                     style = MaterialTheme.typography.labelSmall,
+                                    lineHeight = 14.sp,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }

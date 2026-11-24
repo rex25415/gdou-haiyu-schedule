@@ -113,6 +113,7 @@ fun SettingsScreen(
     onOpenGitHubRepo: () -> Unit,
     onOpenGitHubIssues: () -> Unit,
     onCopyIssuesLink: () -> Unit,
+    onShareApkFile: () -> Unit = {},
     onSystemShareApp: () -> Unit,
     onCopyShareAppText: () -> Unit,
     onCopyDownloadPageLink: () -> Unit,
@@ -558,7 +559,7 @@ fun SettingsScreen(
                     WorkbenchDirectoryRow(
                         icon = Icons.Rounded.Widgets,
                         title = "桌面小组件与数据备份",
-                        subtitle = "4 款微件（含 2×2）一键添置 · .ics · 全量备份",
+                        subtitle = "4 款桌面微件 · .ics 日历 · 全量备份",
                         showBadge = false,
                         onClick = { showWidgetsBackupSheet = true }
                     )
@@ -569,7 +570,7 @@ fun SettingsScreen(
                         subtitle = if (availableUpdate != null) {
                             "发现新版本 v${availableUpdate.versionName} · 点击升级"
                         } else {
-                            "v${BuildConfig.VERSION_NAME} · 签名验真 · PolyForm 非商业开源"
+                            "v${BuildConfig.VERSION_NAME} · 签名验真 · PolyForm 开源"
                         },
                         showBadge = availableUpdate != null,
                         onClick = { showAboutUpdateSheet = true }
@@ -757,6 +758,10 @@ fun SettingsScreen(
         ShareAppDialog(
             targetVersionName = targetVer,
             directMirrorApkUrl = directMirrorUrl,
+            onShareApkFile = {
+                showShareAppDialog = false
+                onShareApkFile()
+            },
             onSystemShare = {
                 showShareAppDialog = false
                 onSystemShareApp()

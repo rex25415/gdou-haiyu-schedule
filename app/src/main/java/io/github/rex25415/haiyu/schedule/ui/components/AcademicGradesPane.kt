@@ -191,14 +191,14 @@ internal fun AcademicGradesPane(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val scopeTitle = buildString {
-                            append(if (selectedTerm == "全部学期") "累计加权平均绩点 (GPA)" else "$selectedTerm · GPA")
+                            append(if (selectedTerm == "全部学期") "累计加权绩点 (GPA)" else "$selectedTerm · GPA")
                             append(" · ${calcMode.label}")
                             if (selectedNatureFilter != GradeNatureFilter.ALL) append(" · ${selectedNatureFilter.label}")
                         }
                         Text(
                             text = scopeTitle,
                             color = heroFg.copy(alpha = 0.88f),
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).padding(end = 8.dp)
@@ -603,7 +603,7 @@ internal fun AcademicGradesPane(
                                 text = buildString {
                                     append("学期 GPA ${String.format(Locale.US, "%.2f", termStat[0])} · 加权均分 ${String.format(Locale.US, "%.1f", termStat[1])} · 计入 ${String.format(Locale.US, "%.2f", termStat[2]).removeSuffix("0").removeSuffix(".")} 学分")
                                     if (skippedCount > 0 && calcMode == GpaCalcMode.EFFECTIVE_BEST) {
-                                        append("（已去重 $skippedCount 条同课重复记录）")
+                                        append(" · 已去重 $skippedCount 条")
                                     }
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -1051,7 +1051,7 @@ internal fun AddSimulatedGradeDialog(
                     )
                 }
                 Text(
-                    text = "自动按广海 5 分制折算绩点（如 90分 = 4.0，85分 = 3.5，低于 60 = 0）。",
+                    text = "按广海 5 分制折算（90分=4.0，85分=3.5，低于60=0）。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -1,7 +1,12 @@
 package io.github.rex25415.haiyu.schedule.ui.components
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Android
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -29,28 +35,38 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
+import io.github.rex25415.haiyu.schedule.update.QrCodeEncoder
 
 /**
- * 分享「海屿空间」给同学的轻量导出链接弹窗（零推广感、零多余权限）：
- * 支持系统分享（发微信/QQ）、复制带简介文案的链接、仅复制纯下载页链接，以及国内加速 APK 直链。
+ * 分享「海屿空间」给同学的轻量分享弹窗（面对面扫码、直接传安装包、系统分享与网址复制）：
  */
 @Composable
 fun ShareAppDialog(
     targetVersionName: String,
     directMirrorApkUrl: String,
+    onShareApkFile: () -> Unit = {},
     onSystemShare: () -> Unit,
     onCopyShareText: () -> Unit,
     onCopyDownloadPageUrl: () -> Unit,
     onCopyDirectApkUrl: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val qrMatrix = remember {
+        QrCodeEncoder.encodeByteModeM(AppUpdateManager.DOWNLOAD_PAGE_URL)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("分享海屿空间给同学") },
@@ -61,53 +77,97 @@ fun ShareAppDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "把中文免翻下载主页发给室友或同班同学，在手机浏览器里打开即可高速下载安装，自动兼容三校区与最新版校验。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "中文多线下载主页（推荐 · 永久有效）",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = AppUpdateManager.DOWNLOAD_PAGE_URL,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (qrMatrix != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(104.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White)
+                                    .border(1.dp, Color(0xFFD7EAE6), RoundedCornerShape(10.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Canvas(modifier = Modifier.matchParentSize()) {
+                                    val cellW = size.width / qrMatrix.size
+                                    val cellH = size.height / qrMatrix.size
+                                    val dark = Color(0xFF0A2926)
+                                    for (y in 0 until qrMatrix.size) {
+                                        for (x in 0 until qrMatrix.size) {
+                                            if (qrMatrix.get(x, y)) {
+                                                drawRect(
+                                                    color = dark,
+                                                    topLeft = Offset(x * cellW, y * cellH),
+                                                    size = Size(cellW + 0.35f, cellH + 0.35f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "面对面扫码下载",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "请用「手机相机 / 浏览器」扫（微信会拦截 github 网页，勿用微信扫码）。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 16.sp
+                            )
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "相机直扫 · 约 2 MB",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
                 Button(
+                    onClick = onShareApkFile,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Android, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("直接传安装包（.apk）给同学", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                }
+
+                FilledTonalButton(
                     onClick = onSystemShare,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("一键发给微信 / QQ 好友", fontSize = 13.sp)
-                }
-
-                FilledTonalButton(
-                    onClick = onCopyShareText,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("复制推荐文案 + 下载页链接", fontSize = 12.5.sp)
+                    Text("发推荐文案与网址（QQ / 微信）", fontSize = 12.5.sp, maxLines = 1, softWrap = false)
                 }
 
                 Row(
@@ -115,29 +175,48 @@ fun ShareAppDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedButton(
-                        onClick = onCopyDownloadPageUrl,
+                        onClick = onCopyShareText,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("仅复制网址", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                        Text("复制推荐文案", fontSize = 11.5.sp, maxLines = 1, softWrap = false)
                     }
                     OutlinedButton(
-                        onClick = onCopyDirectApkUrl,
+                        onClick = onCopyDownloadPageUrl,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("复制直链", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                        Text("复制下载网址", fontSize = 11.5.sp, maxLines = 1, softWrap = false)
                     }
                 }
 
+                OutlinedButton(
+                    onClick = onCopyDirectApkUrl,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "复制 v$targetVersionName 国内加速 APK 直链",
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 Text(
-                    text = "直链指向 v$targetVersionName 国内加速包（${directMirrorApkUrl.substringBefore("https://github.com/")}），若在微信内打不开请提示对方点右上角「在浏览器打开」。",
+                    text = "最省事：直接传安装包（QQ/互传秒收）或相机扫码；微信会拦截 github 网页且常无右上角菜单，请提醒对方复制网址到手机浏览器打开（直链默认走 ${directMirrorApkUrl.substringBefore("https://github.com/")}）。",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 15.sp
                 )
             }
         },

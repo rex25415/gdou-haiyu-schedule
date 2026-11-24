@@ -361,7 +361,7 @@ object ScheduleImageExporter {
             textSize = 24f
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("由「海屿空间」生成 · 广东海洋大学全校区纯净学业助手", width / 2f, height - 34f, footPaint)
+        canvas.drawText("由「海屿空间」生成 · 免费纯开源 · rex25415.github.io/gdou-haiyu-schedule", width / 2f, height - 34f, footPaint)
 
         val fileName = "海屿空间_第${weekNumber}周_${System.currentTimeMillis()}.png"
         val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }

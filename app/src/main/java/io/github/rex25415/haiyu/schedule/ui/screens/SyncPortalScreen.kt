@@ -41,8 +41,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.EventNote
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Assessment
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Computer
@@ -117,6 +120,7 @@ import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import io.github.rex25415.haiyu.schedule.sync.NetworkProbeResult
 import io.github.rex25415.haiyu.schedule.sync.TermOptionsPayload
 import io.github.rex25415.haiyu.schedule.ui.components.EmptyClassroomPane
+import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicReference
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -179,6 +183,7 @@ fun SyncPortalScreen(
         mutableStateOf(NetworkProbeResult(state = CampusNetworkState.PROBING, isOnWifi = false))
     }
     var probeTrigger by remember { mutableIntStateOf(0) }
+    var slowLoadHint by remember { mutableStateOf(false) }
 
     var isSyncing by remember { mutableStateOf(false) }
     var isSilentQuickRefresh by remember { mutableStateOf(false) }
@@ -440,6 +445,17 @@ fun SyncPortalScreen(
         }
     }
 
+    // Surface calm one-tap guidance if CAS/SSO redirect stalls > 4.5s on white transition screen
+    LaunchedEffect(isVisible, loadProgress, currentUrl, pageErrorMsg, isLoggedIntoJw) {
+        slowLoadHint = false
+        if (isVisible && loadProgress in 1..99 && pageErrorMsg == null && !isLoggedIntoJw) {
+            delay(4500L)
+            if (loadProgress in 1..99 && pageErrorMsg == null && !isLoggedIntoJw) {
+                slowLoadHint = true
+            }
+        }
+    }
+
     fun toggleDesktopUa() {
         cancelPendingTransitions()
         val next = !desktopMode
@@ -609,15 +625,16 @@ fun SyncPortalScreen(
                             onDismissRequest = { showQuickNavMenu = false }
                         ) {
                             val shortcuts = listOf(
-                                "进入广海教务主页" to "__WFW_JW__",
-                                "查空教室（自习推荐）" to "cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default",
-                                "个人课表查询页" to "kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151&layout=default",
-                                "学生成绩查询页" to "cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default",
-                                "考试信息查询页" to "kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default"
+                                Triple("进入广海教务主页", "__WFW_JW__", Icons.Rounded.Public),
+                                Triple("查空教室（自习推荐）", "cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", Icons.Rounded.MeetingRoom),
+                                Triple("个人课表查询页", "kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151&layout=default", Icons.Rounded.CalendarMonth),
+                                Triple("学生成绩查询页", "cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default", Icons.Rounded.Assessment),
+                                Triple("考试信息查询页", "kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default", Icons.AutoMirrored.Rounded.EventNote)
                             )
-                            shortcuts.forEach { (label, path) ->
+                            shortcuts.forEach { (label, path, icon) ->
                                 DropdownMenuItem(
                                     text = { Text(label) },
+                                    leadingIcon = { Icon(icon, contentDescription = null) },
                                     onClick = {
                                         showQuickNavMenu = false
                                         if (path == "__WFW_JW__") {
@@ -682,8 +699,8 @@ fun SyncPortalScreen(
                                         appendLine(
                                             "网络探测：" + when (networkProbe.state) {
                                                 CampusNetworkState.PROBING -> "探测中"
-                                                CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（${networkProbe.jwLatencyMs ?: "-"}ms）"
-                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外网络（wfw ${networkProbe.wfwLatencyMs ?: "-"}ms）"
+                                                CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（教务 ${networkProbe.jwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
+                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外或直连受限（wfw ${networkProbe.wfwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
                                                 CampusNetworkState.OFFLINE_OR_BLOCKED -> "网络未连通或校园网未认证"
                                             }
                                         )
@@ -937,8 +954,71 @@ fun SyncPortalScreen(
         if (loadProgress in 1..99) {
             LinearProgressIndicator(
                 progress = { loadProgress / 100f },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp)
             )
+        }
+
+        if (slowLoadHint && !isLoggedIntoJw && pageErrorMsg == null) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "统一认证跳转较慢，可点刷新或切换通道",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .clickable { switchChannel(!useOffCampus) }
+                    ) {
+                        Text(
+                            text = if (useOffCampus) "切直连" else "切校外通道",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .clickable {
+                                slowLoadHint = false
+                                webViewRef?.reload()
+                            }
+                    ) {
+                        Text(
+                            text = "刷新",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // Calm helper strip when sitting on off-campus portal root (gives user clear control)
@@ -1265,7 +1345,7 @@ fun SyncPortalScreen(
                                             }
                                         }
                                         pendingWfwEnterRunnable = enterTask
-                                        mainHandler.postDelayed(enterTask, 1100L)
+                                        mainHandler.postDelayed(enterTask, 300L)
                                     }
                                 }
                             }
@@ -1305,7 +1385,7 @@ fun SyncPortalScreen(
                                                 view?.clearCache(true)
                                                 val freshUrl = if (useOffCampus) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
                                                 view?.loadUrl(freshUrl)
-                                                onShowMessage("检测到旧会话重定向异常，已自动清理缓存并重连")
+                                                onShowMessage("旧会话异常，已自动清理缓存并重连")
                                             }
                                         }
                                         return
@@ -1588,6 +1668,7 @@ fun SyncPortalScreen(
                     ) {
                         DropdownMenuItem(
                             text = { Text("指定学期同步课表") },
+                            leadingIcon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
                             onClick = {
                                 showSingleSyncMenu = false
                                 startSyncFlow("courses")
@@ -1595,6 +1676,7 @@ fun SyncPortalScreen(
                         )
                         DropdownMenuItem(
                             text = { Text("仅同步历史成绩与 GPA") },
+                            leadingIcon = { Icon(Icons.Rounded.Assessment, contentDescription = null) },
                             onClick = {
                                 showSingleSyncMenu = false
                                 startSyncFlow("grades")
@@ -1602,6 +1684,7 @@ fun SyncPortalScreen(
                         )
                         DropdownMenuItem(
                             text = { Text("仅同步考试时间与考场") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.EventNote, contentDescription = null) },
                             onClick = {
                                 showSingleSyncMenu = false
                                 startSyncFlow("exams")

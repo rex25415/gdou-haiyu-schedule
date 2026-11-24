@@ -771,7 +771,7 @@ fun AboutUpdateWorkbenchSheet(
                     fg = MaterialTheme.colorScheme.onPrimaryContainer,
                     icon = Icons.Rounded.VerifiedUser,
                     title = "安装包签名验真通过（海屿空间原版构建）",
-                    desc = "证书指纹：${signatureInfo.shortFingerprint} · 包名 ${BuildConfig.APPLICATION_ID}"
+                    desc = "证书指纹：${signatureInfo.shortFingerprint}\n包名：${BuildConfig.APPLICATION_ID}"
                 )
                 SignatureTrustState.DEBUG_LOCAL_BUILD -> WorkbenchSigStyle(
                     bg = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
@@ -812,7 +812,7 @@ fun AboutUpdateWorkbenchSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("非商业开源（PolyForm 1.0.0）与纯本地隔离声明", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text("PolyForm 1.0.0 非商业开源与纯本地声明", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
             Text(
                 text = "• 非校方官方独立工具 · 零后端零中转 · 无广告统计 SDK；\n" +

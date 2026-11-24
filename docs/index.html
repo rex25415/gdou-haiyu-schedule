@@ -58,7 +58,35 @@
       position: relative;
       overflow: hidden;
     }
-    .hero-top { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    .hero-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .desktop-qr {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.96);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      flex-shrink: 0;
+    }
+    .desktop-qr svg { width: 68px; height: 68px; display: block; border-radius: 6px; }
+    .desktop-qr .qr-txt { font-size: 11px; line-height: 1.4; color: var(--muted); max-width: 84px; }
+    .desktop-qr .qr-txt strong { display: block; color: var(--primary-dark); font-size: 12px; margin-bottom: 2px; }
+    .dl-assist {
+      display: none;
+      margin-top: 10px;
+      background: rgba(255,255,255,0.16);
+      border: 1px solid rgba(255,255,255,0.32);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #f4fffe;
+    }
+    .wx-banner.wx-pulse { animation: wxFlash 0.55s ease 2; }
+    @keyframes wxFlash { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.32); } }
     .app-icon {
       width: 60px; height: 60px; border-radius: 16px;
       background: #fff; display: flex; align-items: center; justify-content: center;
@@ -250,6 +278,7 @@
     }
     footer a, footer span.nowrap { color: var(--primary); text-decoration: none; font-weight: 600; white-space: nowrap; }
     @media (max-width: 720px) {
+      .desktop-qr { display: none; }
       .grid-3 { grid-template-columns: 1fr; }
       .alt-links { grid-template-columns: repeat(2, 1fr); }
     }
@@ -277,7 +306,7 @@
   <!-- 自动识别微信 / QQ 内置浏览器，解决 90% 校园群点不开下载的痛点 -->
   <div id="wxBanner" class="wx-banner">
     <div class="wx-row">
-      <div>微信 / QQ 内置浏览器会拦截安装包下载，请点击右上角 <strong>「⋯」→「在浏览器打开」</strong> 即可 1 秒下载安装！</div>
+      <div>微信 / QQ 内置浏览器会拦截安装包下载：请点击右上角 <strong>「⋯」→「在浏览器打开」</strong>（若被直接拦截且无右上角菜单，请复制网址到手机自带浏览器打开）！</div>
       <div class="wx-arrow">↗</div>
     </div>
   </div>
@@ -285,18 +314,24 @@
   <div class="container">
     <section class="hero">
       <div class="hero-top">
-        <div class="app-icon" aria-hidden="true">
-          <svg viewBox="0 0 108 108" width="48" height="48">
-            <rect x="18" y="18" width="72" height="72" rx="14" fill="#d4f5ec"/>
-            <rect x="18" y="34" width="72" height="56" rx="12" fill="#ffffff"/>
-            <rect x="28" y="44" width="24" height="16" rx="4" fill="#0e8a7d"/>
-            <rect x="58" y="44" width="20" height="10" rx="4" fill="#38bfa1"/>
-            <path d="M26,74 C36,66 46,66 56,72 C66,78 74,78 82,71 L82,79 C74,85 66,85 56,79 C46,73 36,73 26,81 Z" fill="#0f9d8c"/>
-          </svg>
+        <div class="hero-brand">
+          <div class="app-icon" aria-hidden="true">
+            <svg viewBox="0 0 108 108" width="48" height="48">
+              <rect x="18" y="18" width="72" height="72" rx="14" fill="#d4f5ec"/>
+              <rect x="18" y="34" width="72" height="56" rx="12" fill="#ffffff"/>
+              <rect x="28" y="44" width="24" height="16" rx="4" fill="#0e8a7d"/>
+              <rect x="58" y="44" width="20" height="10" rx="4" fill="#38bfa1"/>
+              <path d="M26,74 C36,66 46,66 56,72 C66,78 74,78 82,71 L82,79 C74,85 66,85 56,79 C46,73 36,73 26,81 Z" fill="#0f9d8c"/>
+            </svg>
+          </div>
+          <div>
+            <h1>海屿空间</h1>
+            <div class="sub">原名海屿课表 · 广东海洋大学三校区（湖光 · 海滨 · 阳江）纯净开源课表与学业助手</div>
+          </div>
         </div>
-        <div>
-          <h1>海屿空间</h1>
-          <div class="sub">原名海屿课表 · 广东海洋大学三校区（湖光 · 海滨 · 阳江）纯净开源课表与学业助手</div>
+        <div class="desktop-qr" aria-label="手机扫码打开本下载页">
+          <div id="heroQrMount"></div>
+          <div class="qr-txt"><strong>相机扫码</strong>浏览器直达（勿用微信扫）</div>
         </div>
       </div>
 
@@ -308,14 +343,17 @@
         <span class="badge">零广告 · 零后端 · 非商业开源</span>
       </div>
 
-      <a id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">
+      <a id="dlPrimary" class="dl-primary" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">
         <span>立即下载安卓版</span>
-        <span class="dl-sub">国内加速线路 1 · 推荐</span>
+        <span class="dl-sub">国内加速线路 1（ghfast）· 推荐</span>
       </a>
+      <div id="dlAssist" class="dl-assist">
+        <strong>正在启动下载（约 1.9 MB）</strong>：若 3 秒内未开始，请点下方「国内加速线路 2」；安装若遇手机常规“未知来源风险提示”，对照下方 SHA-256 一致后选「允许本次安装」即可。
+      </div>
       <div class="dl-meta" id="dlMeta">包名 io.github.rex25415.haiyu.schedule · 海屿开源统一发布签名 · 内置运行时签名验真</div>
 
       <div class="alt-links">
-        <a id="dlMirror2" class="alt-btn" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 2</a>
+        <a id="dlMirror2" class="alt-btn" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 2</a>
         <a id="dlMirror3" class="alt-btn" href="https://ghproxy.net/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 3</a>
         <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">GitHub 官方直链</a>
         <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">更新日志与源码</a>
@@ -394,6 +432,10 @@
         <div class="faq-q">4. 以后会经常弹出更新提醒吗？更新节奏是怎么样的？</div>
         <div class="faq-a">不会！刚上线前几版主要在集中补齐核心功能与修复紧急大 Bug，因此连发了较多版本；目前核心已趋于稳定，正式版已转为 <strong>每周 1～2 次的稳健迭代节奏</strong>（日常不频繁弹窗打扰；仅在教务改版或出现严重故障时随时加急修复）。如果想第一时间试用预览特性，也可以在 App「设置 → 应用更新」打开 Beta 预览通道。</div>
       </div>
+      <div class="faq-item">
+        <div class="faq-q">5. 宿舍网打不开网页怎么最快装给室友？</div>
+        <div class="faq-a">已安装同学可以直接打开 App「设置 → 关于与更新 → 分享给同学」，不仅能<strong>面对面扫离线二维码</strong>，还可以直接点击<strong>「直接传安装包（.apk）给同学」</strong>，通过 QQ / 手机互传把安装包发过去，免网页秒装。</div>
+      </div>
     </section>
 
     <div class="disclaimer">
@@ -412,9 +454,154 @@
   <script>
     (function () {
       var ua = navigator.userAgent || "";
-      if (/MicroMessenger|QQ\//i.test(ua)) {
-        document.getElementById("wxBanner").style.display = "block";
+      var isInApp = /MicroMessenger|QQ\//i.test(ua);
+      var wxBanner = document.getElementById("wxBanner");
+      if (isInApp) {
+        wxBanner.style.display = "block";
       }
+
+      // 绑定所有下载按钮：微信/QQ内直接提示点右上角在浏览器打开，正常浏览器展示下一步安装提示
+      ["dlPrimary", "dlMirror2", "dlMirror3", "dlOfficial"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("click", function (ev) {
+          if (isInApp) {
+            ev.preventDefault();
+            wxBanner.style.display = "block";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            wxBanner.classList.remove("wx-pulse");
+            void wxBanner.offsetWidth;
+            wxBanner.classList.add("wx-pulse");
+          } else {
+            var assist = document.getElementById("dlAssist");
+            if (assist) assist.style.display = "block";
+          }
+        });
+      });
+
+      // 纯本地离线 SVG 二维码（ISO/IEC 18004 Level M Byte mode, V1-V6），仅桌面端展示，零外部网络请求
+      (function renderDesktopQr() {
+        var mount = document.getElementById("heroQrMount");
+        if (!mount) return;
+        var text = "https://rex25415.github.io/gdou-haiyu-schedule/";
+        var bytes = [];
+        for (var i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xff);
+        var specs = [
+          [1, 16, 10, 1, [], 0],
+          [2, 28, 16, 1, [6, 18], 7],
+          [3, 44, 26, 1, [6, 22], 7],
+          [4, 64, 18, 2, [6, 26], 7],
+          [5, 86, 24, 2, [6, 30], 7],
+          [6, 108, 16, 4, [6, 34], 7]
+        ];
+        var spec = null;
+        for (var s = 0; s < specs.length; s++) {
+          if (4 + 8 + bytes.length * 8 + 4 <= specs[s][1] * 8) { spec = specs[s]; break; }
+        }
+        if (!spec) return;
+        var gfExp = new Array(512), gfLog = new Array(256), gx = 1;
+        for (var k = 0; k < 255; k++) { gfExp[k] = gx; gfLog[gx] = k; gx <<= 1; if (gx & 256) gx ^= 0x11d; }
+        for (var k = 255; k < 512; k++) gfExp[k] = gfExp[k - 255];
+        function gfMul(a, b) { return (a === 0 || b === 0) ? 0 : gfExp[gfLog[a] + gfLog[b]]; }
+        function rsEc(data, ecCount) {
+          var gen = [1];
+          for (var i = 0; i < ecCount; i++) {
+            var next = new Array(gen.length + 1).fill(0), root = gfExp[i];
+            for (var j = 0; j < gen.length; j++) { next[j] ^= gen[j]; next[j + 1] ^= gfMul(gen[j], root); }
+            gen = next;
+          }
+          var rem = new Array(ecCount).fill(0);
+          for (var i = 0; i < data.length; i++) {
+            var f = data[i] ^ rem[0];
+            rem.shift(); rem.push(0);
+            if (f) for (var j = 0; j < ecCount; j++) rem[j] ^= gfMul(gen[j + 1], f);
+          }
+          return rem;
+        }
+        var bits = [];
+        function pushBits(val, n) { for (var b = n - 1; b >= 0; b--) bits.push((val >> b) & 1); }
+        pushBits(4, 4); pushBits(bytes.length, 8);
+        for (var i = 0; i < bytes.length; i++) pushBits(bytes[i], 8);
+        var maxB = spec[1] * 8, term = Math.min(4, maxB - bits.length);
+        for (var i = 0; i < term; i++) bits.push(0);
+        while (bits.length % 8) bits.push(0);
+        var dataCw = [];
+        for (var i = 0; i < bits.length; i += 8) {
+          var v = 0; for (var b = 0; b < 8; b++) v = (v << 1) | bits[i + b];
+          dataCw.push(v);
+        }
+        var pad = 0; while (dataCw.length < spec[1]) dataCw.push((pad++ % 2 === 0) ? 0xec : 0x11);
+        var bCnt = spec[3], bLen = spec[1] / bCnt, ecLen = spec[2], dBlks = [], eBlks = [];
+        for (var b = 0; b < bCnt; b++) {
+          var sl = dataCw.slice(b * bLen, (b + 1) * bLen);
+          dBlks.push(sl); eBlks.push(rsEc(sl, ecLen));
+        }
+        var stream = [];
+        for (var c = 0; c < bLen; c++) for (var b = 0; b < bCnt; b++) for (var sh = 7; sh >= 0; sh--) stream.push((dBlks[b][c] >> sh) & 1);
+        for (var c = 0; c < ecLen; c++) for (var b = 0; b < bCnt; b++) for (var sh = 7; sh >= 0; sh--) stream.push((eBlks[b][c] >> sh) & 1);
+        for (var r = 0; r < spec[5]; r++) stream.push(0);
+        var sz = 17 + 4 * spec[0], base = new Array(sz * sz).fill(0), fn = new Array(sz * sz).fill(0);
+        function setF(x, y, d) { if (x >= 0 && x < sz && y >= 0 && y < sz) { base[y * sz + x] = d ? 1 : 0; fn[y * sz + x] = 1; } }
+        [[0,0],[sz-7,0],[0,sz-7]].forEach(function(o){
+          for (var dy = -1; dy <= 7; dy++) for (var dx = -1; dx <= 7; dx++) {
+            var d = (dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6) ? (Math.max(Math.abs(dx-3), Math.abs(dy-3)) !== 2) : false;
+            setF(o[0] + dx, o[1] + dy, d);
+          }
+        });
+        for (var i = 8; i < sz - 8; i++) { setF(i, 6, i % 2 === 0); setF(6, i, i % 2 === 0); }
+        spec[4].forEach(function(ay){ spec[4].forEach(function(ax){
+          if ((ax <= 8 && ay <= 8) || (ax >= sz - 9 && ay <= 8) || (ax <= 8 && ay >= sz - 9)) return;
+          for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) setF(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+        }); });
+        setF(8, 4 * spec[0] + 9, true);
+        for (var i = 0; i <= 8; i++) if (i !== 6) { fn[8 * sz + i] = 1; fn[i * sz + 8] = 1; }
+        for (var i = 0; i < 7; i++) fn[(sz - 1 - i) * sz + 8] = 1;
+        for (var i = 0; i < 8; i++) fn[8 * sz + (sz - 8 + i)] = 1;
+        var si = 0, up = true;
+        for (var rc = sz - 1; rc >= 1; rc -= 2) {
+          if (rc === 6) rc--;
+          for (var st = 0; st < sz; st++) {
+            var y = up ? sz - 1 - st : st;
+            for (var dx = 0; dx < 2; dx++) {
+              var x = rc - dx;
+              if (!fn[y * sz + x]) base[y * sz + x] = (si < stream.length) ? stream[si++] : 0;
+            }
+          }
+          up = !up;
+        }
+        var bestM = base, bestP = 1e9;
+        for (var m = 0; m < 8; m++) {
+          var g = base.slice();
+          for (var y = 0; y < sz; y++) for (var x = 0; x < sz; x++) {
+            if (!fn[y * sz + x]) {
+              var fl = (m===0&&(x+y)%2===0)||(m===1&&y%2===0)||(m===2&&x%3===0)||(m===3&&(x+y)%3===0)||(m===4&&((y>>1)+Math.floor(x/3))%2===0)||(m===5&&((x*y)%2+(x*y)%3)===0)||(m===6&&(((x*y)%2+(x*y)%3)%2)===0)||(m===7&&(((x+y)%2+(x*y)%3)%2)===0);
+              if (fl) g[y * sz + x] ^= 1;
+            }
+          }
+          var rem = m << 10;
+          for (var bit = 14; bit >= 10; bit--) if ((rem >> bit) & 1) rem ^= (0x537 << (bit - 10));
+          var fmt = ((m << 10) | rem) ^ 0x5412;
+          var tlR = [0,1,2,3,4,5,7,8,8,8,8,8,8,8,8], tlC = [8,8,8,8,8,8,8,8,7,5,4,3,2,1,0];
+          for (var k = 0; k < 15; k++) g[tlR[k] * sz + tlC[k]] = (fmt >> k) & 1;
+          for (var k = 0; k < 7; k++) g[(sz - 1 - k) * sz + 8] = (fmt >> (14 - k)) & 1;
+          for (var k = 0; k < 8; k++) g[8 * sz + (sz - 8 + k)] = (fmt >> (7 - k)) & 1;
+          var pen = 0, dark = 0;
+          for (var y = 0; y < sz; y++) {
+            var rc1 = g[y*sz], rl1 = 1, cc1 = g[y], cl1 = 1;
+            for (var x = 1; x < sz; x++) {
+              if (g[y*sz+x] === rc1) rl1++; else { if (rl1>=5) pen+=3+rl1-5; rc1=g[y*sz+x]; rl1=1; }
+              if (g[x*sz+y] === cc1) cl1++; else { if (cl1>=5) pen+=3+cl1-5; cc1=g[x*sz+y]; cl1=1; }
+            }
+            if (rl1>=5) pen+=3+rl1-5; if (cl1>=5) pen+=3+cl1-5;
+          }
+          for (var i = 0; i < g.length; i++) if (g[i]) dark++;
+          pen += Math.abs(Math.round(dark * 100 / g.length / 5) * 5 - 50) * 2;
+          if (pen < bestP) { bestP = pen; bestM = g; }
+        }
+        var padQ = 2, vb = sz + padQ * 2, d = "";
+        for (var y = 0; y < sz; y++) for (var x = 0; x < sz; x++) if (bestM[y * sz + x]) d += "M" + (x + padQ) + "," + (y + padQ) + "h1v1h-1z";
+        mount.innerHTML = '<svg viewBox="0 0 ' + vb + ' ' + vb + '" shape-rendering="crispEdges"><rect width="' + vb + '" height="' + vb + '" fill="#fff"/><path fill="#075b52" d="' + d + '"/></svg>';
+      })();
 
       document.getElementById("copyShaBtn").addEventListener("click", function () {
         var sha = document.getElementById("shaBox").textContent.trim();
@@ -431,8 +618,8 @@
         var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 1.92 MB";
         document.getElementById("verBadge").textContent = tag + " 正式版";
         document.getElementById("sizeBadge").textContent = "包体 " + mb;
-        document.getElementById("dlPrimary").href = "https://gh-proxy.com/" + official;
-        document.getElementById("dlMirror2").href = "https://ghfast.top/" + official;
+        document.getElementById("dlPrimary").href = "https://ghfast.top/" + official;
+        document.getElementById("dlMirror2").href = "https://gh-proxy.com/" + official;
         document.getElementById("dlMirror3").href = "https://ghproxy.net/" + official;
         document.getElementById("dlOfficial").href = official;
         if (htmlUrl) document.getElementById("dlRelease").href = htmlUrl;

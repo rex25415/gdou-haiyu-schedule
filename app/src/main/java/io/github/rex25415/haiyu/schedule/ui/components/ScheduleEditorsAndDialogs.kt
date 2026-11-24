@@ -559,7 +559,7 @@ fun SingleWeekRescheduleDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "课程：${course.name}\n仅修改第 $weekNumber 周的上课时间或教室，其他周次保持原样不变。",
+                    text = "课程：${course.name}\n仅修改第 $weekNumber 周时间与教室，其余周次不变。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

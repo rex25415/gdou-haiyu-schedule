@@ -197,28 +197,72 @@ internal fun AcademicExamsPane(
                     Spacer(modifier = Modifier.width(10.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = exam.courseName,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (exam.isPinned) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = "置顶",
-                                        fontSize = 9.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                    )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = exam.courseName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (exam.isPinned) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "置顶",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        )
+                                    }
                                 }
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(
+                                onClick = { onToggleExamPin(exam.id) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.PushPin,
+                                    contentDescription = if (exam.isPinned) "取消置顶" else "置顶到小组件首行",
+                                    tint = if (exam.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { onEditExam(exam) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Edit,
+                                    contentDescription = "编辑",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { onDeleteExam(exam.id) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = "删除",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -257,40 +301,6 @@ internal fun AcademicExamsPane(
                                 )
                             }
                         }
-                    }
-
-                    IconButton(
-                        onClick = { onToggleExamPin(exam.id) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.PushPin,
-                            contentDescription = if (exam.isPinned) "取消置顶" else "置顶到小组件首行",
-                            tint = if (exam.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onEditExam(exam) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.Edit,
-                            contentDescription = "编辑",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onDeleteExam(exam.id) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.DeleteOutline,
-                            contentDescription = "删除",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(17.dp)
-                        )
                     }
                 }
             }

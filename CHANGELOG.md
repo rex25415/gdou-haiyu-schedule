@@ -2,19 +2,19 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
-## [Unreleased]
-- **同步完整性与准确性升级**：
-  - 全链路补齐正方教务多页分页拉取（空教室、成绩、考试、等级考试），拆分 `levelExamEps` 与 `gradeEps` 菜单发现并修复 HTTP 200 非 JSON（评教/通知拦截）诊断；
-  - 修复短学期 `16` / `xqmmc="3"`、`cxbj`/`kcbj` 重修与辅修判定、五年制学年跨度、选课备注 `xkbz`（不覆盖本地笔记）、实践课地点/学时与扩展教学楼识别。
-- **架构模块化、性能与大字适配**：
-  - 拆分 `ScheduleWeekGrid`、`AcademicGradesPane`、`AcademicExamsPane`、`EmptyClassroomSheet` 与共享 `PracticeCoursesBottomSheet`，隔离课表 30 秒倒计时重绘范围，并加入隐藏教务 `WebView` 切页暂停与脱敏诊断一键复制；
-  - 成绩页新增「挂科/补重」与「实践(N)」入口，调整筛选条自适应排版兼容 1.3 倍系统字体；
-  - 在设置页、`README.md` 与下载主页明确后续 **每周 1～2 版** 的稳健更新节奏，并收紧 `.github/dependabot.yml` 依赖升级上限。
-- **更新与云端运维基建**：
-  - 加固 `AppUpdateManager.cleanReleaseNotes`：支持 `<!-- APP_NOTES_START -->` 摘要区间与校验区块自动止步，改为整行截断避免弹窗文案腰斩；
-  - 支持从 `docs/latest.json` 读取动态加速节点 `mirrorPrefixes`，并补充「接收抢先体验版（Beta）」内测通道开关与机型/同步通道脱敏排障信息；
-  - 上线云端正式签名发版（`.github/workflows/release.yml`）、每周加速线路巡检（`.github/workflows/mirror-health.yml`）与 Dependabot 依赖守护；
-  - 拆分 `ScheduleScreen.kt` 视图与弹窗组件，补全 `.ics` 日历导出、旧版快照兼容迁移与 Beta 通道解析单元测试。
+## [v3.4.0] - 2026-11-24
+- **广海官方服务枢纽、校内官网直达与深色/竖屏全量精修**：
+  - 新增「广海官方服务与教务公告」（`CampusOfficialService` + `CampusServicesBottomSheet`）：直连 `jwc.gdou.edu.cn` 拉取教务公告分类流与最新官方校历原表，支持公告一键转入作业/考试 DDL 并联动「课表百宝箱」与「设置 → 官网校历与公告」；
+  - 教务直达新增动态发现正方菜单（教学评价、自主选课、学业情况/培养方案）及评教待办拦截引导横幅；重构校内外双通道智能探测（并发轻量 `GET` 探测 `jw` / `authserver` / `wfw` 并过滤未认证 Wi-Fi 劫持；校外丢包超时约 `1.8s` 快切、校内冷连接抖动单次容错复测、`wfw` 登录跳转等待缩至 `300ms`、`/sso/jziotlogin` 状态纠偏与慢加载一键切线条）；
+  - 按 `1080×2400` 真实手机态与深浅双色模式逐页微调十余处细节：修复长课名挤裁教室定位、消除官方服务/成绩主卡/设置工作台副标题截断、考试座号与学期去重孤字折行、空教室占位符/邻近卡片省略号与深色 Snackbar 过亮反差，统一全部菜单图标风格。
+- **面对面零摩擦分享与下载闭环（零商业推销 · 纯开源免费）**：
+  - 在「分享海屿空间给同学」弹窗新增**纯离线 QR 码编码器（`QrCodeEncoder`）**，支持手机相机/浏览器扫码直达下载页，并上线**「直接传安装包（.apk）给同学」**（读取本机已装只读安装包生成标准命名文件，避开 Android 11+ 包可见性拦阻直拉系统 Sharesheet，适配 QQ/互传/微信转发文件）；
+  - 同班课表分享码新增默认勾选的「附带下载页提示」开关，导出课表长图页脚安静保留开源主页来源，优化分享文案并全线修正微信拦截 `github.io` 时的真实引导（提醒勿用微信扫码、复制网址进手机浏览器或直接发 `.apk`）；
+  - 升级 GitHub Pages 落地页：调整最快国内主线 `ghfast.top` 为首选、加入桌面端纯离线 `<svg>` 扫码框与下载点击引导浮层。
+- **同步完整性、模块化架构与云端运维基建**：
+  - 全链路补齐正方教务多页分页拉取（空教室、成绩、考试、等级考试），拆分 `levelExamEps` 与 `gradeEps` 菜单发现并修复 HTTP 200 非 JSON 诊断；修复短学期 `16` / `xqmmc="3"`、重修辅修判定、五年制学年跨度与实践课识别；
+  - 拆分 `ScheduleWeekGrid`、`AcademicGradesPane`、`AcademicExamsPane`、`EmptyClassroomSheet` 与 `PracticeCoursesBottomSheet`，隔离 30 秒倒计时重绘范围，加入 `.ics` 日历导出、挂科/实践快捷入口、Beta 预览通道与 1.3× 大字适配；
+  - 上线云端签名发版流水线（`.github/workflows/release.yml`）、镜像巡检与 65 项核心单元测试覆盖（AGP `8.13.2`）。
 
 ## [v3.3.0] - 2026-11-24
 - **查空教室 2.0**：支持搜索教室号查看今日全天 5 大节逐节空课时间轴、湖光/海滨/阳江三校区全楼栋与楼层识别、附近自习楼推理，以及常去楼栋/教室收藏置顶。

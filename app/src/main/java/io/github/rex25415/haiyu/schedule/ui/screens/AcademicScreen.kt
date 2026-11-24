@@ -482,11 +482,14 @@ private fun TasksContent(
                             if (task.courseName.isNotBlank()) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.secondaryContainer,
-                                    shape = RoundedCornerShape(6.dp)
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
                                 ) {
                                     Text(
                                         text = task.courseName.take(12),
                                         fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                                     )
@@ -496,6 +499,8 @@ private fun TasksContent(
                                 Text(
                                     text = task.dueDate,
                                     style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -520,6 +525,8 @@ private fun TasksContent(
                             text = badgeText,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                             color = badgeFg,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )

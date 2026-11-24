@@ -803,16 +803,77 @@ object AppUpdateManager {
     /**
      * 生成克制、实用的同学分享文案与免翻下载链接（零广告感）
      */
-    fun buildAppShareText(): String {
-        return "分享一个纯本地、无广告的广海三校区学业工具「海屿空间」（原名海屿课表，免校园网可一键同步课表、成绩/GPA、考试倒计时、DDL 与四款桌面小组件）：\n" +
-            "中文高速下载页（免翻 GitHub）：$DOWNLOAD_PAGE_URL"
+    fun buildAppShareText(includeBrowserTip: Boolean = true): String {
+        val base = "平时用「海屿空间」查广海课表和空教室还挺顺手，纯本地开源没广告也不用开校园网，安卓可以直接装：\n" +
+            "下载页：$DOWNLOAD_PAGE_URL"
+        return if (includeBrowserTip) {
+            "$base\n（微信可能会拦截 github 网页，请复制网址到手机自带浏览器打开；用 QQ 或直接收 .apk 安装包会更顺畅）"
+        } else {
+            base
+        }
+    }
+
+    /**
+     * 为同班课表分享码附加友好的下载引导尾注（文案中避免出现大括号，保证各版本均可提取原始 JSON 分享码）
+     */
+    fun wrapShareCodeForClassmate(shareCode: String, includeDownloadHint: Boolean = true): String {
+        val cleanCode = shareCode.trim()
+        if (!includeDownloadHint || cleanCode.isBlank()) return cleanCode
+        return buildString {
+            appendLine("我用「海屿空间」导出了同班课表，全选整条消息复制，进 App「同班分享码」就能直接导入课表和作息。")
+            appendLine("安卓开源下载页：$DOWNLOAD_PAGE_URL")
+            append(cleanCode)
+        }
+    }
+
+    /**
+     * 直接把本机已安装的 APK 拷贝为干净文件名后通过系统分享发送给同学（QQ/互传/微信面对面秒装，免网页下载）
+     */
+    fun shareInstalledApk(context: Context, versionName: String): Boolean {
+        return try {
+            val appInfo = context.applicationInfo
+            val sourcePath = appInfo.publicSourceDir?.takeIf { it.isNotBlank() } ?: appInfo.sourceDir
+            val sourceFile = sourcePath?.let(::File)?.takeIf { it.exists() && it.canRead() } ?: return false
+            val cleanVer = normalizeVersion(versionName).ifBlank {
+                io.github.rex25415.haiyu.schedule.BuildConfig.VERSION_NAME
+            }
+            val shareDir = File(context.cacheDir, "share_apk").apply { mkdirs() }
+            val targetName = "海屿空间-v$cleanVer.apk"
+            shareDir.listFiles()?.forEach { old ->
+                if (old.name != targetName) old.delete()
+            }
+            val destFile = File(shareDir, targetName)
+            if (!destFile.exists() || destFile.length() != sourceFile.length()) {
+                sourceFile.inputStream().use { input ->
+                    FileOutputStream(destFile).use { output -> input.copyTo(output) }
+                }
+            }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", destFile)
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "*/*"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, targetName)
+                clipData = android.content.ClipData.newRawUri("海屿空间安装包", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(sendIntent, "直接传「$targetName」安装包给同学").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(chooser)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
      * 构造指定版本的国内高速直链（优先复用已知官方 Release APK 链接）
      */
     fun buildMirrorApkUrl(versionName: String, officialApkUrl: String? = null): String {
-        val cleanVer = normalizeVersion(versionName).ifBlank { "3.1.0" }
+        val cleanVer = normalizeVersion(versionName).ifBlank {
+            io.github.rex25415.haiyu.schedule.BuildConfig.VERSION_NAME
+        }
         val official = officialApkUrl?.trim().orEmpty().ifBlank {
             "$REPO_WEB_URL/releases/download/v$cleanVer/HaiyuSchedule-GDOU-v$cleanVer.apk"
         }

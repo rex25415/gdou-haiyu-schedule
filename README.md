@@ -1,13 +1,13 @@
 # 🌊 海屿空间（原名海屿课表）· 广海全校区纯净开源学业与课表工具
 
-[![Release](https://img.shields.io/badge/Release-v3.3.0-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
+[![Release](https://img.shields.io/badge/Release-v3.4.0-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
 [![Android CI](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml/badge.svg)](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml)
 [![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://rex25415.github.io/gdou-haiyu-schedule/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-0C7D72)](LICENSE)
 
 专为 **广东海洋大学三校区（湖光主校区 · 海滨校区 · 阳江校区）** 适配的纯原生 **Kotlin + Jetpack Compose + Material 3** 安卓课表与学业空间（免校园网教务同步、分楼精准错峰、官网公告校历直达、成绩 GPA 去重与反推、空教室自习查询及四款桌面小组件）。
 
-- 🌐 **中文高速下载主页（推荐 · 免梯加速 & 微信/QQ 引导）**：https://rex25415.github.io/gdou-haiyu-schedule/
+- 🌐 **中文高速下载主页（推荐 · 手机浏览器/QQ 直达，微信请复制进浏览器）**：https://rex25415.github.io/gdou-haiyu-schedule/
 - 📦 **GitHub Releases 发布页**：https://github.com/rex25415/gdou-haiyu-schedule/releases/latest
 
 > **非校方官方 & 非商业开源声明**：本项目由个人开发者 [@rex25415](https://github.com/rex25415) 基于兴趣开源维护（内置广海三校区公开作息模板），与任何高校官方无隶属关系。应用 **零自建后端、零账号密码中转、零广告统计、零后台自动爬虫/选课/抢课**，采用 [PolyForm Noncommercial 1.0.0](LICENSE) 开源协议（禁止商用与冒充重打包）。详见 [安全与合规白皮书 (SECURITY.md)](SECURITY.md) 与 [NOTICE](NOTICE)。
@@ -16,7 +16,7 @@
 
 ## 📥 版本、兼容性与更新节奏
 
-- **支持系统**：Android 8.0 ～ Android 17（`minSdk 26` / `targetSdk 36`），同时兼容 **华为鸿蒙 4.x 及以下**（包体仅约 **1.92 MB**）；
+- **支持系统**：Android 8.0 ～ Android 17（`minSdk 26` / `targetSdk 36`），同时兼容 **华为鸿蒙 4.x 及以下**（包体仅约 **2.00 MB**）；
 - **更新节奏**：上线初期集中补齐核心刚需功能与修复紧急 Bug，因此前期连发了较多版本；目前核心已趋于稳定，正式版已转为 **每周 1～2 次的稳健迭代节奏**（日常不频繁弹窗打扰；如遇教务改版或紧急故障将随时加急修复）。想抢先尝鲜新功能可在 App「设置 → 应用更新」开启 **Beta 预览通道**；
 - **内置一键更新与验真**：内置 4 层免梯更新检查、国内多线加速下载与 **SHA-256 强制校验**，并配备 **运行时签名指纹验真**，防第三方篡改套壳；
 - **包名说明（`v2.8.0+`）**：自 `v2.8.0` 起已全面启用中性个人开源包名 `io.github.rex25415.haiyu.schedule`（如此前装过 `v2.7.0` 及以下旧包名版本，可在旧版复制「同班课表分享码」1 秒导入新版后再卸载旧图标，之后所有升级均可直接无缝覆盖）。

@@ -6,9 +6,12 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.SettingsApplications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
+import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -94,6 +100,7 @@ fun BellScheduleReferenceDialog(
                         FilterChip(
                             selected = selected,
                             onClick = { selectedCampus = campus },
+                            modifier = Modifier.weight(1f),
                             leadingIcon = if (selected) {
                                 { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                             } else null,
@@ -103,11 +110,18 @@ fun BellScheduleReferenceDialog(
                                 selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
                             ),
                             label = {
-                                Text(
-                                    campus.label.removeSuffix("校区"),
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        campus.label.removeSuffix("校区"),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         )
                     }
@@ -142,8 +156,8 @@ fun BellScheduleReferenceDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("节次", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(42.dp))
-                    Text("常规作息", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Text("错峰作息", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("常规（共${slots.size}节）", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text("错峰（可下滑）", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
                 HorizontalDivider()
 
@@ -218,6 +232,7 @@ fun ScheduleShareCodeDialog(
 ) {
     val clipboard = LocalClipboardManager.current
     var pasteInput by remember { mutableStateOf("") }
+    var includeDownloadHint by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -242,9 +257,34 @@ fun ScheduleShareCodeDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { includeDownloadHint = !includeDownloadHint }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Checkbox(
+                                checked = includeDownloadHint,
+                                onCheckedChange = { includeDownloadHint = it },
+                                modifier = Modifier.size(30.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "复制时附带下载页提示（方便未装同学安装）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
                         FilledTonalButton(
-                            onClick = { shareCode?.let(onCopyCode) },
+                            onClick = {
+                                shareCode?.let { raw ->
+                                    onCopyCode(AppUpdateManager.wrapShareCodeForClassmate(raw, includeDownloadHint))
+                                }
+                            },
                             enabled = !shareCode.isNullOrBlank(),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
@@ -262,7 +302,7 @@ fun ScheduleShareCodeDialog(
                 OutlinedTextField(
                     value = pasteInput,
                     onValueChange = { pasteInput = it },
-                    placeholder = { Text("粘贴海屿分享码（兼容旧版海屿课表）...") },
+                    placeholder = { Text("粘贴分享码（支持旧版互导）") },
                     minLines = 2,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth()
@@ -362,12 +402,12 @@ fun QuickAddTaskDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it; errorMsg = null },
-                    label = { Text("任务内容（如 实验报告 / 课后习题）*") },
+                    label = { Text("任务内容（实验报告 / 习题）*") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -402,7 +442,9 @@ fun QuickAddTaskDialog(
                                     Text(
                                         cName.take(10),
                                         fontSize = 11.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             )
@@ -415,7 +457,11 @@ fun QuickAddTaskDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("截止日期", style = MaterialTheme.typography.labelMedium)
-                    TextButton(onClick = { showDatePicker = true }) {
+                    TextButton(
+                        onClick = { showDatePicker = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("从日历选", fontSize = 12.sp)
@@ -444,7 +490,9 @@ fun QuickAddTaskDialog(
                                 Text(
                                     label,
                                     fontSize = 11.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         )
@@ -460,7 +508,7 @@ fun QuickAddTaskDialog(
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("备注（如 学习通提交 / 纸质版交学委）") },
+                    label = { Text("备注（学习通 / 交学委，选填）") },
                     maxLines = 2,
                     modifier = Modifier.fillMaxWidth()
                 )

@@ -1,6 +1,8 @@
 package io.github.rex25415.haiyu.schedule
 
+import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
 import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
+import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -165,5 +167,46 @@ class GdouSyncScriptTest {
         assertTrue(domJs.contains("scrapeGradesFromCurrentDom"))
         assertTrue(domJs.contains("scrapeExamsFromCurrentDom"))
         assertFalse(domJs.contains("\$COMMON"))
+    }
+
+    @Test
+    fun ssoHandshakePathIsNeverTreatedAsLoggedInWithoutDomConfirmation() {
+        val ssoUrl = "https://jw.gdou.edu.cn/sso/jziotlogin"
+        assertTrue(GdouSyncScript.isUrlOnPortalLoginPath(ssoUrl))
+        assertFalse(
+            GdouSyncScript.resolveJwLoginState(
+                url = ssoUrl,
+                pageTitle = "广东海洋大学教务系统",
+                pageErrorMsg = null,
+                domConfirmedLoggedIn = false
+            )
+        )
+    }
+
+    @Test
+    fun networkChannelProbeFiltersCaptivePortalsAndChecksAuthHealth() {
+        assertFalse(NetworkChannelProbe.isValidProbeResponse(302, "http://172.16.10.1/portal/login"))
+        assertFalse(NetworkChannelProbe.isValidProbeResponse(404, null))
+        assertFalse(NetworkChannelProbe.isValidProbeResponse(407, null))
+        assertFalse(NetworkChannelProbe.isValidProbeResponse(502, null))
+        assertTrue(NetworkChannelProbe.isValidProbeResponse(302, "/xtgl/login_slogin.html"))
+        assertTrue(
+            NetworkChannelProbe.isValidProbeResponse(
+                302,
+                "http://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fjw.gdou.edu.cn%2Fsso%2Fjziotlogin"
+            )
+        )
+        assertEquals(
+            CampusNetworkState.ON_CAMPUS_DIRECT_READY,
+            NetworkChannelProbe.classifyState(jwReachable = true, wfwReachable = true, authReachable = true)
+        )
+        assertEquals(
+            CampusNetworkState.OFF_CAMPUS_ONLY,
+            NetworkChannelProbe.classifyState(jwReachable = true, wfwReachable = true, authReachable = false)
+        )
+        assertFalse(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 45L))
+        assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 700L))
+        assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = false, wfwLatencyMs = 45L))
+        assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = null))
     }
 }

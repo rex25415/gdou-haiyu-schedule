@@ -253,7 +253,7 @@ fun ScheduleToolboxBottomSheet(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "最新考核/选课通知 · 官方校历 · 一网通办 · 智慧后勤",
+                                text = "教务考核/选课公告 · 官方校历 · 一网通办 · 后勤",
                                 fontSize = 10.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,

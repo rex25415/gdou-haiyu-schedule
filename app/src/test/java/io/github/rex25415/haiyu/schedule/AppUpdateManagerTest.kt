@@ -734,4 +734,28 @@ class AppUpdateManagerTest {
         assertNotNull(stablePick)
         assertEquals("3.3.0", stablePick!!.versionName)
     }
+
+    @Test
+    fun offlineQrEncoderAndClassmateShareHelpersAreValid() {
+        val matrix = io.github.rex25415.haiyu.schedule.update.QrCodeEncoder.encodeByteModeM(
+            AppUpdateManager.DOWNLOAD_PAGE_URL
+        )
+        assertNotNull(matrix)
+        val qr = matrix!!
+        assertEquals(33, qr.size)
+        // Finder patterns corners (7x7 outer ring dark, inner 5x5 ring light, 3x3 center dark)
+        assertTrue(qr.get(0, 0))
+        assertFalse(qr.get(1, 1))
+        assertTrue(qr.get(3, 3))
+        assertTrue(qr.get(qr.size - 1, 0))
+        assertTrue(qr.get(0, qr.size - 1))
+
+        val sampleJson = """{"format":"HAIYU_GDOU_V1","campus":"HAIBIN","semesterStartDate":"2026-08-31","totalWeeks":19,"academicYearLabel":"2026-2027 第一学期","courses":[{"name":"线性代数","location":"实验楼308","dayOfWeek":1,"startSection":3,"endSection":4,"weeks":[1,2]}]}"""
+        val wrapped = AppUpdateManager.wrapShareCodeForClassmate(sampleJson, includeDownloadHint = true)
+        assertTrue(wrapped.contains(AppUpdateManager.DOWNLOAD_PAGE_URL))
+        assertEquals(sampleJson.count { it == '{' }, wrapped.count { it == '{' })
+        assertEquals(sampleJson.count { it == '}' }, wrapped.count { it == '}' })
+        val plain = AppUpdateManager.wrapShareCodeForClassmate(sampleJson, includeDownloadHint = false)
+        assertEquals(sampleJson, plain)
+    }
 }

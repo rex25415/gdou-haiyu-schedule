@@ -36,8 +36,8 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.DashboardCustomize
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.GridView
@@ -436,7 +436,7 @@ fun ScheduleScreen(
                         modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Apps,
+                            imageVector = Icons.Rounded.DashboardCustomize,
                             contentDescription = "课表百宝箱",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
@@ -903,7 +903,7 @@ fun ScheduleScreen(
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1210,9 +1210,9 @@ fun ScheduleScreen(
                         }
 
                         // Subtle 1-row Attendance & Bonus Counter (super handy for tracking absences & participation!)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1238,7 +1238,7 @@ fun ScheduleScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 // Student-friendly Quick Actions: Single-Week Reschedule & Homework DDL
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1303,7 +1303,7 @@ fun ScheduleScreen(
                         Text("编辑全部周次")
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(22.dp))
             }
         }
     }

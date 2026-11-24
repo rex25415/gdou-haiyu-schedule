@@ -726,12 +726,11 @@ fun EmptyClassroomPane(
                         }
                     }
 
-                    // Single Horizontally Scrollable Slot Strip (2-section slots + continuous no-kick-out presets!)
-                    Row(
+                    // Responsive 2-row FlowRow for Slot Presets (zero edge-cut on 1-2..9-10 / continuous blocks!)
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         slotPresets.forEach { preset ->
                             val sel = queryStartSec == preset.startSection && queryEndSec == preset.endSection
@@ -975,7 +974,7 @@ fun EmptyClassroomPane(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "${courseContext.building}本时段 $sameBuildingCount 间空闲 · 点击即直达同楼自习",
+                                            text = "本时段 $sameBuildingCount 间空闲 · 点右侧直达",
                                             fontSize = 10.5.sp,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
                                             maxLines = 1,
@@ -1187,7 +1186,7 @@ fun EmptyClassroomPane(
                         OutlinedTextField(
                             value = roomFilterQuery,
                             onValueChange = { roomFilterQuery = it },
-                            placeholder = { Text("搜教室号看今日全天空课表（如 505、208、阶梯）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            placeholder = { Text("搜教室查今日空课表（如 505）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             trailingIcon = if (roomFilterQuery.isNotEmpty()) {
                                 {

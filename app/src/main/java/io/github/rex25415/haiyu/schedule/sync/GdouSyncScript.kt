@@ -12,6 +12,7 @@ object GdouSyncScript {
     const val URL_OFF_CAMPUS = "https://wfw.gdou.edu.cn/"
     const val URL_WFW_JW_ENTRY = "https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn/"
     const val URL_ON_CAMPUS = "https://jw.gdou.edu.cn/"
+    const val URL_AUTH_SERVER = "https://authserver.gdou.edu.cn/authserver/login"
 
     const val DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -1835,7 +1836,9 @@ object GdouSyncScript {
         val lower = url.orEmpty().lowercase(java.util.Locale.US)
         return lower.contains("login_slogin") ||
             lower.contains("login_tickit") ||
-            lower.contains("/login")
+            lower.contains("/login") ||
+            lower.contains("jziotlogin") ||
+            lower.contains("/sso/")
     }
 
     /** 安全提取请求 URL 的小写主机名，供纯 JVM 单元测试与 WebView 错误拦截复用。 */
