@@ -440,27 +440,7 @@ class AppRepository(context: Context) {
         val current = _state.value
         val manualCourses = current.courses.filter { it.isManual }
         // Preserve user's local notes & attendance counts across re-syncs!
-        val prevBySlot = current.courses.filterNot { it.isManual }.associateBy {
-            "${it.name.trim()}|${it.dayOfWeek}|${it.startSection}|${it.endSection}"
-        }
-        val prevByName = current.courses.filterNot { it.isManual }
-            .filter { it.note.isNotBlank() || it.absenceCount > 0 || it.bonusCount > 0 }
-            .associateBy { it.name.trim() }
-        val mergedCourses = courses.map { c ->
-            val matched = prevBySlot["${c.name.trim()}|${c.dayOfWeek}|${c.startSection}|${c.endSection}"]
-                ?: prevByName[c.name.trim()]
-            if (matched != null) {
-                c.copy(
-                    courseType = c.courseType.ifBlank { matched.courseType },
-                    examMethod = c.examMethod.ifBlank { matched.examMethod },
-                    classGroup = c.classGroup.ifBlank { matched.classGroup },
-                    totalHours = c.totalHours.ifBlank { matched.totalHours },
-                    note = c.note.ifBlank { matched.note },
-                    absenceCount = if (c.absenceCount > 0) c.absenceCount else matched.absenceCount,
-                    bonusCount = if (c.bonusCount > 0) c.bonusCount else matched.bonusCount
-                )
-            } else c
-        }
+        val mergedCourses = mergeSyncedCourseMetadata(current.courses, courses)
         val coloredCourses = assignStableColors(mergedCourses)
         val nowLabel = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         val detectedCampus = GdouCampus.fromIdOrNull(detectedCampusId)
@@ -921,4 +901,32 @@ internal fun computeBitmapInSampleSize(
         sample *= 2
     }
     return sample
+}
+
+internal fun mergeSyncedCourseMetadata(
+    previousCourses: List<CourseItem>,
+    syncedCourses: List<CourseItem>
+): List<CourseItem> {
+    val nonManualPrev = previousCourses.filterNot { it.isManual }
+    val prevBySlot = nonManualPrev.associateBy {
+        "${it.name.trim()}|${it.dayOfWeek}|${it.startSection}|${it.endSection}"
+    }
+    val prevByName = nonManualPrev
+        .filter { it.note.isNotBlank() || it.absenceCount > 0 || it.bonusCount > 0 }
+        .associateBy { it.name.trim() }
+    return syncedCourses.map { c ->
+        val matched = prevBySlot["${c.name.trim()}|${c.dayOfWeek}|${c.startSection}|${c.endSection}"]
+            ?: prevByName[c.name.trim()]
+        if (matched != null) {
+            c.copy(
+                courseType = c.courseType.ifBlank { matched.courseType },
+                examMethod = c.examMethod.ifBlank { matched.examMethod },
+                classGroup = c.classGroup.ifBlank { matched.classGroup },
+                totalHours = c.totalHours.ifBlank { matched.totalHours },
+                note = matched.note.ifBlank { c.note },
+                absenceCount = if (c.absenceCount > 0) c.absenceCount else matched.absenceCount,
+                bonusCount = if (c.bonusCount > 0) c.bonusCount else matched.bonusCount
+            )
+        } else c
+    }
 }

@@ -1,5 +1,6 @@
 package io.github.rex25415.haiyu.schedule
 
+import io.github.rex25415.haiyu.schedule.data.mergeSyncedCourseMetadata
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
@@ -73,5 +74,65 @@ class RepositoryAndMigrationTest {
         assertEquals(listOf(1, 3, 5, 7, 10, 12, 14), parseWeeksExpression("1-8(单)，10～15双", 20))
         assertEquals(listOf(2, 4, 5, 6, 9), parseWeeksExpression("2, 4, 5-6, 9", 18))
         assertTrue(parseWeeksExpression("未知周次", 20).isEmpty())
+    }
+
+    @Test
+    fun mergeSyncedCourseMetadata_preservesUserNoteAndAttendanceWhileBackfillingRemarks() {
+        val prevCourses = listOf(
+            CourseItem(
+                id = "old-1",
+                name = "海洋气象学",
+                teacher = "陈老师",
+                location = "海博楼301",
+                dayOfWeek = 1,
+                startSection = 1,
+                endSection = 2,
+                weeks = (1..16).toList(),
+                note = "记得带计算器",
+                absenceCount = 1,
+                bonusCount = 2
+            ),
+            CourseItem(
+                id = "old-2",
+                name = "数值分析",
+                teacher = "李老师",
+                location = "钟海楼02010",
+                dayOfWeek = 3,
+                startSection = 5,
+                endSection = 6,
+                weeks = (1..16).toList(),
+                note = ""
+            )
+        )
+        val freshSynced = listOf(
+            CourseItem(
+                id = "new-1",
+                name = "海洋气象学",
+                teacher = "陈老师",
+                location = "海博楼301",
+                dayOfWeek = 1,
+                startSection = 1,
+                endSection = 2,
+                weeks = (1..16).toList(),
+                note = "教务选课备注：实验班"
+            ),
+            CourseItem(
+                id = "new-2",
+                name = "数值分析",
+                teacher = "李老师",
+                location = "钟海楼02010",
+                dayOfWeek = 3,
+                startSection = 5,
+                endSection = 6,
+                weeks = (1..16).toList(),
+                note = "上机自带电脑"
+            )
+        )
+
+        val merged = mergeSyncedCourseMetadata(prevCourses, freshSynced)
+        assertEquals("记得带计算器", merged[0].note)
+        assertEquals(1, merged[0].absenceCount)
+        assertEquals(2, merged[0].bonusCount)
+        assertEquals("上机自带电脑", merged[1].note)
     }
 }

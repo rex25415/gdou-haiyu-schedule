@@ -40,7 +40,8 @@ private data class SyncedCourseDto(
     val courseType: String = "",
     val examMethod: String = "",
     val classGroup: String = "",
-    val totalHours: String = ""
+    val totalHours: String = "",
+    val note: String = ""
 )
 
 @Serializable
@@ -217,6 +218,7 @@ class GdouJsBridge(
                     examMethod = dto.examMethod,
                     classGroup = dto.classGroup,
                     totalHours = dto.totalHours,
+                    note = dto.note,
                     isManual = false
                 )
             }

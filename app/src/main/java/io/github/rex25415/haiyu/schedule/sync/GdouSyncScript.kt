@@ -250,12 +250,16 @@ object GdouSyncScript {
                     return;
                 }
                 const domGrades = scrapeGradesFromCurrentDom();
-                if (domGrades.length > 0) {
-                    HaiyuBridge.onGradesSynced(JSON.stringify({ grades: domGrades, levelExams: [] }));
-                    HaiyuBridge.onSyncComplete("已从当前网页表格直接提取成绩 " + domGrades.length + " 门");
+                const domLevelExams = scrapeLevelExamsFromCurrentDom();
+                if (domGrades.length > 0 || domLevelExams.length > 0) {
+                    HaiyuBridge.onGradesSynced(JSON.stringify({ grades: domGrades, levelExams: domLevelExams }));
+                    const parts = [];
+                    if (domGrades.length > 0) parts.push("成绩 " + domGrades.length + " 门");
+                    if (domLevelExams.length > 0) parts.push("等级考 " + domLevelExams.length + " 项");
+                    HaiyuBridge.onSyncComplete("已从当前网页表格直接提取" + parts.join(" · "));
                     return;
                 }
-                HaiyuBridge.onSyncError("当前网页未检测到已加载的考试或成绩表格（请先在网页中点击「查询」展开表格后再试）");
+                HaiyuBridge.onSyncError("当前网页未检测到已加载的考试、成绩或等级考表格（请先在网页中点击「查询」展开表格后再试）");
             } catch (err) {
                 HaiyuBridge.onSyncError("网页表格提取异常：" + (err && err.message ? err.message : String(err)));
             }
@@ -327,39 +331,8 @@ object GdouSyncScript {
                     "&_search=false&nd=" + (Date.now() + secStart) +
                     "&queryModel.showCount=1000&queryModel.currentPage=" + pageNo + "&queryModel.sortName=cdbh&queryModel.sortOrder=asc&time=0";
             }
-            const resp = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                    "x-requested-with": "XMLHttpRequest"
-                },
-                body: buildForm(1),
-                credentials: "include"
-            });
-            if (!resp.ok) return null;
-            const json = JSON.parse(await resp.text());
-            let rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-            const totalPage = Number((json && json.totalPage) || 1);
-            const totalResult = Number((json && json.totalResult) || rawItems.length);
-            if (totalPage > 1 && rawItems.length < totalResult) {
-                try {
-                    const resp2 = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: buildForm(2),
-                        credentials: "include"
-                    });
-                    if (resp2.ok) {
-                        const json2 = JSON.parse(await resp2.text());
-                        const more = Array.isArray(json2 && json2.items) ? json2.items : [];
-                        rawItems = rawItems.concat(more);
-                    }
-                } catch (_) {}
-            }
-            return rawItems;
+            const pageRes = await fetchPaginatedJwItems("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", buildForm, 10, "");
+            return pageRes.ok ? pageRes.items : null;
         }
     """
 
@@ -448,7 +421,7 @@ object GdouSyncScript {
                             continue;
                         }
                         if (!building) {
-                            const bm = roomName.match(/^(广学楼|明德楼|钟海楼|博文楼|兴教楼|兴海楼|兴农楼|望海楼|图海楼|艺海楼[ABC]?|海科楼|海博楼|教学楼|实验楼|电教楼|济海楼|慎思楼|厚为楼|博学楼|明辨楼|海纳楼|海行楼|济航楼)/);
+                            const bm = roomName.match(/^(第二实验综合楼|轮机实验楼|水产科技楼|海科楼一|艺海楼[ABC]?|广学楼|明德楼|钟海楼|博文楼|兴教楼|兴海楼|兴农楼|望海楼|图海楼|海科楼|海博楼|海驰楼|海润楼|慎思楼|厚为楼|博学楼|明辨楼|海纳楼|海行楼|济航楼|厚德楼|铭德楼|海阳馆|济海楼|电教楼|实验楼|教学楼)/);
                             building = bm ? bm[1] : "综合教学区";
                         }
                         const key = building + "|" + roomName;
@@ -724,6 +697,19 @@ object GdouSyncScript {
             }
             return { ok: false, status: lastStatus, text: lastText };
         }
+        function classifyNonJsonHtml(rawText, fallbackMsg) {
+            const t = String(rawText || "");
+            if (/未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(t)) {
+                return "需先在上方教务页确认通知或完成评教（也可切「校外免校园网」同步）";
+            }
+            if (/统一身份认证|cas\/login|请先登录|登录超时|会话超时|用户登录/.test(t)) {
+                return "登录状态已过期，请刷新教务页重新登录";
+            }
+            if (/无操作权限|无权限|未开放|非查询时间/.test(t)) {
+                return "教务当前暂未开放该查询入口";
+            }
+            return fallbackMsg || "教务返回了非数据页，建议刷新教务页或切「校外免校园网」后重试";
+        }
         async function fetchJwWithFallback(relativePath, init) {
             const res = await fetchJwTextWithFallback(relativePath, init, false);
             return {
@@ -741,6 +727,58 @@ object GdouSyncScript {
                 text: async () => res.text,
                 json: async () => JSON.parse(res.text)
             };
+        }
+        async function fetchPaginatedJwItems(ep, buildFormForPage, maxPages, fallbackHint) {
+            const headers = {
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "x-requested-with": "XMLHttpRequest"
+            };
+            const cap = Math.max(1, Math.min(Number(maxPages) || 10, 20));
+            const resp1 = await fetchJwJsonWithFallback(ep, {
+                method: "POST",
+                headers,
+                body: buildFormForPage(1),
+                credentials: "include"
+            });
+            const txt1 = await resp1.text();
+            const trimmed1 = String(txt1 || "").trim();
+            if (!resp1.ok) {
+                const hint = (trimmed1 && !trimmed1.startsWith("{") && !trimmed1.startsWith("["))
+                    ? classifyNonJsonHtml(txt1, fallbackHint)
+                    : "";
+                return { ok: false, status: resp1.status || 0, items: [], htmlHint: hint };
+            }
+            let json1;
+            try {
+                json1 = JSON.parse(txt1);
+            } catch (_) {
+                return { ok: false, status: resp1.status || 200, items: [], htmlHint: classifyNonJsonHtml(txt1, fallbackHint) };
+            }
+            let allItems = Array.isArray(json1 && json1.items) ? json1.items.slice() : (Array.isArray(json1) ? json1.slice() : []);
+            const totalPage = Number((json1 && json1.totalPage) || 1);
+            const totalResult = Number((json1 && json1.totalResult) || allItems.length);
+            if (totalPage > 1 && allItems.length < totalResult) {
+                const limitPage = Math.min(totalPage, cap);
+                for (let pageNo = 2; pageNo <= limitPage; pageNo++) {
+                    try {
+                        const respN = await fetchJwJsonWithFallback(ep, {
+                            method: "POST",
+                            headers,
+                            body: buildFormForPage(pageNo),
+                            credentials: "include"
+                        });
+                        if (!respN.ok) break;
+                        const jsonN = JSON.parse(await respN.text());
+                        const pageItems = Array.isArray(jsonN && jsonN.items) ? jsonN.items : (Array.isArray(jsonN) ? jsonN : []);
+                        if (pageItems.length === 0) break;
+                        allItems = allItems.concat(pageItems);
+                        if (allItems.length >= totalResult) break;
+                    } catch (_) {
+                        break;
+                    }
+                }
+            }
+            return { ok: true, status: resp1.status || 200, items: allItems, htmlHint: "" };
         }
     """
 
@@ -877,7 +915,7 @@ object GdouSyncScript {
         let _cachedMenuEndpoints = null;
         async function discoverMenuEndpoints() {
             if (_cachedMenuEndpoints) return _cachedMenuEndpoints;
-            const found = { gradeEps: [], examEps: [] };
+            const found = { gradeEps: [], examEps: [], levelExamEps: [] };
             try {
                 const sources = [document.documentElement ? document.documentElement.innerHTML : ""];
                 try {
@@ -890,17 +928,21 @@ object GdouSyncScript {
                     while ((m = re.exec(src)) !== null) {
                         const code = m[1];
                         const path = m[2];
-                        if (path.includes("/cjcx/")) {
-                            const sep = path.includes("?") ? "&" : "?";
+                        const sep = path.includes("?") ? "&" : "?";
+                        if (path.includes("djkscx")) {
+                            found.levelExamEps.push(path + sep + "doType=query&gnmkdm=" + code);
+                        } else if (path.includes("/cjcx/")) {
                             found.gradeEps.push(path + sep + "doType=query&gnmkdm=" + code);
                         }
                         if (path.includes("/kwgl/") && path.includes("kscx")) {
-                            const sep = path.includes("?") ? "&" : "?";
                             found.examEps.push(path + sep + "doType=query&gnmkdm=" + code);
                         }
                     }
                 }
             } catch (_) {}
+            found.gradeEps = Array.from(new Set(found.gradeEps));
+            found.examEps = Array.from(new Set(found.examEps));
+            found.levelExamEps = Array.from(new Set(found.levelExamEps));
             _cachedMenuEndpoints = found;
             return found;
         }
@@ -953,6 +995,15 @@ object GdouSyncScript {
             return rest ? (rest + "(" + m[1] + ")") : name;
         }
 
+        function mergeNoteText(a, b) {
+            const na = String(a || "").trim();
+            const nb = String(b || "").trim();
+            if (!na) return nb;
+            if (!nb || na.includes(nb)) return na;
+            if (nb.includes(na)) return nb;
+            return na + " · " + nb;
+        }
+
         function mergeAndDistinctCourses(courses) {
             if (!Array.isArray(courses) || courses.length <= 1) return courses;
             const list = courses.map(c => ({
@@ -979,7 +1030,9 @@ object GdouSyncScript {
                     cur.weeks.join(",") === nxt.weeks.join(",");
                 if (sameMeta && cur.endSection + 1 === nxt.startSection) {
                     cur.endSection = nxt.endSection;
+                    cur.note = mergeNoteText(cur.note, nxt.note);
                 } else if (sameMeta && cur.startSection === nxt.startSection && cur.endSection === nxt.endSection) {
+                    cur.note = mergeNoteText(cur.note, nxt.note);
                     continue;
                 } else {
                     step1.push(cur);
@@ -1009,6 +1062,7 @@ object GdouSyncScript {
                     cur.endSection === nxt.endSection;
                 if (sameSlot) {
                     cur.weeks = Array.from(new Set([...cur.weeks, ...nxt.weeks])).sort((a, b) => a - b);
+                    cur.note = mergeNoteText(cur.note, nxt.note);
                 } else {
                     step2.push(cur);
                     cur = nxt;
@@ -1063,9 +1117,16 @@ object GdouSyncScript {
                 if (!resp.ok) return null;
                 const weeks = await resp.json();
                 if (!Array.isArray(weeks) || weeks.length === 0) return null;
+                let maxWeekNo = 0;
+                for (const w of weeks) {
+                    const n = Number(w && w.zs);
+                    if (Number.isInteger(n) && n >= 1 && n <= 30 && n > maxWeekNo) {
+                        maxWeekNo = n;
+                    }
+                }
                 return {
                     startDate: findSemesterStartDate(weeks),
-                    totalWeeks: weeks.length
+                    totalWeeks: maxWeekNo > 0 ? maxWeekNo : weeks.length
                 };
             } catch (e) {
                 return null;
@@ -1082,9 +1143,9 @@ object GdouSyncScript {
                 else if (xq.includes("海滨")) votes.haibin += 3;
                 else if (xq.includes("阳江")) votes.yangjiang += 3;
 
-                if (/广学楼|明德楼|钟海楼|博文楼|兴海楼|兴教楼|兴农楼|望海楼|图海楼|艺海楼|海科楼|海博楼|水产科技楼|主楼|科技楼/.test(loc)) votes.huguang += 1;
+                if (/广学楼|明德楼|钟海楼|博文楼|兴海楼|兴教楼|兴农楼|望海楼|图海楼|艺海楼|海科楼|海博楼|水产科技楼|第二实验综合楼|主楼|科技楼/.test(loc)) votes.huguang += 1;
                 else if (/慎思楼|海纳楼|厚为楼|博学楼|明辨楼|海科楼一|海行楼|济航楼|海阳馆|海驰楼|海润楼|厚德楼|铭德楼/.test(loc)) votes.yangjiang += 1;
-                else if (/^实\d|海滨|电教楼|济海楼/.test(loc)) votes.haibin += 1;
+                else if (/^实\d|海滨|轮机实验楼|电教楼|济海楼/.test(loc)) votes.haibin += 1;
             }
             let best = "";
             let maxV = 0;
@@ -1092,6 +1153,12 @@ object GdouSyncScript {
                 if (votes[k] > maxV) { maxV = votes[k]; best = k; }
             }
             return best;
+        }
+
+        function normalizeCourseRemark(val) {
+            const s = String(val || "").replace(/[\u00a0\s]+/g, " ").trim();
+            if (!s || s === "无" || s === "-" || s === "--" || s === "null") return "";
+            return s;
         }
 
         async function syncCoursesAndCalendar(xnm, xqm) {
@@ -1109,15 +1176,19 @@ object GdouSyncScript {
                 }),
                 fetchSemesterInfo(xnm, xqm)
             ]);
+            const rawText = await kbResp.text();
+            const trimmedRaw = String(rawText || "").trim();
             if (!kbResp.ok) {
+                if (trimmedRaw && !trimmedRaw.startsWith("{") && !trimmedRaw.startsWith("[")) {
+                    return { ok: false, error: classifyNonJsonHtml(rawText, "教务当前未返回课表数据，请确认已完成登录或评教后重试") };
+                }
                 return { ok: false, error: "HTTP " + kbResp.status + "，请确认已成功登录教务系统" };
             }
-            const rawText = await kbResp.text();
             let data;
             try {
                 data = JSON.parse(rawText);
             } catch (e) {
-                return { ok: false, error: "登录态可能已过期，请刷新教务页面重新登录后再点同步" };
+                return { ok: false, error: classifyNonJsonHtml(rawText, "登录态可能已过期，请刷新教务页面重新登录后再点同步") };
             }
             const kbList = Array.isArray(data && data.kbList) ? data.kbList : [];
             const sjkList = Array.isArray(data && data.sjkList) ? data.sjkList : [];
@@ -1140,7 +1211,8 @@ object GdouSyncScript {
                     courseType: String(raw.kcxzmc || "").trim(),
                     examMethod: String(raw.khfsmc || "").trim(),
                     classGroup: String(raw.jxbmc || "").trim(),
-                    totalHours: String(raw.zxs || "").trim()
+                    totalHours: String(raw.zxs || "").trim(),
+                    note: normalizeCourseRemark(raw.xkbz)
                 });
             }
             const practiceCourses = [];
@@ -1149,6 +1221,15 @@ object GdouSyncScript {
                 const pName = normalizeCourseName(raw.kcmc || raw.sjkcgs || "");
                 if (!pName) continue;
                 const wTxt = String(raw.qsjsz || raw.zcd || "").trim();
+                const pNoteParts = [];
+                if (raw.sjkcgs && raw.kcmc) {
+                    const desc = normalizeCourseRemark(raw.sjkcgs);
+                    if (desc) pNoteParts.push(desc);
+                }
+                const pLoc = normalizeCourseRemark(raw.cdmc);
+                if (pLoc) pNoteParts.push("地点:" + pLoc);
+                const pHours = normalizeCourseRemark(raw.zxs);
+                if (pHours) pNoteParts.push(pHours + "学时");
                 practiceCourses.push({
                     name: pName,
                     teacher: String(raw.jsxm || raw.xm || "").trim(),
@@ -1156,7 +1237,7 @@ object GdouSyncScript {
                     weeks: parseWeeks(wTxt),
                     credit: String(raw.xf || "").trim(),
                     courseType: String(raw.kcxzmc || "实践环节").trim(),
-                    note: String(raw.sjkcgs && raw.kcmc ? raw.sjkcgs : "").trim()
+                    note: pNoteParts.join(" · ")
                 });
             }
             const merged = mergeAndDistinctCourses(rawCourses);
@@ -1185,6 +1266,52 @@ object GdouSyncScript {
             return "";
         }
 
+        function resolveSemesterLabel(xqmmcVal, xqmVal, fallbackXqmVal, defaultLabel) {
+            const xq = String(xqmmcVal || "").trim();
+            if (xq === "1" || xq === "第一学期") return "第一学期";
+            if (xq === "2" || xq === "第二学期") return "第二学期";
+            if (xq === "3" || xq === "第三学期") return "第三学期";
+            if (xq) return xq;
+            const code = String(xqmVal || fallbackXqmVal || "").trim();
+            if (code === "3") return "第一学期";
+            if (code === "12") return "第二学期";
+            if (code === "16") return "第三学期";
+            return defaultLabel != null ? defaultLabel : "第一学期";
+        }
+
+        function resolveGradeExamNature(ksxz, cxbj, kcbj) {
+            const rawKsxz = String(ksxz || "").trim();
+            const rawCxbj = String(cxbj || "").trim();
+            const rawKcbj = String(kcbj || "").trim();
+            const isRetakeFlag = rawCxbj === "1" || rawCxbj === "是" || rawCxbj.includes("重修") || rawKcbj.includes("重修");
+            if (isRetakeFlag && (!rawKsxz || rawKsxz === "正常考试" || rawKsxz === "初修")) {
+                return "重修";
+            }
+            if (rawKcbj && rawKcbj !== "主修" && (!rawKsxz || rawKsxz === "正常考试")) {
+                return rawKcbj;
+            }
+            return rawKsxz || "正常考试";
+        }
+
+        function formatLevelExamDetail(it) {
+            const parts = [];
+            if (it.tlcj) parts.push("听力:" + String(it.tlcj).trim());
+            if (it.ydcj) parts.push("阅读:" + String(it.ydcj).trim());
+            if (it.xzcj) parts.push("写作:" + String(it.xzcj).trim());
+            if (it.zhcj) parts.push("综合:" + String(it.zhcj).trim());
+            if (it.bscj) parts.push("笔试:" + String(it.bscj).trim());
+            if (it.kscj) parts.push("口/机试:" + String(it.kscj).trim());
+            const ksfs = String(it.ksfs || "").trim();
+            if (ksfs) {
+                let dup = false;
+                for (const p of parts) {
+                    if (p.includes(ksfs)) { dup = true; break; }
+                }
+                if (!dup) parts.push(ksfs);
+            }
+            return parts.join(" · ");
+        }
+
         function scrapeGradesFromCurrentDom() {
             const rows = Array.from(document.querySelectorAll("#tabGrid tr.jqgrow, table.ui-jqgrid-btable tr.jqgrow"));
             const out = [];
@@ -1192,15 +1319,26 @@ object GdouSyncScript {
                 const courseName = readCellByCol(row, ["kcmc"]);
                 if (!courseName) continue;
                 const xnmText = readCellByCol(row, ["xnmmc", "xnm"]) || "未知学年";
-                const rawXq = readCellByCol(row, ["xqmmc", "xqm"]);
-                const semText = (rawXq === "1" || rawXq === "3") ? "第一学期"
-                    : ((rawXq === "2" || rawXq === "12") ? "第二学期" : (rawXq || "第一学期"));
+                const semText = resolveSemesterLabel(readCellByCol(row, ["xqmmc"]), readCellByCol(row, ["xqm"]), "", "第一学期");
                 const score = readCellByCol(row, ["cj", "bfzcj"]);
                 const jd = parseFloat(readCellByCol(row, ["jd"]));
                 const xf = parseFloat(readCellByCol(row, ["xf"]));
                 const courseType = readCellByCol(row, ["kcxzmc", "kclbmc"]);
-                const examNature = readCellByCol(row, ["ksxz"]) || "正常考试";
-                const teacher = readCellByCol(row, ["jsxm"]);
+                const examNature = resolveGradeExamNature(
+                    readCellByCol(row, ["ksxz"]),
+                    readCellByCol(row, ["cxbj"]),
+                    readCellByCol(row, ["kcbj"])
+                );
+                const teacher = readCellByCol(row, ["jsxm", "rkjs"]);
+                const subParts = [];
+                const pscj = readCellByCol(row, ["pscj"]);
+                const qzcj = readCellByCol(row, ["qzcj"]);
+                const sycj = readCellByCol(row, ["sycj"]);
+                const qmcj = readCellByCol(row, ["qmcj"]);
+                if (pscj) subParts.push("平时:" + pscj);
+                if (qzcj) subParts.push("期中:" + qzcj);
+                if (sycj) subParts.push("实验:" + sycj);
+                if (qmcj) subParts.push("期末:" + qmcj);
                 out.push({
                     academicYear: xnmText,
                     semester: semText,
@@ -1211,7 +1349,36 @@ object GdouSyncScript {
                     courseType,
                     examNature,
                     teacher,
-                    breakdown: ""
+                    breakdown: subParts.join(" · ")
+                });
+            }
+            return out;
+        }
+
+        function scrapeLevelExamsFromCurrentDom() {
+            const rows = Array.from(document.querySelectorAll("#tabGrid tr.jqgrow, table.ui-jqgrid-btable tr.jqgrow"));
+            const out = [];
+            for (const row of rows) {
+                const djksmc = readCellByCol(row, ["djksmc"]);
+                const examName = djksmc || readCellByCol(row, ["ksmc"]);
+                const score = readCellByCol(row, ["cj", "zcj", "dj"]);
+                if (!examName || !score) continue;
+                const tlcj = readCellByCol(row, ["tlcj"]);
+                const ydcj = readCellByCol(row, ["ydcj"]);
+                const xzcj = readCellByCol(row, ["xzcj"]);
+                const zhcj = readCellByCol(row, ["zhcj"]);
+                const bscj = readCellByCol(row, ["bscj"]);
+                const kscj = readCellByCol(row, ["kscj"]);
+                const ksfs = readCellByCol(row, ["ksfs"]);
+                const hasLevelSignal = Boolean(djksmc || tlcj || ydcj || xzcj || bscj || kscj) ||
+                    /四级|六级|CET|计算机|普通话|英语等级/i.test(examName);
+                if (!hasLevelSignal) continue;
+                const examDate = readCellByCol(row, ["ksrq", "xnmc"]);
+                out.push({
+                    examName,
+                    score,
+                    examDate,
+                    detail: formatLevelExamDetail({ tlcj, ydcj, xzcj, zhcj, bscj, kscj, ksfs })
                 });
             }
             return out;
@@ -1225,7 +1392,7 @@ object GdouSyncScript {
                 const examTimeRaw = readCellByCol(row, ["kssj"]);
                 if (!courseName || !examTimeRaw) continue;
                 const academicYear = readCellByCol(row, ["xnmc", "xnmmc", "xnm"]);
-                const semester = readCellByCol(row, ["xqmmc", "xqm"]);
+                const semester = resolveSemesterLabel(readCellByCol(row, ["xqmmc"]), readCellByCol(row, ["xqm"]), "", "");
                 const location = readCellByCol(row, ["cdmc", "ksmc"]);
                 const seatNumber = readCellByCol(row, ["zwh"]);
                 const ksmc = readCellByCol(row, ["ksmc"]);
@@ -1247,40 +1414,39 @@ object GdouSyncScript {
         }
 
         async function syncLevelExamsGentle() {
-            const eps = [
+            const discovered = await discoverMenuEndpoints();
+            const eps = Array.from(new Set([
+                ...(discovered.levelExamEps || []),
                 "/cjcx/djkscx_cxXsDjksxxIndex.html?doType=query&gnmkdm=N305010",
                 "/cjcx/djkscx_cxXsDjksxxIndex.html?doType=query&gnmkdm=N358115"
-            ];
-            const form = "_search=false&nd=" + Date.now() + "&queryModel.showCount=100&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
+            ]));
             for (const ep of eps) {
                 try {
-                    const resp = await fetchJwJsonWithFallback(ep, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: form,
-                        credentials: "include"
-                    });
-                    if (!resp.ok) continue;
-                    const json = JSON.parse(await resp.text());
-                    const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-                    const mapped = items.map(it => {
+                    const res = await fetchPaginatedJwItems(
+                        ep,
+                        pageNo => "_search=false&nd=" + Date.now() + "&queryModel.showCount=200&queryModel.currentPage=" + pageNo + "&queryModel.sortName=&queryModel.sortOrder=asc&time=0",
+                        5,
+                        ""
+                    );
+                    if (!res.ok) continue;
+                    const mapped = [];
+                    const seen = new Set();
+                    for (const it of res.items) {
+                        if (!it) continue;
                         const examName = String(it.djksmc || it.ksmc || "").trim();
                         const score = String(it.cj || it.zcj || it.dj || "").trim();
+                        if (!examName || !score) continue;
                         const examDate = String(it.ksrq || it.xnmc || "").trim();
-                        const parts = [];
-                        if (it.tlcj) parts.push("听力:" + it.tlcj);
-                        if (it.ydcj) parts.push("阅读:" + it.ydcj);
-                        if (it.xzcj) parts.push("写作:" + it.xzcj);
-                        if (it.zhcj) parts.push("综合:" + it.zhcj);
-                        return { examName, score, examDate, detail: parts.join(" · ") };
-                    }).filter(x => x.examName.length > 0 && x.score.length > 0);
+                        const detail = formatLevelExamDetail(it);
+                        const key = examName + "|" + score + "|" + examDate;
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        mapped.push({ examName, score, examDate, detail });
+                    }
                     if (mapped.length > 0) return mapped;
                 } catch (_) {}
             }
-            return [];
+            return scrapeLevelExamsFromCurrentDom();
         }
 
         async function syncGrades() {
@@ -1299,6 +1465,7 @@ object GdouSyncScript {
                     let m;
                     while ((m = epRe.exec(html)) !== null) {
                         const rawEp = m[1];
+                        if (rawEp.includes("djkscx")) continue;
                         const sep = rawEp.includes("?") ? "&" : "?";
                         if (!rawEp.includes("doType=query")) {
                             pageDiscovered.push(rawEp + sep + "doType=query&gnmkdm=N305005");
@@ -1311,7 +1478,7 @@ object GdouSyncScript {
 
             const discovered = await discoverMenuEndpoints();
             const endpoints = Array.from(new Set([
-                ...discovered.gradeEps,
+                ...(discovered.gradeEps || []),
                 ...pageDiscovered,
                 "/cjcx/cjcx_cxDcListByXs.html?doType=query&gnmkdm=N305005",
                 "/cjcx/cjcx_cxXsgrcj.html?doType=query&gnmkdm=N305005",
@@ -1322,11 +1489,14 @@ object GdouSyncScript {
             ]));
 
             function mapGradeItems(items) {
-                return items.map(it => {
-                    const xnmText = String(it.xnmmc || (it.xnm ? (it.xnm + "-" + (Number(it.xnm) + 1)) : "")).trim();
-                    const rawXq = String(it.xqmmc || it.xqm || "").trim();
-                    const semText = rawXq === "1" || rawXq === "3" ? "第一学期"
-                        : (rawXq === "2" || rawXq === "12" ? "第二学期" : (rawXq || "第一学期"));
+                const mapped = [];
+                const seen = new Set();
+                for (const it of items) {
+                    if (!it) continue;
+                    const courseName = String(it.kcmc || "").trim();
+                    if (!courseName) continue;
+                    const xnmText = String(it.xnmmc || (it.xnm ? (it.xnm + "-" + (Number(it.xnm) + 1)) : "")).trim() || "未知学年";
+                    const semText = resolveSemesterLabel(it.xqmmc, it.xqm, "", "第一学期");
                     const jd = parseFloat(it.jd);
                     const xf = parseFloat(it.xf);
                     const subParts = [];
@@ -1334,50 +1504,56 @@ object GdouSyncScript {
                     if (it.qzcj) subParts.push("期中:" + it.qzcj);
                     if (it.sycj) subParts.push("实验:" + it.sycj);
                     if (it.qmcj) subParts.push("期末:" + it.qmcj);
-                    return {
-                        academicYear: xnmText || "未知学年",
+                    const score = String(it.cj || it.bfzcj || "").trim();
+                    const examNature = resolveGradeExamNature(it.ksxz, it.cxbj, it.kcbj);
+                    const key = xnmText + "|" + semText + "|" + courseName + "|" + score + "|" + examNature;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    mapped.push({
+                        academicYear: xnmText,
                         semester: semText,
-                        courseName: String(it.kcmc || "").trim(),
-                        score: String(it.cj || it.bfzcj || "").trim(),
+                        courseName,
+                        score,
                         gradePoint: isNaN(jd) ? 0.0 : jd,
                         credit: isNaN(xf) ? 0.0 : xf,
                         courseType: String(it.kcxzmc || it.kclbmc || "").trim(),
-                        examNature: String(it.ksxz || "正常考试").trim(),
-                        teacher: String(it.jsxm || "").trim(),
+                        examNature,
+                        teacher: String(it.jsxm || it.rkjs || "").trim(),
                         breakdown: subParts.join(" · ")
-                    };
-                }).filter(g => g.courseName.length > 0);
+                    });
+                }
+                return mapped;
             }
 
             const levelExams = await syncLevelExamsGentle();
 
             async function queryGradesOnce(ep, xnmVal, xqmVal) {
-                const form = "xnm=" + encodeURIComponent(xnmVal) +
-                    "&xqm=" + encodeURIComponent(xqmVal) +
-                    "&kcbj=&_search=false&nd=" + Date.now() +
-                    "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
-                const resp = await fetchJwJsonWithFallback(ep, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                        "x-requested-with": "XMLHttpRequest"
-                    },
-                    body: form,
-                    credentials: "include"
-                });
-                if (!resp.ok) return null;
-                const json = JSON.parse(await resp.text());
-                return Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                return await fetchPaginatedJwItems(
+                    ep,
+                    pageNo => "xnm=" + encodeURIComponent(xnmVal) +
+                        "&xqm=" + encodeURIComponent(xqmVal) +
+                        "&kcbj=&_search=false&nd=" + Date.now() +
+                        "&queryModel.showCount=200&queryModel.currentPage=" + pageNo +
+                        "&queryModel.sortName=&queryModel.sortOrder=asc&time=0",
+                    10,
+                    "需先在教务页确认通知或完成评教（也可切「校外免校园网」同步）"
+                );
             }
 
             // Try ALL endpoints (NEVER break on first empty [] so cjcx_cxDcListByXs / cjcx_cxDgXscj all get tried!)
             const workingEps = [];
+            let lastHttpError = 0;
+            let htmlInterceptHint = "";
             for (const ep of endpoints) {
                 try {
-                    const items = await queryGradesOnce(ep, "", "");
-                    if (items === null) continue;
+                    const res = await queryGradesOnce(ep, "", "");
+                    if (!res.ok) {
+                        if (res.status >= 400) lastHttpError = res.status;
+                        if (!htmlInterceptHint && res.htmlHint) htmlInterceptHint = res.htmlHint;
+                        continue;
+                    }
                     workingEps.push(ep);
-                    const mapped = mapGradeItems(items);
+                    const mapped = mapGradeItems(res.items);
                     if (mapped.length > 0) {
                         return { ok: true, grades: mapped, levelExams };
                     }
@@ -1386,19 +1562,19 @@ object GdouSyncScript {
                 }
             }
 
-            // Fallback: query recent 4 academic years gently across working endpoints
+            // Fallback: query recent 6 academic years gently across working endpoints (covers 4-5 year + extended programs)
             if (workingEps.length > 0) {
                 const curY = Number(getDefaultAcademicYear());
                 for (const ep of workingEps.slice(0, 3)) {
                     const collected = [];
                     const seen = new Set();
-                    for (let offset = 0; offset < 4; offset++) {
+                    for (let offset = 0; offset < 6; offset++) {
                         const y = String(curY - offset);
                         try {
-                            const items = await queryGradesOnce(ep, y, "");
-                            if (items && items.length > 0) {
-                                for (const g of mapGradeItems(items)) {
-                                    const key = g.academicYear + "|" + g.semester + "|" + g.courseName + "|" + g.score;
+                            const res = await queryGradesOnce(ep, y, "");
+                            if (res.ok && res.items.length > 0) {
+                                for (const g of mapGradeItems(res.items)) {
+                                    const key = g.academicYear + "|" + g.semester + "|" + g.courseName + "|" + g.score + "|" + g.examNature;
                                     if (!seen.has(key)) {
                                         seen.add(key);
                                         collected.push(g);
@@ -1419,6 +1595,12 @@ object GdouSyncScript {
                 return { ok: true, grades: domGrades, levelExams };
             }
 
+            if (htmlInterceptHint) {
+                return { ok: false, error: htmlInterceptHint };
+            }
+            if (lastHttpError >= 400) {
+                return { ok: false, error: "成绩接口请求失败(HTTP " + lastHttpError + ")，请刷新教务页后重试" };
+            }
             return { ok: false, error: "暂未获取到成绩（可能当前未出分或需先在教务页确认学业通知）" };
         }
 
@@ -1434,7 +1616,7 @@ object GdouSyncScript {
 
             const discovered = await discoverMenuEndpoints();
             const endpoints = Array.from(new Set([
-                ...discovered.examEps,
+                ...(discovered.examEps || []),
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105",
                 "/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358110"
             ]));
@@ -1447,91 +1629,58 @@ object GdouSyncScript {
             }
 
             async function queryExamsOnce(ep, qXnm, qXqm) {
-                const form = "xnm=" + encodeURIComponent(qXnm) + "&xqm=" + encodeURIComponent(qXqm) +
-                    "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
-                    "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
-                const resp = await fetchJwJsonWithFallback(ep, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                        "x-requested-with": "XMLHttpRequest"
-                    },
-                    body: form,
-                    credentials: "include"
-                });
-                if (!resp.ok) return null;
-                const json = JSON.parse(await resp.text());
-                const items = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-                return items.map(it => ({
-                    academicYear: String(it.xnmc || qXnm || xnm).trim(),
-                    semester: String(it.xqmmc || (qXqm === "3" ? "第一学期" : (qXqm === "12" ? "第二学期" : ""))).trim(),
-                    courseName: String(it.kcmc || "").trim(),
-                    examTimeRaw: String(it.kssj || "").trim(),
-                    location: String(it.cdmc || it.ksmc || "").trim(),
-                    seatNumber: String(it.zwh || "").trim(),
-                    examType: formatExamTypeLabel(it),
-                    campus: String(it.cdxqmc || "").trim()
-                })).filter(ex => ex.courseName.length > 0);
+                const res = await fetchPaginatedJwItems(
+                    ep,
+                    pageNo => "xnm=" + encodeURIComponent(qXnm) + "&xqm=" + encodeURIComponent(qXqm) +
+                        "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
+                        "&queryModel.showCount=200&queryModel.currentPage=" + pageNo +
+                        "&queryModel.sortName=&queryModel.sortOrder=asc&time=0",
+                    10,
+                    "需先在上方教务页确认通知或完成评教（也可切「校外免校园网」同步）"
+                );
+                if (!res.ok) return res;
+                const mapped = [];
+                const seen = new Set();
+                for (const it of res.items) {
+                    if (!it) continue;
+                    const courseName = String(it.kcmc || "").trim();
+                    if (!courseName) continue;
+                    const academicYear = String(it.xnmc || qXnm || xnm).trim();
+                    const semester = resolveSemesterLabel(it.xqmmc, it.xqm, qXqm, "");
+                    const examTimeRaw = String(it.kssj || "").trim();
+                    const seatNumber = String(it.zwh || "").trim();
+                    const key = academicYear + "|" + semester + "|" + courseName + "|" + examTimeRaw + "|" + seatNumber;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    mapped.push({
+                        academicYear,
+                        semester,
+                        courseName,
+                        examTimeRaw,
+                        location: String(it.cdmc || it.ksmc || "").trim(),
+                        seatNumber,
+                        examType: formatExamTypeLabel(it),
+                        campus: String(it.cdxqmc || "").trim()
+                    });
+                }
+                return { ok: true, status: res.status, exams: mapped, htmlHint: "" };
             }
 
             let workingEp = null;
             let lastHttpError = 0;
             let htmlInterceptHint = "";
 
-            function classifyNonJsonHtml(rawText) {
-                const t = String(rawText || "");
-                if (/未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(t)) {
-                    return "需先在上方教务页确认通知或完成评教（也可切「校外免校园网」同步）";
-                }
-                if (/统一身份认证|cas\/login|请先登录|登录超时|会话超时/.test(t)) {
-                    return "登录状态已过期，请刷新教务页重新登录";
-                }
-                if (/无操作权限|无权限|未开放|非查询时间/.test(t)) {
-                    return "教务当前暂未开放考试查询入口";
-                }
-                return "教务返回了非数据页，建议切「校外免校园网」或先点进「查考场座位」后重试";
-            }
-
             for (const ep of endpoints) {
                 try {
-                    const form = "xnm=" + encodeURIComponent(xnm) + "&xqm=" + encodeURIComponent(xqm) +
-                        "&ksmcdmb_id=&kch=&kc=&ksrq=&kkbm_id=&_search=false&nd=" + Date.now() +
-                        "&queryModel.showCount=200&queryModel.currentPage=1&queryModel.sortName=&queryModel.sortOrder=asc&time=0";
-                    const resp = await fetchJwJsonWithFallback(ep, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                            "x-requested-with": "XMLHttpRequest"
-                        },
-                        body: form,
-                        credentials: "include"
-                    });
-                    if (!resp.ok) {
-                        if (resp.status >= 400) lastHttpError = resp.status;
+                    const res = await queryExamsOnce(ep, xnm, xqm);
+                    if (!res.ok) {
+                        if (res.status >= 400) lastHttpError = res.status;
+                        if (!htmlInterceptHint && res.htmlHint) htmlInterceptHint = res.htmlHint;
                         continue;
                     }
-                    const rawText = await resp.text();
-                    let json;
-                    try {
-                        json = JSON.parse(rawText);
-                    } catch (_) {
-                        if (!htmlInterceptHint) htmlInterceptHint = classifyNonJsonHtml(rawText);
-                        continue;
-                    }
-                    const rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
-                    const exams = rawItems.map(it => ({
-                        academicYear: String(it.xnmc || xnm).trim(),
-                        semester: String(it.xqmmc || (xqm === "3" ? "第一学期" : (xqm === "12" ? "第二学期" : ""))).trim(),
-                        courseName: String(it.kcmc || "").trim(),
-                        examTimeRaw: String(it.kssj || "").trim(),
-                        location: String(it.cdmc || it.ksmc || "").trim(),
-                        seatNumber: String(it.zwh || "").trim(),
-                        examType: formatExamTypeLabel(it),
-                        campus: String(it.cdxqmc || "").trim()
-                    })).filter(ex => ex.courseName.length > 0);
                     if (!workingEp) workingEp = ep;
-                    if (exams.length > 0) {
-                        return { ok: true, exams };
+                    if (res.exams.length > 0) {
+                        return { ok: true, exams: res.exams };
                     }
                 } catch (e) {
                     // Try next endpoint
@@ -1541,9 +1690,9 @@ object GdouSyncScript {
             // Fallback 1: if term-scoped query returned 0, try whole-year query once
             if (workingEp && xqm) {
                 try {
-                    const yearExams = await queryExamsOnce(workingEp, xnm, "");
-                    if (yearExams && yearExams.length > 0) {
-                        return { ok: true, exams: yearExams };
+                    const yearRes = await queryExamsOnce(workingEp, xnm, "");
+                    if (yearRes.ok && yearRes.exams.length > 0) {
+                        return { ok: true, exams: yearRes.exams };
                     }
                 } catch (_) {}
             }
@@ -1551,9 +1700,9 @@ object GdouSyncScript {
             // Fallback 2: if current year also returned 0, try unrestricted query once (catches cross-term / retake exams)
             if (workingEp) {
                 try {
-                    const allExams = await queryExamsOnce(workingEp, "", "");
-                    if (allExams && allExams.length > 0) {
-                        return { ok: true, exams: allExams };
+                    const allRes = await queryExamsOnce(workingEp, "", "");
+                    if (allRes.ok && allRes.exams.length > 0) {
+                        return { ok: true, exams: allRes.exams };
                     }
                 } catch (_) {}
             }

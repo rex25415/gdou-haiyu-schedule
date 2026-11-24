@@ -18,6 +18,21 @@ updates:
           - "com.android.*"
     labels:
       - "dependencies"
+    ignore:
+      # Toolchain locked to AGP 8.x / Kotlin 2.0.x / Gradle 8.x / Compose 2025.x;
+      # avoid noisy unbuildable major jumps (like Gradle 9.x / AGP 9.x / Kotlin 2.4 / Compose 2026)
+      - dependency-name: "gradle-wrapper"
+        versions: [">= 9.0.0"]
+      - dependency-name: "com.android.application"
+        versions: [">= 9.0.0"]
+      - dependency-name: "org.jetbrains.kotlin*"
+        versions: [">= 2.1.0"]
+      - dependency-name: "androidx.compose:compose-bom"
+        versions: [">= 2026.0.0"]
+      - dependency-name: "org.jetbrains.kotlinx:kotlinx-serialization-json"
+        versions: [">= 1.8.0"]
+      - dependency-name: "org.jetbrains.kotlinx:kotlinx-coroutines-android"
+        versions: [">= 1.10.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -137,5 +137,33 @@ class GdouSyncScriptTest {
         assertTrue(roomQueryJs.contains("__haiyuRoomQuerySeq"))
         assertTrue(roomQueryJs.contains("ensureWfwJwSessionIfNeeded"))
         assertTrue(roomQueryJs.contains("zcdMask"))
+        assertTrue(roomQueryJs.contains("fetchPaginatedJwItems"))
+        assertTrue(roomQueryJs.contains("第二实验综合楼|轮机实验楼|水产科技楼|海科楼一"))
+        assertFalse(roomQueryJs.contains("\$COMMON"))
+    }
+
+    @Test
+    fun upgradedSyncAndDomScriptsContainPaginationRetakeAndMenuIsolationGuards() {
+        val syncJs = GdouSyncScript.buildSyncScript(
+            mode = "all",
+            academicYear = "2026",
+            semesterCode = "16",
+            termLabel = "2026-2027 第三学期"
+        )
+        assertTrue(syncJs.contains("fetchPaginatedJwItems"))
+        assertTrue(syncJs.contains("classifyNonJsonHtml"))
+        assertTrue(syncJs.contains("levelExamEps"))
+        assertTrue(syncJs.contains("resolveGradeExamNature"))
+        assertTrue(syncJs.contains("resolveSemesterLabel"))
+        assertTrue(syncJs.contains("offset < 6"))
+        assertTrue(syncJs.contains("normalizeCourseRemark(raw.xkbz)"))
+        assertTrue(syncJs.contains("maxWeekNo"))
+        assertFalse(syncJs.contains("\$COMMON"))
+
+        val domJs = GdouSyncScript.buildScrapeCurrentPageDomScript()
+        assertTrue(domJs.contains("scrapeLevelExamsFromCurrentDom"))
+        assertTrue(domJs.contains("scrapeGradesFromCurrentDom"))
+        assertTrue(domJs.contains("scrapeExamsFromCurrentDom"))
+        assertFalse(domJs.contains("\$COMMON"))
     }
 }
