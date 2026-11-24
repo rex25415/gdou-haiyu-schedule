@@ -680,7 +680,7 @@ fun AboutUpdateWorkbenchSheet(
                     Text(
                         text = updateStatusSummary
                             ?: if (availableUpdate != null) "可升级至最新版本 v${availableUpdate.versionName}"
-                            else "采用海屿开源统一发布签名打包，后续覆盖升级自动保留你的全部数据与设置。",
+                            else "采用海屿开源统一发布签名打包，覆盖升级自动保留全部数据。目前通常每周稳健更新 1～2 版（教务改版或紧急故障随时加急修复）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (availableUpdate != null) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -758,7 +758,7 @@ fun AboutUpdateWorkbenchSheet(
                     )
                     SettingSwitchRow(
                         title = "接收抢先体验版（Beta）",
-                        subtitle = "开启后可提前获取 GitHub Pre-release 预览版本，关闭后仅接收正式版",
+                        subtitle = "正式版通常每周 1～2 更；开启后可提前接收 GitHub Pre-release 预览版，关闭则仅接收正式版",
                         checked = settings.receiveBetaUpdates,
                         onCheckedChange = { v -> onUpdateSettings { it.copy(receiveBetaUpdates = v) } }
                     )

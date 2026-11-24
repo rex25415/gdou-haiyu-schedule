@@ -3,6 +3,13 @@
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
 ## [Unreleased]
+- **同步完整性与准确性升级**：
+  - 全链路补齐正方教务多页分页拉取（空教室、成绩、考试、等级考试），拆分 `levelExamEps` 与 `gradeEps` 菜单发现并修复 HTTP 200 非 JSON（评教/通知拦截）诊断；
+  - 修复短学期 `16` / `xqmmc="3"`、`cxbj`/`kcbj` 重修与辅修判定、五年制学年跨度、选课备注 `xkbz`（不覆盖本地笔记）、实践课地点/学时与扩展教学楼识别。
+- **架构模块化、性能与大字适配**：
+  - 拆分 `ScheduleWeekGrid`、`AcademicGradesPane`、`AcademicExamsPane`、`EmptyClassroomSheet` 与共享 `PracticeCoursesBottomSheet`，隔离课表 30 秒倒计时重绘范围，并加入隐藏教务 `WebView` 切页暂停与脱敏诊断一键复制；
+  - 成绩页新增「挂科/补重」与「实践(N)」入口，调整筛选条自适应排版兼容 1.3 倍系统字体；
+  - 在设置页、`README.md` 与下载主页明确后续 **每周 1～2 版** 的稳健更新节奏，并收紧 `.github/dependabot.yml` 依赖升级上限。
 - **更新与云端运维基建**：
   - 加固 `AppUpdateManager.cleanReleaseNotes`：支持 `<!-- APP_NOTES_START -->` 摘要区间与校验区块自动止步，改为整行截断避免弹窗文案腰斩；
   - 支持从 `docs/latest.json` 读取动态加速节点 `mirrorPrefixes`，并补充「接收抢先体验版（Beta）」内测通道开关与机型/同步通道脱敏排障信息；
