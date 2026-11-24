@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      dry_run:
+        description: '仅云端校验与正式签名打包（不提交不公开 Release，用于验证 Secrets 与发版流水线）'
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - 'v*.*.*'
@@ -120,13 +125,28 @@ jobs:
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          printf '%s' "$KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/haiyu-release.jks"
-          cat > keystore.properties <<EOF
-          storeFile=$RUNNER_TEMP/haiyu-release.jks
-          storePassword=$STORE_PASS
-          keyAlias=$KEY_ALIAS
-          keyPassword=$KEY_PASS
-          EOF
+          python3 - <<'PY'
+          import base64, os, pathlib
+          runner_tmp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          jks_path = runner_tmp / "haiyu-release.jks"
+          b64 = "".join(os.environ["KEYSTORE_B64"].split())
+          jks_path.write_bytes(base64.b64decode(b64))
+          def esc(val: str) -> str:
+              return (
+                  val.replace("\\", "\\\\")
+                     .replace("\n", "\\n")
+                     .replace("\r", "\\r")
+                     .replace("=", "\\=")
+                     .replace(":", "\\:")
+              )
+          props = "\n".join([
+              f"storeFile={esc(str(jks_path))}",
+              f"storePassword={esc(os.environ['STORE_PASS'])}",
+              f"keyAlias={esc(os.environ['KEY_ALIAS'])}",
+              f"keyPassword={esc(os.environ['KEY_PASS'])}",
+          ]) + "\n"
+          pathlib.Path("keystore.properties").write_text(props, encoding="utf-8")
+          PY
 
       - name: Run unit tests, Lint & signed Release APK build
         run: |
@@ -168,6 +188,7 @@ jobs:
           TAG_NAME: ${{ steps.meta.outputs.tag_name }}
           VER_NAME: ${{ steps.meta.outputs.version_name }}
           IS_PRE: ${{ steps.meta.outputs.is_prerelease }}
+          IS_DRY: ${{ github.event.inputs.dry_run }}
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           APK_BYTES: ${{ steps.apk.outputs.apk_bytes }}
           APK_MB: ${{ steps.apk.outputs.apk_mb }}
@@ -179,12 +200,13 @@ jobs:
           tag = os.environ["TAG_NAME"]
           ver = os.environ["VER_NAME"]
           is_pre = os.environ["IS_PRE"] == "true"
+          is_dry = os.environ.get("IS_DRY") == "true"
           apk_name = os.environ["APK_NAME"]
           apk_bytes = int(os.environ["APK_BYTES"])
           apk_mb = os.environ["APK_MB"]
           apk_sha = os.environ["APK_SHA"]
           cert_sha = os.environ["EXPECTED_CERT_SHA256"]
-          raw_notes = (os.environ.get("INPUT_NOTES") or "").strip()
+          raw_notes = (os.environ.get("INPUT_NOTES") or "").replace("\\n", "\n").strip()
           if not raw_notes:
               raw_notes = (
                   f"💬 致各位海大同学：海屿空间 {tag} 已通过云端自动化测试并完成统一签名构建，覆盖安装自动保留全部课表与设置！\n\n"
@@ -208,7 +230,7 @@ jobs:
           ])
           pathlib.Path(os.environ["RUNNER_TEMP"], "release_notes.md").write_text(notes_md, encoding="utf-8")
 
-          if not is_pre:
+          if not is_pre and not is_dry:
               latest_path = pathlib.Path("docs/latest.json")
               existing = json.loads(latest_path.read_text(encoding="utf-8")) if latest_path.exists() else {}
               mirrors = existing.get("mirrorPrefixes") or [
@@ -245,21 +267,23 @@ jobs:
           PY
 
       - name: Commit updated manifests back to main (workflow_dispatch stable)
-        if: github.event_name == 'workflow_dispatch' && steps.meta.outputs.is_prerelease != 'true'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && steps.meta.outputs.is_prerelease != 'true'
         run: |
           if [ -n "$(git status --porcelain app/build.gradle.kts docs/latest.json docs/index.html)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add app/build.gradle.kts docs/latest.json docs/index.html
-            git commit -m "chore(release): publish ${{ steps.meta.outputs.tag_name }} [skip ci]"
+            git commit -m "chore(release): publish ${{ steps.meta.outputs.tag_name }}"
             git push origin HEAD:main
           fi
 
       - name: Publish GitHub Release & upload signed APK
+        if: github.event.inputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ steps.meta.outputs.tag_name }}
           IS_PRE: ${{ steps.meta.outputs.is_prerelease }}
+          IS_DRY: ${{ github.event.inputs.dry_run }}
           APK_OUT: ${{ steps.apk.outputs.apk_path }}
         run: |
           PRE_FLAG=""
@@ -278,6 +302,19 @@ jobs:
           else
             gh release create "$TAG_NAME" "$APK_OUT" $PRE_FLAG $TARGET_OPT --title "$TITLE" --notes-file "$RUNNER_TEMP/release_notes.md"
           fi
+
+      - name: Write dry-run verification summary
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          {
+            echo "### 云端正式签名演练通过（Dry Run）"
+            echo ""
+            echo "- 目标版本：\`${{ steps.meta.outputs.tag_name }}\` (build \`${{ steps.meta.outputs.version_code }}\`)"
+            echo "- APK 文件：\`${{ steps.meta.outputs.apk_name }}\`"
+            echo "- APK 大小：\`${{ steps.apk.outputs.apk_bytes }}\` bytes (${{ steps.apk.outputs.apk_mb }} MB)"
+            echo "- APK SHA-256：\`${{ steps.apk.outputs.apk_sha256 }}\`"
+            echo "- 证书指纹匹配预期：\`$EXPECTED_CERT_SHA256\` ✅"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Always scrub temporary signing files
         if: always()
