@@ -136,7 +136,8 @@ fun SettingsScreen(
     @Suppress("UNUSED_PARAMETER") onImportShareCode: (String) -> Unit = {},
     onLoadDemoData: () -> Unit,
     onLogoutJwSession: () -> Unit,
-    onClearAllData: () -> Unit
+    onClearAllData: () -> Unit,
+    onOpenCampusServices: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -265,7 +266,7 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 val legacyVer = legacyInstall.versionName.removePrefix("v").removePrefix("V")
                                 Text(
-                                    text = "检测到旧版海屿课表（v$legacyVer）仍留在手机上",
+                                    text = "检测到旧版（v$legacyVer）仍留在手机上",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -378,14 +379,30 @@ fun SettingsScreen(
                         Text("编辑", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedButton(
-                        onClick = { showBellRefDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Rounded.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("查看三校区作息速查表", maxLines = 1, softWrap = false)
+                        OutlinedButton(
+                            onClick = { showBellRefDialog = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Rounded.Schedule, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("三校区作息表", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        FilledTonalButton(
+                            onClick = onOpenCampusServices,
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("官网校历与公告", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }

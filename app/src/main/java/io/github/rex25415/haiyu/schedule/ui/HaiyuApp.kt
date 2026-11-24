@@ -55,7 +55,11 @@ import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.IcsExporter
 import io.github.rex25415.haiyu.schedule.data.ScheduleImageExporter
 import io.github.rex25415.haiyu.schedule.reminder.ClassReminderScheduler
+import io.github.rex25415.haiyu.schedule.data.CampusNoticeItem
+import io.github.rex25415.haiyu.schedule.data.CampusOfficialService
 import io.github.rex25415.haiyu.schedule.ui.components.AppUpdateDialog
+import io.github.rex25415.haiyu.schedule.ui.components.CampusServicesBottomSheet
+import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
 import io.github.rex25415.haiyu.schedule.ui.screens.AcademicScreen
 import io.github.rex25415.haiyu.schedule.ui.screens.ScheduleScreen
 import io.github.rex25415.haiyu.schedule.ui.screens.SettingsScreen
@@ -104,6 +108,8 @@ fun HaiyuApp(
     var showUpdateDialog by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateStatusSummary by remember { mutableStateOf<String?>(null) }
+    var showCampusServicesSheet by remember { mutableStateOf(false) }
+    var pendingNoticeForTask by remember { mutableStateOf<CampusNoticeItem?>(null) }
 
     // Zero-permission legacy package (cn.gdou.haiyu.schedule <= v2.7.0) detection, refreshed on every resume!
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -449,6 +455,7 @@ fun HaiyuApp(
                                     showToast(msg)
                                 },
                                 onNavigateBackToSchedule = { currentTab = 0 },
+                                onOpenCampusServices = { showCampusServicesSheet = true },
                                 onSyncFinishedJumpSchedule = { currentTab = 0 }
                             )
                         }
@@ -570,7 +577,8 @@ fun HaiyuApp(
                                     val next = !snapshot.settings.compactScheduleBanner
                                     repo.updateSettings { it.copy(compactScheduleBanner = next) }
                                     showToast(if (next) "已收起为极简预告条，课表视野更开阔" else "已展开完整下节看板")
-                                }
+                                },
+                                onOpenCampusServices = { showCampusServicesSheet = true }
                             )
 
                             2 -> AcademicScreen(
@@ -768,12 +776,65 @@ fun HaiyuApp(
                                     repo.clearAllAcademicData()
                                     syncWidgetsAndReminders()
                                     showToast("已清空所有本地课表、作业、成绩与考场")
-                                }
+                                },
+                                onOpenCampusServices = { showCampusServicesSheet = true }
                             )
                         }
                     }
                 }
             }
+        }
+
+        if (showCampusServicesSheet) {
+            val currentWeek = remember(snapshot.settings.semesterStartDate, snapshot.settings.totalWeeks) {
+                GdouTimeRules.calculateCurrentWeek(
+                    snapshot.settings.semesterStartDate,
+                    snapshot.settings.totalWeeks
+                )
+            }
+            CampusServicesBottomSheet(
+                currentWeek = currentWeek,
+                totalWeeks = snapshot.settings.totalWeeks,
+                semesterStartDate = snapshot.settings.semesterStartDate,
+                academicYearLabel = snapshot.settings.academicYearLabel,
+                onOpenUrl = { title, url ->
+                    val safeUrl = if (CampusOfficialService.isAllowedExternalPortalUrl(url)) {
+                        url
+                    } else {
+                        CampusOfficialService.URL_JWC_NOTICES
+                    }
+                    if (!AppUpdateManager.openUrlInBrowser(context, safeUrl)) {
+                        clipboard.setText(AnnotatedString(safeUrl))
+                        showToast("未检测到可用浏览器，已复制「$title」链接")
+                    }
+                },
+                onOpenWebSyncPortal = {
+                    syncRequestedMode = 0
+                    syncModeNonce++
+                    hasOpenedSyncTab = true
+                    currentTab = 1
+                },
+                onAddNoticeAsTask = { notice ->
+                    pendingNoticeForTask = notice
+                },
+                onDismiss = { showCampusServicesSheet = false }
+            )
+        }
+
+        pendingNoticeForTask?.let { notice ->
+            QuickAddTaskDialog(
+                availableCourses = remember(snapshot.courses) { snapshot.courses.map { it.name }.distinct() },
+                initialTitle = notice.title.removePrefix("关于").take(40),
+                initialNote = "${notice.categoryLabel}${if (notice.date.isNotBlank()) "（${notice.date}）" else ""}\n官网原文：${notice.url}",
+                dialogTitleOverride = "从教务公告创建 DDL 提醒",
+                onDismiss = { pendingNoticeForTask = null },
+                onSave = { task ->
+                    repo.upsertTask(task)
+                    syncWidgetsAndReminders()
+                    pendingNoticeForTask = null
+                    showToast("已加入「学业 → 作业 DDL」")
+                }
+            )
         }
 
         val pendingRelease = availableUpdate

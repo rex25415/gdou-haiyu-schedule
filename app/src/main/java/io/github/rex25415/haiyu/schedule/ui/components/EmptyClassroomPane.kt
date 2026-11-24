@@ -786,7 +786,6 @@ fun EmptyClassroomPane(
                             val isCourseMatch = courseContext?.building == label
                             val hasZero = results != null && kw.isNotEmpty() && count == 0
                             val displayLabel = buildString {
-                                if (isFav) append("★ ") else if (isCourseMatch) append("📍")
                                 append(label)
                                 if (results != null && count != null) {
                                     append(if (hasZero) "(专/0)" else "($count)")
@@ -815,15 +814,33 @@ fun EmptyClassroomPane(
                                         floorFilter = null
                                     }
                             ) {
-                                Text(
-                                    text = displayLabel,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (sel || isFav || isCourseMatch) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (sel) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    softWrap = false,
+                                val chipContentColor = if (sel) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                                )
+                                ) {
+                                    if (isFav || isCourseMatch) {
+                                        Icon(
+                                            imageVector = if (isFav) Icons.Rounded.Star else Icons.Rounded.NearMe,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        text = displayLabel,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (sel || isFav || isCourseMatch) FontWeight.Bold else FontWeight.Normal,
+                                        color = chipContentColor,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
@@ -845,7 +862,7 @@ fun EmptyClassroomPane(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(15.dp),
                                     strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("正在拉取「${queryCampus.label}」...", fontSize = 13.sp, fontWeight = FontWeight.Bold)

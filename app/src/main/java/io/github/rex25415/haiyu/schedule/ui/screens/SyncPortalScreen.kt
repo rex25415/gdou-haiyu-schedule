@@ -47,7 +47,10 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.AccountBalance
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MeetingRoom
 import androidx.compose.material.icons.rounded.MoreVert
@@ -63,6 +66,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
@@ -136,6 +140,7 @@ fun SyncPortalScreen(
     onExamsSynced: (List<ExamItem>) -> Unit,
     onShowMessage: (String) -> Unit,
     onNavigateBackToSchedule: () -> Unit = {},
+    onOpenCampusServices: () -> Unit = {},
     onSyncFinishedJumpSchedule: () -> Unit
 ) {
     val context = LocalContext.current
@@ -183,6 +188,7 @@ fun SyncPortalScreen(
     var showQuickNavMenu by remember { mutableStateOf(false) }
     var showSingleSyncMenu by remember { mutableStateOf(false) }
     var syncSuccessSummary by remember { mutableStateOf<String?>(null) }
+    var evalInterceptBanner by remember { mutableStateOf<String?>(null) }
     var jsAlertDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var jsConfirmDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var diagnosticDialogText by remember { mutableStateOf<String?>(null) }
@@ -325,6 +331,7 @@ fun SyncPortalScreen(
                     isSyncing = false
                     isSilentQuickRefresh = false
                     syncStatusText = null
+                    evalInterceptBanner = null
                     if (wasSilent) {
                         onShowMessage(summary)
                     } else {
@@ -340,6 +347,9 @@ fun SyncPortalScreen(
                     isInspectingRoom = false
                     isSilentQuickRefresh = false
                     syncStatusText = null
+                    if (errorMessage.contains("评教") || errorMessage.contains("确认通知")) {
+                        evalInterceptBanner = errorMessage
+                    }
                     onShowMessage(errorMessage)
                 }
             }
@@ -624,6 +634,39 @@ fun SyncPortalScreen(
                                     }
                                 )
                             }
+                            HorizontalDivider()
+                            val dynamicModules = listOf(
+                                "教学评价（评教入口）" to listOf("评价", "评教", "问卷"),
+                                "自主选课入口" to listOf("自主选课", "选课"),
+                                "学业情况 / 培养方案" to listOf("学业情况", "培养方案", "修读情况")
+                            )
+                            dynamicModules.forEach { (label, kws) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    leadingIcon = { Icon(Icons.Rounded.School, contentDescription = null) },
+                                    onClick = {
+                                        showQuickNavMenu = false
+                                        if (!isLoggedIntoJw) {
+                                            onShowMessage("请先完成广海教务登录，再打开「$label」")
+                                        } else {
+                                            webViewRef?.evaluateJavascript(
+                                                GdouSyncScript.buildDynamicMenuNavigateScript(kws, label),
+                                                null
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("广海官方公告与校历") },
+                                leadingIcon = { Icon(Icons.Rounded.AccountBalance, contentDescription = null) },
+                                onClick = {
+                                    showQuickNavMenu = false
+                                    onOpenCampusServices()
+                                }
+                            )
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("查看当前页诊断信息") },
                                 leadingIcon = { Icon(Icons.Rounded.BugReport, contentDescription = null) },
@@ -928,6 +971,59 @@ fun SyncPortalScreen(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+        if (evalInterceptBanner != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "需先完成教务教学评价或确认通知，才可同步完整数据",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                evalInterceptBanner = null
+                                webViewRef?.evaluateJavascript(
+                                    GdouSyncScript.buildDynamicMenuNavigateScript(listOf("评价", "评教", "问卷"), "教学评价"),
+                                    null
+                                )
+                            }
+                    ) {
+                        Text(
+                            text = "去评教",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "关闭提示",
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { evalInterceptBanner = null }
                     )
                 }
             }

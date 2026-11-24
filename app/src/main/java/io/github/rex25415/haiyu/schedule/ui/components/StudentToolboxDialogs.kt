@@ -314,19 +314,30 @@ fun QuickAddTaskDialog(
     initialCourseName: String = "",
     availableCourses: List<String> = emptyList(),
     existingTask: TodoTaskItem? = null,
+    initialTitle: String = "",
+    initialDueDate: String = "",
+    initialNote: String = "",
+    dialogTitleOverride: String? = null,
     onDismiss: () -> Unit,
     onSave: (TodoTaskItem) -> Unit
 ) {
     val today = remember { LocalDate.now() }
     val fmt = remember { DateTimeFormatter.ISO_LOCAL_DATE }
-    var title by remember(existingTask) { mutableStateOf(existingTask?.title.orEmpty()) }
+    var title by remember(existingTask, initialTitle) {
+        mutableStateOf(existingTask?.title ?: initialTitle)
+    }
     var courseName by remember(initialCourseName, existingTask) {
         mutableStateOf(existingTask?.courseName ?: initialCourseName)
     }
-    var dueDate by remember(existingTask) {
-        mutableStateOf(existingTask?.dueDate?.ifBlank { today.plusDays(2).format(fmt) } ?: today.plusDays(2).format(fmt))
+    var dueDate by remember(existingTask, initialDueDate) {
+        mutableStateOf(
+            existingTask?.dueDate?.ifBlank { today.plusDays(2).format(fmt) }
+                ?: initialDueDate.ifBlank { today.plusDays(2).format(fmt) }
+        )
     }
-    var note by remember(existingTask) { mutableStateOf(existingTask?.note.orEmpty()) }
+    var note by remember(existingTask, initialNote) {
+        mutableStateOf(existingTask?.note ?: initialNote)
+    }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -341,7 +352,11 @@ fun QuickAddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existingTask == null) "记一条作业 / 实验 DDL" else "编辑作业 / 实验 DDL") },
+        title = {
+            Text(
+                dialogTitleOverride ?: if (existingTask == null) "记一条作业 / 实验 DDL" else "编辑作业 / 实验 DDL"
+            )
+        },
         text = {
             Column(
                 modifier = Modifier

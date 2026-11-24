@@ -680,7 +680,7 @@ fun AboutUpdateWorkbenchSheet(
                     Text(
                         text = updateStatusSummary
                             ?: if (availableUpdate != null) "可升级至最新版本 v${availableUpdate.versionName}"
-                            else "采用海屿开源统一发布签名打包，覆盖升级自动保留全部数据。目前通常每周稳健更新 1～2 版（教务改版或紧急故障随时加急修复）。",
+                            else "采用海屿开源统一发布签名打包，覆盖升级自动保留全部数据。上线初期集中补核心功能与修紧急 Bug 曾高频连发，现核心已稳，转为每周 1～2 更（教务改版或重大故障随时加急修复）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (availableUpdate != null) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant

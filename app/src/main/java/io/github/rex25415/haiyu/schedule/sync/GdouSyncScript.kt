@@ -233,6 +233,90 @@ object GdouSyncScript {
     }
 
     /**
+     * 基于当前登录会话的真实菜单 DOM，按关键词动态定位并跳转正方子模块（避免硬编码失效 gnmkdm）
+     */
+    fun buildDynamicMenuNavigateScript(keywords: List<String>, targetLabel: String): String {
+        val kwArray = keywords.joinToString(",") {
+            "\"${it.replace("\\", "").replace("\"", "").trim()}\""
+        }
+        val safeLabel = targetLabel.replace("\"", "").trim()
+        return """
+        (async function() {
+            $COMMON_HELPERS
+            const KEYWORDS = [$kwArray];
+            const LABEL = "$safeLabel";
+            try {
+                if (!checkOnJwDomain()) {
+                    HaiyuBridge.onSyncError("请先完成广海教务系统登录后再进入「" + LABEL + "」");
+                    return;
+                }
+                const sources = [];
+                if (document.documentElement) {
+                    sources.push(document.documentElement.innerHTML || "");
+                }
+                try {
+                    const r = await fetchJwWithFallback("/xtgl/index_initMenu.html?jsdm=xs", {
+                        method: "GET",
+                        credentials: "include"
+                    });
+                    if (r.ok) sources.push(await r.text());
+                } catch (_) {}
+
+                let matchedUrl = null;
+                const clickMenuRe = /clickMenu\(\s*['"]([A-Za-z0-9_]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]/g;
+                for (const src of sources) {
+                    let m;
+                    while ((m = clickMenuRe.exec(src)) !== null) {
+                        const code = m[1];
+                        const path = m[2];
+                        const title = m[3] || "";
+                        if (KEYWORDS.some(k => title.includes(k))) {
+                            const clean = path.replace(/^\/+/, "");
+                            const sep = clean.includes("?") ? "&" : "?";
+                            matchedUrl = clean.includes("gnmkdm=") ? clean : (clean + sep + "gnmkdm=" + code + "&layout=default");
+                            break;
+                        }
+                    }
+                    if (matchedUrl) break;
+                }
+
+                if (!matchedUrl) {
+                    const anchors = Array.from(document.querySelectorAll("a[data-src], a[onclick*='clickMenu'], a[href*='.html']"));
+                    for (const a of anchors) {
+                        const txt = (a.textContent || "").trim();
+                        if (!KEYWORDS.some(k => txt.includes(k))) continue;
+                        const dataSrc = a.getAttribute("data-src") || "";
+                        const onclick = a.getAttribute("onclick") || "";
+                        const om = onclick.match(/clickMenu\(\s*['"]([A-Za-z0-9_]+)['"]\s*,\s*['"]([^'"]+)['"]/);
+                        if (om) {
+                            const clean = om[2].replace(/^\/+/, "");
+                            const sep = clean.includes("?") ? "&" : "?";
+                            matchedUrl = clean.includes("gnmkdm=") ? clean : (clean + sep + "gnmkdm=" + om[1] + "&layout=default");
+                            break;
+                        }
+                        if (dataSrc && !dataSrc.startsWith("javascript")) {
+                            matchedUrl = dataSrc.replace(/^\/+/, "");
+                            break;
+                        }
+                    }
+                }
+
+                if (matchedUrl) {
+                    const target = matchedUrl.startsWith("http")
+                        ? matchedUrl
+                        : (window.location.origin + getJwBasePrefix() + "/" + matchedUrl.replace(/^\/+/, ""));
+                    window.location.href = target;
+                } else {
+                    HaiyuBridge.onSyncError("当前教务菜单暂未开放「" + LABEL + "」入口，可先在官网公告确认开放时间或点击教务首页查找");
+                }
+            } catch (err) {
+                HaiyuBridge.onSyncError("跳转「" + LABEL + "」失败：" + (err && err.message ? err.message : String(err)));
+            }
+        })();
+        """.trimIndent()
+    }
+
+    /**
      * 一键从当前正方网页已展示的表格（DOM #tabGrid）直接提取成绩或考试数据（100% 绕过接口拦截兜底）
      */
     fun buildScrapeCurrentPageDomScript(): String = """

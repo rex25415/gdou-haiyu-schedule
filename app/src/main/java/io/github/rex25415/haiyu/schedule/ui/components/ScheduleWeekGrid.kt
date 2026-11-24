@@ -762,15 +762,20 @@ private fun WeekGridCourseCard(
                 fontWeight = FontWeight.Bold,
                 color = textColor,
                 maxLines = when {
-                    span <= 1 -> 2
+                    span <= 1 -> 1
                     span >= 3 -> 5
                     else -> 4
                 },
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (course.location.isNotBlank() && span >= 2) {
+                    Modifier.weight(1f, fill = false)
+                } else {
+                    Modifier
+                }
             )
 
             if (course.location.isNotBlank()) {
-                Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.5.dp else 2.5.dp))
+                Spacer(modifier = Modifier.height(if (rowDensity == GridRowDensity.COMPACT) 1.dp else 2.dp))
                 Text(
                     text = course.location,
                     fontSize = locFontSize,
@@ -781,7 +786,7 @@ private fun WeekGridCourseCard(
                     color = textColor.copy(alpha = 0.76f),
                     maxLines = when {
                         span <= 1 -> 1
-                        rowDensity == GridRowDensity.COMPACT && conflictCount > 1 && span <= 2 -> 1
+                        rowDensity == GridRowDensity.COMPACT && span <= 2 -> 1
                         else -> 2
                     },
                     overflow = TextOverflow.Ellipsis

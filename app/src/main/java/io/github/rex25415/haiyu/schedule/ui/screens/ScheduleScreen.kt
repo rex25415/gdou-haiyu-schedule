@@ -163,7 +163,8 @@ fun ScheduleScreen(
     onShowMessage: (String) -> Unit,
     onApplyHolidayShift: (sourceWeek: Int, sourceDay: Int, targetWeek: Int, targetDay: Int, move: Boolean) -> Unit,
     onOpenEmptyClassroom: () -> Unit = {},
-    onToggleCompactBanner: () -> Unit = {}
+    onToggleCompactBanner: () -> Unit = {},
+    onOpenCampusServices: () -> Unit = {}
 ) {
     val settings = snapshot.settings
     // Live 30s clock ticker + immediate ON_RESUME refresh so overnight transitions update instantly!
@@ -1570,6 +1571,7 @@ fun ScheduleScreen(
             onExportWeekImage = { onExportWeekImage(selectedWeek) },
             onOpenHolidayShift = { showHolidayShiftDialog = true },
             onOpenShareCode = { showShareCodeDialog = true },
+            onOpenCampusServices = onOpenCampusServices,
             onOpenPracticeCourses = { showPracticeCoursesDialog = true },
             onCopyWeekText = { onCopyWeekScheduleText(selectedWeek) },
             onDismiss = { showToolsMenu = false }
