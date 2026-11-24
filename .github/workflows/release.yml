@@ -166,7 +166,7 @@ jobs:
             exit 1
           fi
           "$APKSIGNER" verify --print-certs "$APK_OUT" | tee "$RUNNER_TEMP/apksigner.txt"
-          CERT_SHA256="$(grep -i 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner.txt" | awk -F': ' '{print tolower($2)}' | tr -d '[:space:]')"
+          CERT_SHA256="$(grep -i 'certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner.txt" | head -n 1 | awk -F'digest:' '{print tolower($2)}' | tr -d '[:space:]')"
           if [ "$CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
             echo "::error::签名证书指纹不匹配！实际=$CERT_SHA256 预期=$EXPECTED_CERT_SHA256"
             exit 1
