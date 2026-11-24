@@ -3,6 +3,7 @@ package io.github.rex25415.haiyu.schedule
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.OccurrenceState
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
+import io.github.rex25415.haiyu.schedule.model.AppSettings
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.GridRowDensity
@@ -357,8 +358,11 @@ class AppUpdateManagerTest {
         assertTrue(syncJs.contains("sjkList"))
         assertTrue(syncJs.contains("syncLevelExamsGentle"))
 
-        val roomJs = GdouSyncScript.buildQueryEmptyClassroomsScript("海滨", 13, 1, 1, 2, "实验")
+        val roomJs = GdouSyncScript.buildQueryEmptyClassroomsScript("湖光", 13, 2, 1, 2, "", "2026", "3")
         assertTrue(roomJs.contains("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155"))
+        assertTrue(roomJs.contains("queryModel.showCount=1000"))
+        assertTrue(roomJs.contains("#dm_cx"))
+        assertTrue(roomJs.contains("BBF8A51ACEA2144EE053768926D2788B"))
         assertTrue(roomJs.contains("onEmptyClassroomsLoaded"))
 
         val domJs = GdouSyncScript.buildScrapeCurrentPageDomScript()
@@ -367,5 +371,231 @@ class AppUpdateManagerTest {
         assertTrue(decoded.levelExams.isEmpty())
         assertEquals(160.0, decoded.settings.creditTargets.totalRequired, 0.01)
         assertFalse(decoded.settings.compactScheduleBanner)
+    }
+
+    @Test
+    fun emptyClassroomClassificationAndNaturalRoomSortingWork() {
+        val guangxueRegular = io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem(
+            roomName = "广学楼105",
+            building = "广学楼",
+            roomType = "实验室", // GDOU tags non-multimedia standard rooms as "实验室"
+            seats = "75",
+            campus = "湖光校区"
+        )
+        val guangxueMulti = io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem(
+            roomName = "广学楼208(多)",
+            building = "广学楼",
+            roomType = "多媒体教室",
+            seats = "78",
+            campus = "湖光校区"
+        )
+        val haibinLab = io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem(
+            roomName = "实验楼308",
+            building = "实验楼",
+            roomType = "实验室",
+            seats = "90",
+            campus = "海滨校区"
+        )
+        val specialCoffeeLab = io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem(
+            roomName = "广东海洋大学商学院百瑞斯塔咖啡实验室",
+            building = "济航楼",
+            roomType = "实验室",
+            seats = "36",
+            campus = "阳江校区"
+        )
+        val computerRoom = io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem(
+            roomName = "海纳楼401(计)",
+            building = "海纳楼",
+            roomType = "计算机房",
+            seats = "80",
+            campus = "阳江校区"
+        )
+        assertTrue(io.github.rex25415.haiyu.schedule.ui.components.isPrimeSelfStudyClassroom(guangxueRegular))
+        assertTrue(io.github.rex25415.haiyu.schedule.ui.components.isPrimeSelfStudyClassroom(guangxueMulti))
+        assertTrue(io.github.rex25415.haiyu.schedule.ui.components.isPrimeSelfStudyClassroom(haibinLab))
+        assertFalse(io.github.rex25415.haiyu.schedule.ui.components.isPrimeSelfStudyClassroom(specialCoffeeLab))
+        assertFalse(io.github.rex25415.haiyu.schedule.ui.components.isPrimeSelfStudyClassroom(computerRoom))
+
+        val rawRoomNames = listOf("广学楼1001", "广学楼208(多)", "广学楼105")
+        val sorted = rawRoomNames.sortedBy { io.github.rex25415.haiyu.schedule.ui.components.naturalRoomSortKey(it) }
+        assertEquals(listOf("广学楼105", "广学楼208(多)", "广学楼1001"), sorted)
+    }
+
+    @Test
+    fun gradeRetakeAndMakeupDeduplicationProducesAuthenticGpaAndCredits() {
+        val sampleGrades = listOf(
+            io.github.rex25415.haiyu.schedule.model.GradeItem(
+                id = "g1",
+                academicYear = "2025-2026",
+                semester = "第一学期",
+                courseName = "大学生国家安全教育",
+                score = "37",
+                gradePoint = 0.0,
+                credit = 1.0,
+                courseType = "必修",
+                examNature = "正常考试"
+            ),
+            io.github.rex25415.haiyu.schedule.model.GradeItem(
+                id = "g2",
+                academicYear = "2025-2026",
+                semester = "第二学期",
+                courseName = "大学生国家安全教育",
+                score = "96",
+                gradePoint = 4.6,
+                credit = 1.0,
+                courseType = "必修",
+                examNature = "补考"
+            ),
+            io.github.rex25415.haiyu.schedule.model.GradeItem(
+                id = "g3",
+                academicYear = "2025-2026",
+                semester = "第二学期",
+                courseName = "大学物理Ⅱx1",
+                score = "54",
+                gradePoint = 0.0,
+                credit = 3.0,
+                courseType = "必修",
+                examNature = "正常考试"
+            ),
+            io.github.rex25415.haiyu.schedule.model.GradeItem(
+                id = "g4",
+                academicYear = "2026-2027",
+                semester = "第一学期",
+                courseName = "大学物理Ⅱx1",
+                score = "缺考",
+                gradePoint = 0.0,
+                credit = 3.0,
+                courseType = "必修",
+                examNature = "补考"
+            )
+        )
+
+        val dedup = io.github.rex25415.haiyu.schedule.ui.components.deduplicateEffectiveGrades(sampleGrades)
+        assertEquals(2, dedup.effectiveGrades.size)
+        assertEquals(1, dedup.passedGrades.size)
+        assertEquals(1.0, dedup.earnedCredits, 0.001)
+        assertEquals(4.0, dedup.attemptedDistinctCredits, 0.001)
+        assertEquals(4.0, dedup.duplicateCreditsRemoved, 0.001)
+        assertEquals(2, dedup.duplicateCourseCount)
+        assertEquals(1, dedup.makeupRecoveredCourses.size)
+        assertEquals("g2", dedup.supersededByMap["g1"]?.bestAttempt?.id)
+        assertTrue(dedup.supersededByMap["g1"]?.isBestPassed == true)
+        assertEquals("g3", dedup.supersededByMap["g4"]?.bestAttempt?.id)
+        assertFalse(dedup.supersededByMap["g4"]?.isBestPassed == true)
+
+        val effectiveMetrics = io.github.rex25415.haiyu.schedule.ui.components.computeGradeMetrics(
+            sampleGrades,
+            io.github.rex25415.haiyu.schedule.ui.components.GpaCalcMode.EFFECTIVE_BEST
+        )
+        // Effective: (4.6*1.0 + 0.0*3.0) / 4.0 = 1.15; Score: (96*1.0 + 54*3.0) / 4.0 = 64.5
+        assertEquals(1.15, effectiveMetrics.gpa, 0.001)
+        assertEquals(64.5, effectiveMetrics.weightedAvgScore, 0.01)
+        assertEquals(4.0, effectiveMetrics.totalCredits, 0.001)
+
+        val passedMetrics = io.github.rex25415.haiyu.schedule.ui.components.computeGradeMetrics(
+            sampleGrades,
+            io.github.rex25415.haiyu.schedule.ui.components.GpaCalcMode.PASSED_ONLY
+        )
+        assertEquals(4.6, passedMetrics.gpa, 0.001)
+        assertEquals(96.0, passedMetrics.weightedAvgScore, 0.01)
+        assertEquals(1.0, passedMetrics.totalCredits, 0.001)
+
+        val trainingGrade = io.github.rex25415.haiyu.schedule.model.GradeItem(
+            academicYear = "2025-2026",
+            semester = "第二学期",
+            courseName = "海上求生训练",
+            score = "良好",
+            gradePoint = 3.5,
+            credit = 1.0,
+            courseType = "必修"
+        )
+        assertTrue(io.github.rex25415.haiyu.schedule.ui.components.isPracticeOrExperimentGrade(trainingGrade))
+        assertFalse(io.github.rex25415.haiyu.schedule.ui.components.isPracticeOrExperimentGrade(sampleGrades[0]))
+    }
+
+    @Test
+    fun inspectRoomDayScriptAndFavoriteSettingsCompatibilityWork() {
+        val multiBlockJs = GdouSyncScript.buildQueryEmptyClassroomsScript(
+            campusKeyword = "湖光",
+            weekNumber = 12,
+            dayOfWeek = 3,
+            startSection = 1,
+            endSection = 4,
+            buildingKeyword = ""
+        )
+        assertTrue(multiBlockJs.contains("window.__haiyuRoomQuerySeq"))
+        assertTrue(multiBlockJs.contains("for (const pair of blocks)"))
+        assertTrue(multiBlockJs.contains("fetchEmptyRoomBlock"))
+        assertTrue(multiBlockJs.contains("!m.has(key)"))
+        assertFalse(multiBlockJs.contains(".every("))
+        assertFalse(multiBlockJs.contains(".some("))
+        assertTrue(multiBlockJs.contains("onEmptyClassroomsLoaded"))
+
+        val dayScript = GdouSyncScript.buildInspectRoomDayScheduleScript(
+            campusKeyword = "湖光",
+            weekNumber = 12,
+            dayOfWeek = 3,
+            buildingName = "广学楼",
+            roomName = "广学楼208(多)"
+        )
+        assertTrue(dayScript.contains("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155"))
+        assertTrue(dayScript.contains("window.__haiyuRoomInspectSeq"))
+        assertTrue(dayScript.contains("dayBlocks.length"))
+        assertFalse(dayScript.contains(".every("))
+        assertTrue(dayScript.contains("onClassroomDayScheduleLoaded"))
+        assertTrue(dayScript.contains("广学楼208(多)"))
+        assertTrue(dayScript.contains("[[1,2],[3,4],[5,6],[7,8],[9,10]]"))
+        assertTrue(dayScript.contains("\"208\""))
+
+        val legacySettings = lenientJson.decodeFromString(
+            AppSettings.serializer(),
+            """{"campus":"HAIBIN","autoSyncOnLaunch":true}"""
+        )
+        assertTrue(legacySettings.favoriteBuildings.isEmpty())
+        assertTrue(legacySettings.favoriteClassrooms.isEmpty())
+
+        val roundTrip = lenientJson.decodeFromString(
+            AppSettings.serializer(),
+            lenientJson.encodeToString(
+                AppSettings.serializer(),
+                AppSettings(
+                    campus = GdouCampus.HUGUANG,
+                    favoriteBuildings = listOf("广学楼", "钟海楼"),
+                    favoriteClassrooms = listOf("广学楼208(多)")
+                )
+            )
+        )
+        assertEquals(listOf("广学楼", "钟海楼"), roundTrip.favoriteBuildings)
+        assertEquals(listOf("广学楼208(多)"), roundTrip.favoriteClassrooms)
+    }
+
+    @Test
+    fun wallpaperScalingMathHandlesPortraitLandscapeAndEdgeSizes() {
+        // Vertical 4000x6000 camera photo -> 960x1440 (preserves aspect ratio & stays <= 1440px)
+        assertEquals(
+            960 to 1440,
+            io.github.rex25415.haiyu.schedule.data.computeScaledTargetDimensions(4000, 6000, 1440)
+        )
+        // Landscape 3840x2160 4K image -> 1440x810
+        assertEquals(
+            1440 to 810,
+            io.github.rex25415.haiyu.schedule.data.computeScaledTargetDimensions(3840, 2160, 1440)
+        )
+        // Small 1080x1920 image -> unscaled 1080x1920? Wait: 1920 > 1440 -> 810x1440; 800x600 stays 800x600
+        assertEquals(
+            810 to 1440,
+            io.github.rex25415.haiyu.schedule.data.computeScaledTargetDimensions(1080, 1920, 1440)
+        )
+        assertEquals(
+            800 to 600,
+            io.github.rex25415.haiyu.schedule.data.computeScaledTargetDimensions(800, 600, 1440)
+        )
+        // Invalid dimensions fall back safely instead of dividing by zero
+        assertEquals(
+            1440 to 1440,
+            io.github.rex25415.haiyu.schedule.data.computeScaledTargetDimensions(0, -1, 1440)
+        )
+        assertEquals(1, io.github.rex25415.haiyu.schedule.data.computeBitmapInSampleSize(0, 0, 1440))
+        assertEquals(4, io.github.rex25415.haiyu.schedule.data.computeBitmapInSampleSize(4000, 3000, 1440))
     }
 }

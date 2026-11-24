@@ -13,9 +13,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 class GdouTimeRulesTest {
 
@@ -411,5 +414,79 @@ class GdouTimeRulesTest {
         assertFalse(impossible.achievable)
         assertTrue(impossible.summaryText.contains("超过满绩 5.0"))
         assertTrue(impossible.summaryText.contains("约需"))
+    }
+
+    @Test
+    fun extractRoomFloorAndCourseLocationContextWorkAcrossCampuses() {
+        assertEquals(5, GdouTimeRules.extractRoomFloor("教学楼505", "教学楼"))
+        assertEquals(5, GdouTimeRules.extractRoomFloor("实506-1计算机(2)室", "实验楼"))
+        assertEquals(2, GdouTimeRules.extractRoomFloor("钟海楼02005", "钟海楼"))
+        assertEquals(2, GdouTimeRules.extractRoomFloor("广学楼208(多)", "广学楼"))
+        val mingdeParsed = GdouTimeRules.extractBuildingAndFloor("明德楼B2302", GdouCampus.HUGUANG)
+        assertNotNull(mingdeParsed)
+        assertEquals("明德楼", mingdeParsed!!.first)
+        assertEquals(3, mingdeParsed.second)
+
+        val haibinLab = GdouTimeRules.extractBuildingAndFloor("实506-1", GdouCampus.HAIBIN)
+        assertEquals("实验楼" to 5, haibinLab)
+        val haibinTeach = GdouTimeRules.extractBuildingAndFloor("教学楼505", GdouCampus.HAIBIN)
+        assertEquals("教学楼" to 5, haibinTeach)
+        assertEquals("钟海楼" to 2, GdouTimeRules.extractBuildingAndFloor("钟海楼02005", GdouCampus.HUGUANG))
+        assertEquals("广学楼" to 2, GdouTimeRules.extractBuildingAndFloor("广学楼208(多)", GdouCampus.HUGUANG))
+
+        val haibinCourses = listOf(
+            CourseItem(name = "数据结构实验", location = "实506-1", dayOfWeek = 1, startSection = 1, endSection = 2, weeks = listOf(1)),
+            CourseItem(name = "线性代数", location = "教学楼505", dayOfWeek = 1, startSection = 3, endSection = 4, weeks = listOf(1))
+        )
+        // Monday 2026-09-07 09:50 -> 1-2 finished, 3-4 upcoming -> prefers upcoming 教学楼505
+        val upcomingCtx = GdouTimeRules.inferCourseLocationContext(
+            courses = haibinCourses,
+            startDateStr = "2026-09-07",
+            totalWeeks = 20,
+            targetCampus = GdouCampus.HAIBIN,
+            targetWeek = 1,
+            targetDay = 1,
+            queryStartSection = 3,
+            now = LocalDateTime.of(2026, 9, 7, 9, 50)
+        )
+        assertNotNull(upcomingCtx)
+        assertEquals("教学楼", upcomingCtx!!.building)
+        assertEquals(5, upcomingCtx.floor)
+        assertTrue(upcomingCtx.hintText.contains("教学楼505"))
+
+        // Campus isolation: querying Huguang with Haibin-only courses returns null
+        val isolatedHuguangCtx = GdouTimeRules.inferCourseLocationContext(
+            courses = haibinCourses,
+            startDateStr = "2026-09-07",
+            totalWeeks = 20,
+            targetCampus = GdouCampus.HUGUANG,
+            targetWeek = 1,
+            targetDay = 1,
+            queryStartSection = 3,
+            now = LocalDateTime.of(2026, 9, 7, 9, 50)
+        )
+        assertNull(isolatedHuguangCtx)
+
+        val huguangCtx = GdouTimeRules.inferCourseLocationContext(
+            courses = haibinCourses + CourseItem(
+                name = "海洋科学导论",
+                location = "钟海楼02005",
+                dayOfWeek = 1,
+                startSection = 3,
+                endSection = 4,
+                weeks = listOf(1)
+            ),
+            startDateStr = "2026-09-07",
+            totalWeeks = 20,
+            targetCampus = GdouCampus.HUGUANG,
+            targetWeek = 1,
+            targetDay = 1,
+            queryStartSection = 3,
+            now = LocalDateTime.of(2026, 9, 7, 10, 30)
+        )
+        assertNotNull(huguangCtx)
+        assertEquals("钟海楼", huguangCtx!!.building)
+        assertEquals(2, huguangCtx.floor)
+        assertTrue(huguangCtx.hintText.contains("正在上课"))
     }
 }

@@ -1,5 +1,6 @@
 package io.github.rex25415.haiyu.schedule.ui.components
 
+import android.appwidget.AppWidgetProvider
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -51,12 +52,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +72,12 @@ import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
 import io.github.rex25415.haiyu.schedule.update.SignatureTrustState
 import io.github.rex25415.haiyu.schedule.update.SignatureVerificationResult
+import io.github.rex25415.haiyu.schedule.widget.CompactSquareWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.PinWidgetOutcome
+import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.WidgetScheduleHelper
 import kotlin.math.roundToInt
 
 @Composable
@@ -150,8 +159,11 @@ internal fun SettingSwitchRow(
 @Composable
 fun AppearanceWorkbenchSheet(
     settings: AppSettings,
+    isImportingWallpaper: Boolean = false,
+    wallpaperStatus: Pair<Boolean, String>? = null,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onPickWallpaper: () -> Unit,
+    onPickWallpaperFromFiles: () -> Unit = {},
     onClearWallpaper: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -231,21 +243,73 @@ fun AppearanceWorkbenchSheet(
                 ) {
                     FilledTonalButton(
                         onClick = onPickWallpaper,
+                        enabled = !isImportingWallpaper,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Rounded.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (hasWallpaper) "更换课表壁纸" else "选择课表壁纸", fontSize = 12.5.sp)
+                        if (isImportingWallpaper) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("正在导入处理...", fontSize = 12.5.sp)
+                        } else {
+                            Icon(Icons.Rounded.Wallpaper, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (hasWallpaper) "更换课表壁纸" else "选择课表壁纸", fontSize = 12.5.sp)
+                        }
                     }
                     if (hasWallpaper) {
                         OutlinedButton(
                             onClick = onClearWallpaper,
+                            enabled = !isImportingWallpaper,
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Rounded.HideImage, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("恢复默认", fontSize = 12.5.sp)
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = onPickWallpaperFromFiles,
+                    enabled = !isImportingWallpaper,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "相册找不到或导入异常？改用系统文件管理器选图",
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (wallpaperStatus != null) {
+                    val (isOk, msg) = wallpaperStatus
+                    Surface(
+                        color = if (isOk) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isOk) Icons.Rounded.Check else Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = if (isOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = msg,
+                                fontSize = 11.5.sp,
+                                color = if (isOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                            )
                         }
                     }
                 }
@@ -281,6 +345,14 @@ fun AppearanceWorkbenchSheet(
     }
 }
 
+private data class DesktopWidgetCatalogEntry(
+    val title: String,
+    val sizeBadge: String,
+    val subtitle: String,
+    val requestCode: Int,
+    val providerClass: Class<out AppWidgetProvider>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WidgetsBackupWorkbenchSheet(
@@ -292,6 +364,41 @@ fun WidgetsBackupWorkbenchSheet(
     onRequestClearData: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    var pinFeedback by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    val widgetCatalog = remember {
+        listOf(
+            DesktopWidgetCatalogEntry(
+                title = "极简方卡",
+                sizeBadge = "2×2",
+                subtitle = "半屏小卡：状态、课程名、教室与时间",
+                requestCode = 104,
+                providerClass = CompactSquareWidgetProvider::class.java
+            ),
+            DesktopWidgetCatalogEntry(
+                title = "下一节课",
+                sizeBadge = "4×1",
+                subtitle = "单行极简胶囊，不占桌面高度",
+                requestCode = 103,
+                providerClass = NextClassWidgetProvider::class.java
+            ),
+            DesktopWidgetCatalogEntry(
+                title = "今日课表",
+                sizeBadge = "4×2",
+                subtitle = "今日全部课程列表与明日早课预告",
+                requestCode = 101,
+                providerClass = TodayScheduleWidgetProvider::class.java
+            ),
+            DesktopWidgetCatalogEntry(
+                title = "考试与 DDL",
+                sizeBadge = "4×2",
+                subtitle = "考场座号、置顶倒数与待办截止",
+                requestCode = 102,
+                providerClass = CountdownWidgetProvider::class.java
+            )
+        )
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -320,12 +427,102 @@ fun WidgetsBackupWorkbenchSheet(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("桌面微件支持", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text("桌面微件支持（4 款深浅自适应）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        text = "长按手机桌面空白处 →「微件 / 小组件」，可添加「海屿今日课表」、「海屿下一节课（极简）」与「海屿考试与 DDL 倒计时」。",
+                        text = "可直接点右侧「放到桌面」快捷添置；若部分桌面拦截，也可长按桌面空白处 →「微件 / 小组件」手动添加。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        widgetCatalog.forEach { entry ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = entry.title,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = entry.sizeBadge,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = entry.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val outcome = WidgetScheduleHelper.requestPinWidget(
+                                                context = context,
+                                                providerClass = entry.providerClass,
+                                                requestCode = entry.requestCode
+                                            )
+                                            pinFeedback = when (outcome) {
+                                                PinWidgetOutcome.REQUESTED ->
+                                                    true to "已向桌面发起添置「${entry.title}（${entry.sizeBadge}）」，请在系统弹窗确认。"
+                                                PinWidgetOutcome.UNSUPPORTED_LAUNCHER,
+                                                PinWidgetOutcome.FAILED ->
+                                                    false to "当前桌面暂不支持应用内添置，请长按桌面空白处 →「小组件」查找「海屿${entry.title}」。"
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text("放到桌面", fontSize = 11.5.sp, maxLines = 1, softWrap = false)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pinFeedback?.let { (isOk, msg) ->
+                        Surface(
+                            color = if (isOk) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = msg,
+                                fontSize = 11.5.sp,
+                                color = if (isOk) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()

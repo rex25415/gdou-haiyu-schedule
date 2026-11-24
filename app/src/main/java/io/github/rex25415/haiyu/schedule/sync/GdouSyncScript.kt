@@ -262,8 +262,110 @@ object GdouSyncScript {
         })();
     """.trimIndent()
 
+    private const val EMPTY_ROOM_CONTEXT_HELPER = """
+        async function resolveEmptyRoomQueryContext(safeCampus, safeYear, safeSem) {
+            let xnm = safeYear || getDefaultAcademicYear();
+            let xqm = safeSem || ((new Date().getMonth() >= 7 || new Date().getMonth() === 0) ? "3" : "12");
+            const knownCampusMap = {
+                "湖光": "1",
+                "海滨": "2",
+                "阳江": "BBF8A51ACEA2144EE053768926D2788B",
+                "霞山": "3"
+            };
+            let xqhId = "";
+            for (const [k, v] of Object.entries(knownCampusMap)) {
+                if (safeCampus.includes(k)) {
+                    xqhId = v;
+                    break;
+                }
+            }
+            try {
+                const pageResp = await fetchJwWithFallback("/cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", {
+                    method: "GET",
+                    credentials: "include"
+                });
+                if (pageResp.ok) {
+                    const html = await pageResp.text();
+                    const doc = new DOMParser().parseFromString(html, "text/html");
+                    const dmCxEl = doc.querySelector("#dm_cx, select[name='dm_cx']");
+                    if (dmCxEl && dmCxEl.value && String(dmCxEl.value).includes("-")) {
+                        const parts = String(dmCxEl.value).trim().split("-");
+                        if (parts[0]) xnm = parts[0].trim();
+                        if (parts[1]) xqm = parts[1].trim();
+                    }
+                    const xnmEl = doc.querySelector("#xnm, select[name='xnm'], input[name='xnm']");
+                    const xqmEl = doc.querySelector("#xqm, select[name='xqm'], input[name='xqm']");
+                    if (xnmEl && xnmEl.value) xnm = String(xnmEl.value).trim();
+                    if (xqmEl && xqmEl.value) xqm = String(xqmEl.value).trim();
+
+                    const xqSelect = doc.querySelector("#xqh_id, select[name='xqh_id']");
+                    if (xqSelect) {
+                        const opts = Array.from(xqSelect.querySelectorAll("option"));
+                        const matched = opts.find(o => o.value && String(o.textContent || "").includes(safeCampus));
+                        const firstValid = opts.find(o => o.value && String(o.value).trim().length > 0);
+                        if (matched) xqhId = String(matched.value).trim();
+                        else if (!xqhId && firstValid) xqhId = String(firstValid.value).trim();
+                    }
+                }
+            } catch (_) {}
+            return { xnm, xqm, xqhId };
+        }
+
+        async function fetchEmptyRoomBlock(ctx, zcdMask, dow, secStart, secEnd, roomKeyword) {
+            let jcdMask = 0;
+            for (let sec = secStart; sec <= secEnd; sec++) {
+                jcdMask += Math.pow(2, sec - 1);
+            }
+            function buildForm(pageNo) {
+                return "fwzt=cx&xqh_id=" + encodeURIComponent(ctx.xqhId) +
+                    "&xnm=" + encodeURIComponent(ctx.xnm) +
+                    "&xqm=" + encodeURIComponent(ctx.xqm) +
+                    "&cdlb_id=&cdejlb_id=&qszws=&jszws=&cdmc=" + encodeURIComponent(roomKeyword || "") +
+                    "&lh=&jyfs=0&cdjylx=&zcd=" + encodeURIComponent(String(zcdMask)) +
+                    "&xqj=" + encodeURIComponent(String(dow)) +
+                    "&jcd=" + encodeURIComponent(String(jcdMask)) +
+                    "&_search=false&nd=" + (Date.now() + secStart) +
+                    "&queryModel.showCount=1000&queryModel.currentPage=" + pageNo + "&queryModel.sortName=cdbh&queryModel.sortOrder=asc&time=0";
+            }
+            const resp = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    "x-requested-with": "XMLHttpRequest"
+                },
+                body: buildForm(1),
+                credentials: "include"
+            });
+            if (!resp.ok) return null;
+            const json = JSON.parse(await resp.text());
+            let rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+            const totalPage = Number((json && json.totalPage) || 1);
+            const totalResult = Number((json && json.totalResult) || rawItems.length);
+            if (totalPage > 1 && rawItems.length < totalResult) {
+                try {
+                    const resp2 = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                            "x-requested-with": "XMLHttpRequest"
+                        },
+                        body: buildForm(2),
+                        credentials: "include"
+                    });
+                    if (resp2.ok) {
+                        const json2 = JSON.parse(await resp2.text());
+                        const more = Array.isArray(json2 && json2.items) ? json2.items : [];
+                        rawItems = rawItems.concat(more);
+                    }
+                } catch (_) {}
+            }
+            return rawItems;
+        }
+    """
+
     /**
-     * 原生级自习空教室只读查询（直接在当前登录态内调用正方场地查询接口，无需在手机小屏网页上戳下拉框）
+     * 原生级自习空教室只读查询（直接在当前登录态内调用正方场地查询接口，全量拉取当前校区全部教学楼空教室，
+     * 对跨双节如 1-4节/5-8节 并行拆块严格求交集，自动剔除线上/球场/基地等非自习场地）
      */
     fun buildQueryEmptyClassroomsScript(
         campusKeyword: String,
@@ -271,10 +373,14 @@ object GdouSyncScript {
         dayOfWeek: Int,
         startSection: Int,
         endSection: Int,
-        buildingKeyword: String
+        buildingKeyword: String,
+        fallbackAcademicYear: String = "",
+        fallbackSemesterCode: String = ""
     ): String {
         val safeCampus = campusKeyword.replace("\"", "")
         val safeBuilding = buildingKeyword.replace("\"", "")
+        val safeYear = fallbackAcademicYear.replace("\"", "").trim()
+        val safeSem = fallbackSemesterCode.replace("\"", "").trim()
         val w = weekNumber.coerceIn(1, 25)
         val d = dayOfWeek.coerceIn(1, 7)
         val s1 = startSection.coerceIn(1, 12)
@@ -282,91 +388,259 @@ object GdouSyncScript {
         return """
         (async function() {
             $COMMON_HELPERS
+            $EMPTY_ROOM_CONTEXT_HELPER
             try {
                 if (!checkOnJwDomain()) {
                     HaiyuBridge.onSyncError("请先完成广海教务系统登录，再查询空教室");
                     return;
                 }
-                HaiyuBridge.onSyncProgress("正在连接正方场地系统查询空教室...");
+                HaiyuBridge.onSyncProgress("正在连接正方场地系统全量拉取「$safeCampus」空教室...");
                 await ensureWfwJwSessionIfNeeded();
 
-                let xnm = getDefaultAcademicYear();
-                let xqm = (new Date().getMonth() >= 7 || new Date().getMonth() === 0) ? "3" : "12";
-                let xqhId = "";
-
-                // 1) Pre-warm empty classroom page and discover campus xqh_id & term codes
-                try {
-                    const pageResp = await fetchJwWithFallback("/cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", {
-                        method: "GET",
-                        credentials: "include"
-                    });
-                    if (pageResp.ok) {
-                        const html = await pageResp.text();
-                        const doc = new DOMParser().parseFromString(html, "text/html");
-                        const xnmEl = doc.querySelector("#xnm");
-                        const xqmEl = doc.querySelector("#xqm");
-                        if (xnmEl && xnmEl.value) xnm = String(xnmEl.value).trim();
-                        if (xqmEl && xqmEl.value) xqm = String(xqmEl.value).trim();
-
-                        const xqSelect = doc.querySelector("#xqh_id, select[name='xqh_id']");
-                        if (xqSelect) {
-                            const opts = Array.from(xqSelect.querySelectorAll("option"));
-                            const matched = opts.find(o => o.value && String(o.textContent || "").includes("$safeCampus"));
-                            const firstValid = opts.find(o => o.value && String(o.value).trim().length > 0);
-                            if (matched) xqhId = String(matched.value).trim();
-                            else if (firstValid) xqhId = String(firstValid.value).trim();
-                        }
-                    }
-                } catch (_) {}
-
+                const ctx = await resolveEmptyRoomQueryContext("$safeCampus", "$safeYear", "$safeSem");
                 const zcdMask = Math.pow(2, $w - 1);
-                let jcdMask = 0;
-                for (let sec = $s1; sec <= $s2; sec++) {
-                    jcdMask += Math.pow(2, sec - 1);
+
+                // Split multi-block ranges (e.g. 1-4 = [1..2, 3..4]) cleanly and intersect for 100% authentic consecutive free guarantee
+                const blocks = [];
+                if ($s2 - $s1 >= 2) {
+                    for (let cur = $s1; cur <= $s2; cur += 2) {
+                        blocks.push([cur, Math.min(cur + 1, $s2)]);
+                    }
+                } else {
+                    blocks.push([$s1, $s2]);
                 }
 
-                const form = "fwzt=cx&xqh_id=" + encodeURIComponent(xqhId) +
-                    "&xnm=" + encodeURIComponent(xnm) +
-                    "&xqm=" + encodeURIComponent(xqm) +
-                    "&cdlb_id=&cdejlb_id=&qszws=&jszws=&cdmc=" + encodeURIComponent("$safeBuilding") +
-                    "&lh=&jyfs=0&cdjylx=&zcd=" + encodeURIComponent(String(zcdMask)) +
-                    "&xqj=" + encodeURIComponent(String($d)) +
-                    "&jcd=" + encodeURIComponent(String(jcdMask)) +
-                    "&_search=false&nd=" + Date.now() +
-                    "&queryModel.showCount=80&queryModel.currentPage=1&queryModel.sortName=cdbh&queryModel.sortOrder=asc&time=0";
+                // Sequential per-block fetch avoids Struts2/WebVPN session race when intersecting multi-block ranges (1-4 / 5-8)
+                const mySeq = (window.__haiyuRoomQuerySeq = (window.__haiyuRoomQuerySeq || 0) + 1);
+                const blockResults = [];
+                for (const pair of blocks) {
+                    if (window.__haiyuRoomQuerySeq !== mySeq) return;
+                    const res = await fetchEmptyRoomBlock(ctx, zcdMask, $d, pair[0], pair[1], "");
+                    blockResults.push(res);
+                }
+                if (window.__haiyuRoomQuerySeq !== mySeq) return;
 
-                const resp = await fetchJwJsonWithFallback("/cdjy/cdjy_cxKxcdlb.html?doType=query&gnmkdm=N2155", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                        "x-requested-with": "XMLHttpRequest"
-                    },
-                    body: form,
-                    credentials: "include"
-                });
-
-                if (!resp.ok) {
-                    HaiyuBridge.onSyncError("空教室接口暂未返回数据（可在教务页点「进入原网页查空教室」查看）");
+                let hasNullBlock = false;
+                for (const r of blockResults) {
+                    if (r === null) {
+                        hasNullBlock = true;
+                        break;
+                    }
+                }
+                if (hasNullBlock) {
+                    HaiyuBridge.onSyncError("空教室接口暂未返回数据（可在教务页点「原网页」查看）");
                     return;
                 }
 
-                const json = JSON.parse(await resp.text());
-                const rawItems = Array.isArray(json && json.items) ? json.items : (Array.isArray(json) ? json : []);
+                const nonStudyBuildingRe = /线上教学|无楼号|体育课场地|田径运动场|体育场|体育馆|动物科学基地|动物医院|林学后山基地|林果楼|^工厂$/;
+                const nonStudyTypeRe = /网络教室|运动场|操场|录像/;
+                const nonStudyRoomRe = /网络教学平台|腾讯会议|钉钉直播|微信直播|超星平台|腾讯课堂|线上教学|^校外$|足球场|篮球场|排球场|网球场|羽毛球|游泳池|校道|田径运动场|台球室|乒乓球室|健身室|牛舍|鸡舍|羊舍|动物房|室外基地|后山基地|气象观测场|大厅前空地/;
+
+                function normalizeRooms(rawItems) {
+                    const map = new Map();
+                    for (const it of rawItems) {
+                        if (!it) continue;
+                        const roomName = String(it.cdmc || it.cdbh || "").trim();
+                        if (!roomName) continue;
+                        let building = String(it.jxlmc || it.lh || "").trim();
+                        const roomType = String(it.cdlbmc || "普通教室").trim();
+                        if (nonStudyBuildingRe.test(building) || nonStudyTypeRe.test(roomType) || nonStudyRoomRe.test(roomName)) {
+                            continue;
+                        }
+                        if (!building) {
+                            const bm = roomName.match(/^(广学楼|明德楼|钟海楼|博文楼|兴教楼|兴海楼|兴农楼|望海楼|图海楼|艺海楼[ABC]?|海科楼|海博楼|教学楼|实验楼|电教楼|济海楼|慎思楼|厚为楼|博学楼|明辨楼|海纳楼|海行楼|济航楼)/);
+                            building = bm ? bm[1] : "综合教学区";
+                        }
+                        const key = building + "|" + roomName;
+                        if (!map.has(key)) {
+                            map.set(key, {
+                                roomName,
+                                building,
+                                roomType,
+                                seats: String(it.kwzws || it.zws || "").trim(),
+                                campus: String(it.xqmc || "$safeCampus").trim()
+                            });
+                        }
+                    }
+                    return map;
+                }
+
+                const firstMap = normalizeRooms(blockResults[0]);
+                const otherMaps = blockResults.slice(1).map(normalizeRooms);
                 const bKw = "$safeBuilding".trim();
-                const rooms = rawItems.map(it => ({
-                    roomName: String(it.cdmc || it.cdbh || "").trim(),
-                    building: String(it.jxlmc || it.lh || "").trim(),
-                    roomType: String(it.cdlbmc || "普通教室").trim(),
-                    seats: String(it.kwzws || it.zws || "").trim(),
-                    campus: String(it.xqmc || "$safeCampus").trim()
-                })).filter(r => r.roomName.length > 0 && (!bKw || r.roomName.includes(bKw) || r.building.includes(bKw)));
+                const rooms = [];
+                for (const [key, item] of firstMap.entries()) {
+                    // Explicitly loop instead of Array.prototype.every because legacy Zhengfang pages override it
+                    let inAllBlocks = true;
+                    for (const m of otherMaps) {
+                        if (!m.has(key)) {
+                            inAllBlocks = false;
+                            break;
+                        }
+                    }
+                    if (!inAllBlocks) continue;
+                    if (bKw && !item.roomName.includes(bKw) && !item.building.includes(bKw)) continue;
+                    rooms.push(item);
+                }
+
+                const primeCount = rooms.filter(r =>
+                    !/实验室|实训|机房|语音|画室|琴房|多功能厅|咖啡|活动中心/.test(r.roomName) &&
+                    !/语音室|计算机房|多功能计算机房|设计教室|画室|绘图教室|艺术类|声乐|键盘|琴房|舞蹈|实验剧场/.test(r.roomType) &&
+                    !/工程训练中心|轮机实验楼|水产科技楼|第二实验综合楼|智能制造/.test(r.building)
+                ).length;
+                const buildingCount = new Set(rooms.map(r => r.building)).size;
 
                 HaiyuBridge.onEmptyClassroomsLoaded(JSON.stringify({
                     rooms,
-                    summary: "查询到 " + rooms.length + " 间空闲教室"
+                    summary: "$safeCampus" + "校区 · 共 " + primeCount + " 间自习教室（全校区共 " + rooms.length + " 间 · 覆盖 " + buildingCount + " 栋教学楼）"
                 }));
             } catch (err) {
                 HaiyuBridge.onSyncError("查询空教室失败：" + (err && err.message ? err.message : String(err)));
+            }
+        })();
+        """.trimIndent()
+    }
+
+    /**
+     * 单间教室今日全天（1-10 节共 5 大节）空闲时间轴并发只读检测，帮助判断“现在进去后下节课会不会被赶走”。
+     */
+    fun buildInspectRoomDayScheduleScript(
+        campusKeyword: String,
+        weekNumber: Int,
+        dayOfWeek: Int,
+        buildingName: String,
+        roomName: String,
+        fallbackAcademicYear: String = "",
+        fallbackSemesterCode: String = ""
+    ): String {
+        val safeCampus = campusKeyword.replace("\"", "").trim()
+        val safeBuilding = buildingName.replace("\"", "").trim()
+        val safeRoom = roomName.replace("\"", "").trim()
+        val safeYear = fallbackAcademicYear.replace("\"", "").trim()
+        val safeSem = fallbackSemesterCode.replace("\"", "").trim()
+        val w = weekNumber.coerceIn(1, 25)
+        val d = dayOfWeek.coerceIn(1, 7)
+        val noTag = safeRoom
+            .replace(Regex("[（(][^）)]*[）)]$"), "")
+            .trim()
+        val shortNoBld = if (safeBuilding.isNotEmpty() && noTag.startsWith(safeBuilding)) {
+            noTag.removePrefix(safeBuilding).trimStart('-', '—', ' ')
+        } else noTag
+        val searchKey = if (shortNoBld.length >= 2) shortNoBld else noTag
+        return """
+        (async function() {
+            $COMMON_HELPERS
+            $EMPTY_ROOM_CONTEXT_HELPER
+            try {
+                if (!checkOnJwDomain()) {
+                    HaiyuBridge.onSyncError("请先完成广海教务系统登录");
+                    return;
+                }
+                await ensureWfwJwSessionIfNeeded();
+                const ctx = await resolveEmptyRoomQueryContext("$safeCampus", "$safeYear", "$safeSem");
+                const zcdMask = Math.pow(2, $w - 1);
+                const dayBlocks = [[1,2],[3,4],[5,6],[7,8],[9,10]];
+                const targetRaw = "$safeRoom";
+                const targetCore = targetRaw.replace(/[（(][^）)]*[）)]${'$'}/, "").trim();
+                const targetBld = "$safeBuilding";
+                const qKw = "$searchKey" || targetCore || targetRaw;
+
+                const mySeq = (window.__haiyuRoomInspectSeq = (window.__haiyuRoomInspectSeq || 0) + 1);
+                const results = [];
+                let activeKw = qKw;
+                let switchedToFull = false;
+                for (let idx = 0; idx < dayBlocks.length; idx++) {
+                    if (window.__haiyuRoomInspectSeq !== mySeq) return;
+                    const pair = dayBlocks[idx];
+                    let items = await fetchEmptyRoomBlock(ctx, zcdMask, $d, pair[0], pair[1], activeKw);
+                    if (items === null && activeKw) {
+                        activeKw = "";
+                        switchedToFull = true;
+                        items = await fetchEmptyRoomBlock(ctx, zcdMask, $d, pair[0], pair[1], "");
+                    }
+                    results.push(items);
+                }
+                if (window.__haiyuRoomInspectSeq !== mySeq) return;
+                // Explicitly avoid Array.prototype.every/.find due to Zhengfang legacy Prototype/jQuery overrides
+                let allEmptyArr = results.length > 0;
+                for (const r of results) {
+                    if (!Array.isArray(r) || r.length > 0) {
+                        allEmptyArr = false;
+                        break;
+                    }
+                }
+                if (activeKw && !switchedToFull && allEmptyArr) {
+                    for (let idx = 0; idx < dayBlocks.length; idx++) {
+                        if (window.__haiyuRoomInspectSeq !== mySeq) return;
+                        const pair = dayBlocks[idx];
+                        results[idx] = await fetchEmptyRoomBlock(ctx, zcdMask, $d, pair[0], pair[1], "");
+                    }
+                }
+                if (window.__haiyuRoomInspectSeq !== mySeq) return;
+                let allNull = true;
+                for (const r of results) {
+                    if (r !== null) {
+                        allNull = false;
+                        break;
+                    }
+                }
+                if (allNull) {
+                    HaiyuBridge.onSyncError("未能查询该教室今日全天排课状况");
+                    return;
+                }
+
+                let resolvedName = targetRaw;
+                let resolvedBuilding = targetBld;
+                let resolvedSeats = "";
+                let resolvedType = "";
+                const bCore = targetBld.replace(/楼${'$'}/, "");
+
+                const slots = dayBlocks.map((pair, idx) => {
+                    const items = results[idx] || [];
+                    let matched = null;
+                    for (const it of items) {
+                        const mc = String(it.cdmc || "").trim();
+                        const b = String(it.jxlmc || it.lh || "").trim();
+                        const bOk = !targetBld || (b ? (b === targetBld || b.includes(bCore)) : (mc.includes(bCore) || mc === targetRaw));
+                        const rOk = mc === targetRaw || mc === targetCore ||
+                            mc.replace(/[（(][^）)]*[）)]${'$'}/, "").trim() === targetCore ||
+                            (items.length === 1 && mc.includes(qKw));
+                        if (bOk && rOk) {
+                            matched = it;
+                            break;
+                        }
+                    }
+                    if (!matched && !targetBld && items.length === 1) {
+                        matched = items[0];
+                    }
+                    if (matched) {
+                        resolvedName = String(matched.cdmc || targetRaw).trim();
+                        if (!resolvedBuilding) resolvedBuilding = String(matched.jxlmc || matched.lh || "").trim();
+                        if (!resolvedSeats) resolvedSeats = String(matched.kwzws || matched.zws || "").trim();
+                        if (!resolvedType) resolvedType = String(matched.cdlbmc || "").trim();
+                    }
+                    return {
+                        startSection: pair[0],
+                        endSection: pair[1],
+                        isFree: !!matched,
+                        matchedRoomName: matched ? String(matched.cdmc || "").trim() : "",
+                        seats: matched ? String(matched.kwzws || matched.zws || "").trim() : "",
+                        roomType: matched ? String(matched.cdlbmc || "").trim() : ""
+                    };
+                });
+
+                HaiyuBridge.onClassroomDayScheduleLoaded(JSON.stringify({
+                    campusName: "$safeCampus",
+                    building: resolvedBuilding,
+                    roomName: resolvedName,
+                    weekNumber: $w,
+                    dayOfWeek: $d,
+                    seats: resolvedSeats,
+                    roomType: resolvedType,
+                    slots
+                }));
+            } catch (err) {
+                HaiyuBridge.onSyncError("查询教室全天时间轴失败：" + (err && err.message ? err.message : String(err)));
             }
         })();
         """.trimIndent()
@@ -470,8 +744,44 @@ object GdouSyncScript {
         }
     """
 
+    private const val HAS_LOGGED_IN_PORTAL_DOM_JS = """
+        function hasLoggedInPortalDom() {
+            try {
+                if (typeof document === "undefined" || !document) return false;
+                if (document.querySelector('input[type="password"], #mm, #yhm, input[name="mm"]')) {
+                    return false;
+                }
+                const title = String(document.title || "").toLowerCase();
+                if (
+                    title.includes("统一身份认证") ||
+                    title.includes("多因子") ||
+                    title.includes("正在跳转") ||
+                    title.includes("无法打开") ||
+                    title.includes("出错") ||
+                    title.includes("error") ||
+                    title.includes("登录") ||
+                    title.includes("login")
+                ) {
+                    return false;
+                }
+                const bodyText = String((document.body && (document.body.innerText || document.body.textContent)) || "");
+                const headText = bodyText.slice(0, 600);
+                if (/统一身份认证|登录超时|会话超时|请先登录|用户登录/.test(headText)) {
+                    return false;
+                }
+                if (document.querySelector('#cdNav, #yhxx, .nav_menu, #top_menu, .top_menu')) {
+                    return true;
+                }
+                return /个人课表查询|学生成绩查询|空教室查询|考试查询|选课学分/.test(bodyText);
+            } catch (_) {
+                return false;
+            }
+        }
+    """
+
     private const val COMMON_HELPERS = """
         $BASE_PREFIX_HELPER
+        $HAS_LOGGED_IN_PORTAL_DOM_JS
 
         function checkOnJwDomain() {
             const host = (window.location && window.location.hostname || "").toLowerCase();
@@ -483,12 +793,19 @@ object GdouSyncScript {
                 host.startsWith("authserver.") ||
                 href.includes("/authserver/") ||
                 href.includes("/cas/login") ||
-                href.includes("login_slogin.html") ||
-                href.includes("/login") ||
+                href.includes("reauthcheck") ||
+                href.includes("reauthloginview") ||
+                href.includes("ismultifactor") ||
                 title.includes("统一身份认证") ||
+                title.includes("多因子") ||
+                title.includes("正在跳转") ||
                 title.includes("登录")
             ) {
                 return false;
+            }
+            // Server-side forward after login may keep /xtgl/login_slogin.html or login_tickitLogin.html URL
+            if (href.includes("login_slogin") || href.includes("login_tickit") || href.includes("/login")) {
+                return hasLoggedInPortalDom();
             }
             return true;
         }
@@ -765,9 +1082,9 @@ object GdouSyncScript {
                 else if (xq.includes("海滨")) votes.haibin += 3;
                 else if (xq.includes("阳江")) votes.yangjiang += 3;
 
-                if (/广学楼|明德楼|钟海楼|兴海楼|兴农楼|主楼|科技楼/.test(loc)) votes.huguang += 1;
-                else if (/慎思楼|海纳楼|厚德楼|铭德楼/.test(loc)) votes.yangjiang += 1;
-                else if (/^实\d|海滨/.test(loc)) votes.haibin += 1;
+                if (/广学楼|明德楼|钟海楼|博文楼|兴海楼|兴教楼|兴农楼|望海楼|图海楼|艺海楼|海科楼|海博楼|水产科技楼|主楼|科技楼/.test(loc)) votes.huguang += 1;
+                else if (/慎思楼|海纳楼|厚为楼|博学楼|明辨楼|海科楼一|海行楼|济航楼|海阳馆|海驰楼|海润楼|厚德楼|铭德楼/.test(loc)) votes.yangjiang += 1;
+                else if (/^实\d|海滨|电教楼|济海楼/.test(loc)) votes.haibin += 1;
             }
             let best = "";
             let maxV = 0;
@@ -1263,4 +1580,95 @@ object GdouSyncScript {
             };
         }
     """
+
+    /** 探测服务端内部转发后 URL 仍停留在 login_* 路径的页面是否已真实渲染教务首页 DOM。 */
+    val DOM_PORTAL_PROBE_SCRIPT: String = """
+        (function() {
+            $HAS_LOGGED_IN_PORTAL_DOM_JS
+            return hasLoggedInPortalDom() ? "LOGGED_IN" : "NOT_READY";
+        })();
+    """.trimIndent()
+
+    /** 判断当前 URL 是否处于统一认证多因子二次验证页。 */
+    fun isMfaUrl(url: String?): Boolean {
+        val lower = url.orEmpty().lowercase(java.util.Locale.US)
+        return lower.contains("reauthcheck") ||
+            lower.contains("reauthloginview") ||
+            lower.contains("ismultifactor")
+    }
+
+    /** 判断 URL 是否仍停留在教务登录/票据转发路径上。 */
+    fun isUrlOnPortalLoginPath(url: String?): Boolean {
+        val lower = url.orEmpty().lowercase(java.util.Locale.US)
+        return lower.contains("login_slogin") ||
+            lower.contains("login_tickit") ||
+            lower.contains("/login")
+    }
+
+    /** 安全提取请求 URL 的小写主机名，供纯 JVM 单元测试与 WebView 错误拦截复用。 */
+    fun extractHostLower(url: String?): String {
+        val raw = url?.trim().orEmpty()
+        if (raw.isEmpty()) return ""
+        return try {
+            java.net.URI(raw).host?.lowercase(java.util.Locale.US).orEmpty()
+        } catch (_: Exception) {
+            raw.substringAfter("://", raw)
+                .substringBefore("/")
+                .substringBefore("?")
+                .substringBefore("#")
+                .substringBefore(":")
+                .lowercase(java.util.Locale.US)
+        }
+    }
+
+    /** 切回目标通道后，忽略上一条被中断通道延迟送达的主框架网络错误。 */
+    fun isStaleChannelError(useOffCampus: Boolean, requestUrl: String?): Boolean {
+        val host = extractHostLower(requestUrl)
+        if (host.isEmpty()) return false
+        return if (useOffCampus) {
+            host == "jw.gdou.edu.cn"
+        } else {
+            host == "wfw.gdou.edu.cn"
+        }
+    }
+
+    /** 综合 URL、页面标题、错误状态与 DOM 探测结果，准确判定当前教务页是否已登录。 */
+    fun resolveJwLoginState(
+        url: String?,
+        pageTitle: String?,
+        pageErrorMsg: String?,
+        domConfirmedLoggedIn: Boolean
+    ): Boolean {
+        if (!pageErrorMsg.isNullOrBlank()) return false
+        val lower = url.orEmpty().lowercase(java.util.Locale.US)
+        val titleLower = pageTitle.orEmpty().lowercase(java.util.Locale.US)
+        val onJwOrWfw = lower.contains("jw.gdou.edu.cn") || lower.contains("wfw.gdou.edu.cn")
+        if (!onJwOrWfw) return false
+        if (
+            isMfaUrl(lower) ||
+            lower.contains("auth_error") ||
+            lower.contains("authserver.") ||
+            lower.contains("/authserver/") ||
+            lower.contains("sso.") ||
+            lower.contains("/cas/login")
+        ) {
+            return false
+        }
+        if (
+            titleLower.contains("无法打开") ||
+            titleLower.contains("出错") ||
+            titleLower.contains("error") ||
+            titleLower.contains("统一身份认证") ||
+            titleLower.contains("多因子") ||
+            titleLower.contains("正在跳转") ||
+            titleLower.contains("登录") ||
+            titleLower.contains("login")
+        ) {
+            return false
+        }
+        if (isUrlOnPortalLoginPath(lower)) {
+            return domConfirmedLoggedIn
+        }
+        return true
+    }
 }

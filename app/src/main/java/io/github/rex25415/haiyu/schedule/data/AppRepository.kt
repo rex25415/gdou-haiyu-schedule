@@ -5,7 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import io.github.rex25415.haiyu.schedule.model.AppDataSnapshot
 import io.github.rex25415.haiyu.schedule.model.AppSettings
@@ -223,35 +227,80 @@ class AppRepository(context: Context) {
     }
 
     /**
-     * 零权限保存自定义课表壁纸（自动降采样至 <= 1440px 以控制内存 < 2MB，仅存本机私有目录）
+     * 零权限保存自定义课表壁纸（单次流落盘缓冲 + ImageDecoder/BitmapFactory 双引擎适配 Android 8–17 与 HEIC/EXIF 旋转，
+     * 自动等比压至 <= 1440px，仅存本机私有目录）
      */
     fun saveScheduleBackgroundFromUri(uri: Uri): Result<String> {
+        var tempSrcFile: File? = null
+        var decodedBitmap: Bitmap? = null
+        var outputBitmap: Bitmap? = null
         return try {
-            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            appContext.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, boundsOpts)
-            } ?: return Result.failure(IllegalArgumentException("无法读取所选图片"))
+            val stream = try {
+                appContext.contentResolver.openInputStream(uri)
+                    ?: appContext.contentResolver.openAssetFileDescriptor(uri, "r")?.createInputStream()
+            } catch (_: SecurityException) {
+                return Result.failure(IllegalArgumentException("没有读取该图片的临时权限，请点「从系统文件选图」重试"))
+            } catch (_: Exception) {
+                null
+            } ?: return Result.failure(IllegalArgumentException("无法打开所选图片，请确认图片未被移除后重试"))
 
-            val maxDim = 1440
-            var sample = 1
-            while (boundsOpts.outWidth / sample > maxDim || boundsOpts.outHeight / sample > maxDim) {
-                sample *= 2
+            val maxInputBytes = 40L * 1024L * 1024L
+            val tmp = File.createTempFile("wp_src_", ".img", appContext.cacheDir)
+            tempSrcFile = tmp
+            var totalCopied = 0L
+            stream.use { input ->
+                FileOutputStream(tmp).use { out ->
+                    val buf = ByteArray(16 * 1024)
+                    while (true) {
+                        val read = input.read(buf)
+                        if (read <= 0) break
+                        totalCopied += read
+                        if (totalCopied > maxInputBytes) {
+                            return Result.failure(IllegalArgumentException("所选图片体积过大（超过 40MB），请选择轻量图片"))
+                        }
+                        out.write(buf, 0, read)
+                    }
+                }
             }
-            val decodeOpts = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
+            if (totalCopied <= 0L) {
+                return Result.failure(IllegalArgumentException("所选图片内容为空（若为云相册照片请先下载到本地后再试）"))
             }
-            val bitmap = appContext.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, decodeOpts)
-            } ?: return Result.failure(IllegalArgumentException("图片解码失败"))
+
+            decodedBitmap = decodeScaledWallpaperFile(tmp, maxDim = 1440)
+                ?: return Result.failure(IllegalArgumentException("图片格式暂不支持或文件已损坏，请换一张 JPG/PNG/HEIC 图片"))
+
+            val flattenNeeded = decodedBitmap.hasAlpha() || decodedBitmap.config != Bitmap.Config.ARGB_8888
+            val bitmapToSave = if (flattenNeeded) {
+                val safe = Bitmap.createBitmap(
+                    decodedBitmap.width.coerceAtLeast(1),
+                    decodedBitmap.height.coerceAtLeast(1),
+                    Bitmap.Config.ARGB_8888
+                )
+                val canvas = Canvas(safe)
+                canvas.drawColor(Color.WHITE)
+                canvas.drawBitmap(decodedBitmap, 0f, 0f, null)
+                outputBitmap = safe
+                safe
+            } else {
+                decodedBitmap
+            }
 
             val oldName = _state.value.settings.scheduleBgFileName
             val newName = "schedule_bg_${System.currentTimeMillis()}.jpg"
             val dstFile = File(appContext.filesDir, newName)
-            FileOutputStream(dstFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 86, out)
+            val dstTmp = File(appContext.filesDir, "$newName.tmp")
+            val compressed = FileOutputStream(dstTmp).use { out ->
+                bitmapToSave.compress(Bitmap.CompressFormat.JPEG, 88, out)
             }
-            bitmap.recycle()
+            if (!compressed || !dstTmp.exists() || dstTmp.length() <= 0L) {
+                dstTmp.delete()
+                return Result.failure(IllegalArgumentException("壁纸编码保存失败，请检查设备剩余存储空间"))
+            }
+            if (dstFile.exists()) dstFile.delete()
+            if (!dstTmp.renameTo(dstFile)) {
+                dstTmp.copyTo(dstFile, overwrite = true)
+                dstTmp.delete()
+            }
 
             if (oldName.isNotBlank() && oldName != newName) {
                 File(appContext.filesDir, oldName).delete()
@@ -269,7 +318,49 @@ class AppRepository(context: Context) {
             Result.success(newName)
         } catch (e: Exception) {
             Result.failure(IllegalArgumentException("设置壁纸失败：${e.message ?: "未知错误"}"))
+        } finally {
+            outputBitmap?.let { if (!it.isRecycled) it.recycle() }
+            decodedBitmap?.let { if (it !== outputBitmap && !it.isRecycled) it.recycle() }
+            tempSrcFile?.delete()
         }
+    }
+
+    private fun decodeScaledWallpaperFile(srcFile: File, maxDim: Int = 1440): Bitmap? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val source = ImageDecoder.createSource(srcFile)
+                return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    // Software allocator is mandatory so Bitmap.compress() never fails on HARDWARE bitmaps
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = false
+                    val (tw, th) = computeScaledTargetDimensions(info.size.width, info.size.height, maxDim)
+                    if (tw > 0 && th > 0) {
+                        decoder.setTargetSize(tw, th)
+                    }
+                }
+            } catch (_: Throwable) {
+                // Fall back to BitmapFactory if ImageDecoder fails on an uncommon container
+            }
+        }
+        return decodeViaBitmapFactory(srcFile, maxDim)
+    }
+
+    private fun decodeViaBitmapFactory(srcFile: File, maxDim: Int = 1440): Bitmap? {
+        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        // Note: decodeFile with inJustDecodeBounds=true always returns null; inspect outWidth/outHeight instead
+        BitmapFactory.decodeFile(srcFile.absolutePath, boundsOpts)
+        val srcW = boundsOpts.outWidth
+        val srcH = boundsOpts.outHeight
+        if (srcW <= 0 || srcH <= 0) return null
+
+        val sample = computeBitmapInSampleSize(srcW, srcH, maxDim)
+        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val decoded = BitmapFactory.decodeFile(srcFile.absolutePath, decodeOpts) ?: return null
+        val (targetW, targetH) = computeScaledTargetDimensions(decoded.width, decoded.height, maxDim)
+        if (decoded.width == targetW && decoded.height == targetH) return decoded
+        val scaled = Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
+        if (scaled !== decoded && !decoded.isRecycled) decoded.recycle()
+        return scaled
     }
 
     fun clearScheduleBackground() {
@@ -285,6 +376,50 @@ class AppRepository(context: Context) {
         if (fileName.isBlank()) return null
         val f = File(appContext.filesDir, fileName)
         return if (f.exists() && f.length() > 0L) f else null
+    }
+
+    fun toggleFavoriteBuilding(campus: GdouCampus, building: String): Boolean {
+        val normalized = building.trim()
+        if (normalized.isEmpty()) return false
+        val key = "${campus.id}|$normalized"
+        val current = _state.value
+        val existing = current.settings.favoriteBuildings.toMutableList()
+        val added = if (key in existing) {
+            existing.removeAll { it == key }
+            false
+        } else {
+            existing.add(0, key)
+            true
+        }
+        persist(current.copy(settings = current.settings.copy(favoriteBuildings = existing)))
+        return added
+    }
+
+    fun toggleFavoriteClassroom(
+        campus: GdouCampus,
+        building: String,
+        roomName: String,
+        seats: String = "",
+        roomType: String = ""
+    ): Boolean {
+        val cleanRoom = roomName.trim()
+        val cleanBuilding = building.trim()
+        if (cleanRoom.isEmpty()) return false
+        val matchPrefix = "${campus.id}|$cleanBuilding|$cleanRoom|"
+        val legacyExact = "${campus.id}|$cleanBuilding|$cleanRoom"
+        val encoded = "$matchPrefix${seats.trim()}|${roomType.trim()}"
+        val current = _state.value
+        val existing = current.settings.favoriteClassrooms.toMutableList()
+        val wasPresent = existing.any { it.startsWith(matchPrefix) || it == legacyExact }
+        existing.removeAll { it.startsWith(matchPrefix) || it == legacyExact }
+        val added = if (!wasPresent) {
+            existing.add(0, encoded)
+            true
+        } else {
+            false
+        }
+        persist(current.copy(settings = current.settings.copy(favoriteClassrooms = existing)))
+        return added
     }
 
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
@@ -758,4 +893,32 @@ class AppRepository(context: Context) {
             }
         }
     }
+}
+
+internal fun computeScaledTargetDimensions(
+    srcWidth: Int,
+    srcHeight: Int,
+    maxDim: Int = 1440
+): Pair<Int, Int> {
+    val safeMax = maxDim.coerceAtLeast(1)
+    if (srcWidth <= 0 || srcHeight <= 0) return safeMax to safeMax
+    if (srcWidth <= safeMax && srcHeight <= safeMax) return srcWidth to srcHeight
+    val scale = safeMax.toFloat() / maxOf(srcWidth, srcHeight).toFloat()
+    val w = (srcWidth * scale).toInt().coerceIn(1, safeMax)
+    val h = (srcHeight * scale).toInt().coerceIn(1, safeMax)
+    return w to h
+}
+
+internal fun computeBitmapInSampleSize(
+    srcWidth: Int,
+    srcHeight: Int,
+    maxDim: Int = 1440
+): Int {
+    val safeMax = maxDim.coerceAtLeast(1)
+    if (srcWidth <= 0 || srcHeight <= 0) return 1
+    var sample = 1
+    while (srcWidth / sample > safeMax || srcHeight / sample > safeMax) {
+        sample *= 2
+    }
+    return sample
 }

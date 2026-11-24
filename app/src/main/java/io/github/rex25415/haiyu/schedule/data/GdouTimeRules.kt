@@ -83,6 +83,14 @@ data class JointFreeCell(
     val state: JointFreeState
 )
 
+data class CourseLocationContext(
+    val building: String,
+    val floor: Int?,
+    val courseName: String,
+    val rawLocation: String,
+    val hintText: String
+)
+
 object GdouTimeRules {
 
     // 广东海洋大学全校统一标准作息时间（1-10节，2026 现行）
@@ -1070,6 +1078,171 @@ object GdouTimeRules {
                     credit = "1.5"
                 )
             )
+        }
+    }
+
+    fun extractRoomFloor(roomName: String, buildingHint: String = ""): Int? {
+        var rest = roomName.trim()
+        if (rest.isEmpty()) return null
+        val b = buildingHint.trim()
+        if (b.isNotEmpty()) {
+            rest = rest
+                .removePrefix(b)
+                .removePrefix(b.removeSuffix("楼"))
+                .trimStart('-', '—', ' ')
+            if (b == "实验楼" && rest.startsWith("实") && rest.getOrNull(1)?.isDigit() == true) {
+                rest = rest.removePrefix("实").trimStart('-', '—', ' ')
+            } else if (b == "教学楼" && rest.startsWith("教") && rest.getOrNull(1)?.isDigit() == true) {
+                rest = rest.removePrefix("教").trimStart('-', '—', ' ')
+            }
+        } else if (rest.startsWith("实") && rest.getOrNull(1)?.isDigit() == true) {
+            rest = rest.removePrefix("实").trimStart('-', '—', ' ')
+        }
+        // Format like 01003 / 02005 in Zhonghai building: first 2 digits encode floor 01..09
+        Regex("^(?:0([1-9])\\d{3})(?:\\D|$)").find(rest)?.let { m ->
+            return m.groupValues[1].toIntOrNull()
+        }
+        // Standard 3-digit room like 105, 505, A204, B501, 506-1
+        Regex("^[A-Za-z]?([1-9])\\d{2}(?:\\D|$)").find(rest)?.let { m ->
+            return m.groupValues[1].toIntOrNull()
+        }
+        // High-rise 4-digit room like 1001, 1404 (treated as 5+ unless Mingde B12xx sub-block)
+        Regex("^([1-9]\\d)\\d{2}(?:\\D|$)").find(rest)?.let { m ->
+            val rawFloor = m.groupValues[1].toIntOrNull() ?: return null
+            if (b.contains("明德") && rest.startsWith("B", ignoreCase = true) && rest.length >= 4) {
+                return rest[2].digitToIntOrNull()
+            }
+            return rawFloor
+        }
+        // 明德楼B1202 / B2302 style
+        Regex("^[AB][12]([1-9])\\d{2}").find(rest)?.let { m ->
+            return m.groupValues[1].toIntOrNull()
+        }
+        return null
+    }
+
+    fun extractBuildingAndFloor(location: String, campus: GdouCampus): Pair<String, Int?>? {
+        val loc = location.trim()
+        if (loc.isEmpty()) return null
+        val knownBuildings = when (campus) {
+            GdouCampus.HUGUANG -> listOf(
+                "广学楼", "明德楼", "钟海楼", "博文楼", "兴教楼", "兴农楼",
+                "兴海楼", "望海楼", "图海楼", "艺海楼A", "艺海楼B", "艺海楼C",
+                "艺海楼", "海科楼", "海博楼", "第二实验综合楼", "轮机实验楼", "水产科技楼"
+            )
+            GdouCampus.HAIBIN -> listOf("教学楼", "实验楼", "电教楼", "济海楼")
+            GdouCampus.YANGJIANG -> listOf(
+                "慎思楼", "厚为楼", "博学楼", "明辨楼", "海纳楼",
+                "海科楼一", "海行楼", "济航楼", "海驰楼", "海润楼", "厚德楼"
+            )
+        }
+        if (campus == GdouCampus.HAIBIN && HAIBIN_LAB_SHORT_REGEX.containsMatchIn(loc)) {
+            val floor = extractRoomFloor(loc.removePrefix("实"), "")
+            return "实验楼" to floor
+        }
+        val matched = knownBuildings.firstOrNull { loc.contains(it) } ?: return null
+        val canonical = when {
+            matched.startsWith("艺海楼") -> "艺海楼"
+            else -> matched
+        }
+        val floor = extractRoomFloor(loc, matched)
+        return canonical to floor
+    }
+
+    /**
+     * 基于用户本地离线课表，零权限推断“此时或查询当天”所在/即将上课的教学楼与楼层，
+     * 方便查空教室自动把同楼或相邻教学楼推到前排。
+     */
+    fun inferCourseLocationContext(
+        courses: List<CourseItem>,
+        startDateStr: String,
+        totalWeeks: Int,
+        targetCampus: GdouCampus,
+        targetWeek: Int,
+        targetDay: Int,
+        queryStartSection: Int,
+        now: LocalDateTime = LocalDateTime.now(),
+        pinnedKeys: Set<String> = emptySet()
+    ): CourseLocationContext? {
+        if (courses.isEmpty()) return null
+        val today = now.toLocalDate()
+        val weekInfo = calculateTermWeekInfo(startDateStr, totalWeeks, today)
+        val isTodayQuery = weekInfo.phase == TermWeekPhase.IN_TERM &&
+            targetWeek == weekInfo.clampedWeek &&
+            targetDay == today.dayOfWeek.value
+
+        if (isTodayQuery) {
+            val todayStatuses = getTodayCoursesWithStatus(
+                courses = courses,
+                startDateStr = startDateStr,
+                totalWeeks = totalWeeks,
+                campus = targetCampus,
+                now = now,
+                pinnedKeys = pinnedKeys
+            )
+            // Priority 1: ongoing course -> upcoming course -> most recently finished course
+            val ongoing = todayStatuses
+                .filter { it.state == OccurrenceState.ONGOING }
+                .firstNotNullOfOrNull { st ->
+                    extractBuildingAndFloor(st.course.location, targetCampus)?.let { (b, fl) ->
+                        CourseLocationContext(
+                            building = b,
+                            floor = fl,
+                            courseName = st.course.name,
+                            rawLocation = st.course.location,
+                            hintText = "正在上课「${st.course.location}」· 同楼优先"
+                        )
+                    }
+                }
+            if (ongoing != null) return ongoing
+
+            val upcoming = todayStatuses
+                .filter { it.state == OccurrenceState.UPCOMING }
+                .sortedBy { it.minutesDelta }
+                .firstNotNullOfOrNull { st ->
+                    extractBuildingAndFloor(st.course.location, targetCampus)?.let { (b, fl) ->
+                        CourseLocationContext(
+                            building = b,
+                            floor = fl,
+                            courseName = st.course.name,
+                            rawLocation = st.course.location,
+                            hintText = "下节 ${st.time.startTime} 将去「${st.course.location}」"
+                        )
+                    }
+                }
+            if (upcoming != null) return upcoming
+
+            val finished = todayStatuses
+                .filter { it.state == OccurrenceState.FINISHED }
+                .sortedBy { it.minutesDelta }
+                .firstNotNullOfOrNull { st ->
+                    extractBuildingAndFloor(st.course.location, targetCampus)?.let { (b, fl) ->
+                        CourseLocationContext(
+                            building = b,
+                            floor = fl,
+                            courseName = st.course.name,
+                            rawLocation = st.course.location,
+                            hintText = "刚在「${st.course.location}」下课"
+                        )
+                    }
+                }
+            if (finished != null) return finished
+        }
+
+        // Non-today fallback: match targetWeek & targetDay courses nearest queryStartSection
+        val dayCourses = courses
+            .filter { it.dayOfWeek == targetDay && targetWeek in it.weeks }
+            .sortedBy { kotlin.math.abs(it.startSection - queryStartSection) }
+        return dayCourses.firstNotNullOfOrNull { c ->
+            extractBuildingAndFloor(c.location, targetCampus)?.let { (b, fl) ->
+                CourseLocationContext(
+                    building = b,
+                    floor = fl,
+                    courseName = c.name,
+                    rawLocation = c.location,
+                    hintText = "当天有课于「${c.location}」"
+                )
+            }
         }
     }
 

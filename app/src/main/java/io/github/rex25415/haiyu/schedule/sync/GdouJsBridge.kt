@@ -101,6 +101,28 @@ private data class SyncedEmptyClassroomsPayload(
 )
 
 @Serializable
+private data class SyncedRoomSlotDto(
+    val startSection: Int = 1,
+    val endSection: Int = 2,
+    val isFree: Boolean = false,
+    val matchedRoomName: String = "",
+    val seats: String = "",
+    val roomType: String = ""
+)
+
+@Serializable
+private data class SyncedRoomDaySchedulePayload(
+    val campusName: String = "",
+    val building: String = "",
+    val roomName: String = "",
+    val weekNumber: Int = 1,
+    val dayOfWeek: Int = 1,
+    val seats: String = "",
+    val roomType: String = "",
+    val slots: List<SyncedRoomSlotDto> = emptyList()
+)
+
+@Serializable
 private data class SyncedExamDto(
     val academicYear: String = "",
     val semester: String = "",
@@ -133,6 +155,16 @@ interface GdouSyncCallback {
     fun onGradesSynced(grades: List<GradeItem>, levelExams: List<LevelExamItem> = emptyList())
     fun onExamsSynced(exams: List<ExamItem>)
     fun onEmptyClassroomsLoaded(rooms: List<EmptyClassroomItem>, summary: String) {}
+    fun onClassroomDayScheduleLoaded(
+        campusLabel: String,
+        building: String,
+        roomName: String,
+        weekNumber: Int,
+        dayOfWeek: Int,
+        seats: String,
+        roomType: String,
+        slots: List<io.github.rex25415.haiyu.schedule.model.ClassroomSlotStatus>
+    ) {}
     fun onComplete(summary: String)
     fun onError(errorMessage: String)
     fun onQuickRefreshNeedsLogin(reason: String) {}
@@ -257,6 +289,36 @@ class GdouJsBridge(
             callback.onEmptyClassroomsLoaded(payload.rooms, payload.summary)
         } catch (e: Exception) {
             callback.onError("解析空教室结果失败：${e.message}")
+        }
+    }
+
+    @JavascriptInterface
+    fun onClassroomDayScheduleLoaded(payloadJson: String) {
+        if (!isAllowedOrigin()) return
+        try {
+            val payload = json.decodeFromString(SyncedRoomDaySchedulePayload.serializer(), payloadJson)
+            val mappedSlots = payload.slots.map {
+                io.github.rex25415.haiyu.schedule.model.ClassroomSlotStatus(
+                    startSection = it.startSection,
+                    endSection = it.endSection,
+                    isFree = it.isFree,
+                    matchedRoomName = it.matchedRoomName,
+                    seats = it.seats,
+                    roomType = it.roomType
+                )
+            }
+            callback.onClassroomDayScheduleLoaded(
+                campusLabel = payload.campusName,
+                building = payload.building,
+                roomName = payload.roomName,
+                weekNumber = payload.weekNumber,
+                dayOfWeek = payload.dayOfWeek,
+                seats = payload.seats,
+                roomType = payload.roomType,
+                slots = mappedSlots
+            )
+        } catch (e: Exception) {
+            callback.onError("解析教室全天时间轴失败：${e.message}")
         }
     }
 

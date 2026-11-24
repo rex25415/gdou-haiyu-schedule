@@ -5,15 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.WidgetScheduleHelper
 
 class ClassReminderReceiver : BroadcastReceiver() {
 
     private fun refreshAllDesktopWidgets(context: Context) {
-        TodayScheduleWidgetProvider.refreshAllWidgets(context)
-        CountdownWidgetProvider.refreshAllWidgets(context)
-        NextClassWidgetProvider.refreshAllWidgets(context)
+        WidgetScheduleHelper.refreshAllWidgets(context)
     }
 
     override fun onReceive(context: Context, intent: Intent?) {

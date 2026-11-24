@@ -1,11 +1,11 @@
 {
-  "tagName": "v3.2.0",
-  "versionName": "3.2.0",
-  "title": "海屿空间 v3.2.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.2.0.apk",
-  "apkSizeBytes": 1940933,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.2.0/HaiyuSchedule-GDOU-v3.2.0.apk",
-  "expectedSha256": "2f2c032bb56423141901c1443ea4d88cb0a94972f2d2e641de723333d697cd2d",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.2.0",
-  "releaseNotes": "💬 致各位海大同学：v3.2.0 是一次面向全站体验、功能收纳与深色视觉的深度打磨，主课表永远稳居 C 位，更多硬核工具一键直达！\n\n- 首页课表主界面升级：新增「课表百宝箱」视觉 2×4 工具抽屉，并支持一键开启「微缩单行预告条」留出更大周课表视野\n- 全新原生「查空教室」自习室面板：在教务页双模式中直连实时教学楼空教室查询，支持校区切换与楼栋关键词即时筛选\n- 学业中心减负与分析深度整合：支持按待办/成绩/考务智能默认落页，并将 GPA 趋势图、毕业学分目标进度、等级考试档案与目标反推收进「学业深度分析」抽屉；彻底修复深海深色模式成绩卡片与分段徽章对比度\n- 设置页「三大工作台」清晰重构：高频校历/提醒前置，外观显示、桌面小组件/全量备份、更新验真与隐私管理分类收口，同时完善校园实景/真机多分辨率适配"
+  "tagName": "v3.3.0",
+  "versionName": "3.3.0",
+  "title": "海屿空间 v3.3.0",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.3.0.apk",
+  "apkSizeBytes": 2011377,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk",
+  "expectedSha256": "29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.3.0",
+  "releaseNotes": "💬 致各位海大同学：v3.3.0 重点围绕「自习室深度找位、绩点口径去重、2×2 极简方卡小组件」以及同学反馈的两个 Issue 问题（#2、#3）完成了全面打磨！\n\n- 查空教室 2.0 深度升级：新增「单间教室今日全天 5 大节逐节空课时间轴」，支持湖光/海滨/阳江三校区楼栋与楼层识别、自习室优先级排序、结合当前上课地点推理附近空教室，以及常去楼栋/教室收藏置顶\n- 成绩与 GPA 科学去重：自动识别正方「初修 + 补考/重修」同课重复记录，支持切换「有效去重 / 仅已通过 / 原始全计」三种统计口径并识别实验/实践课，避免多算挂科学分分母\n- 新增「海屿极简方卡（2×2）」与桌面工作台直放（响应 #2）：正式扩充至 4 款深浅自适应桌面小组件，设置工作台支持一键「放到桌面」；极简方卡与 4×1 小组件优化节次与时间段排版\n- 零权限壁纸导入全链路重构（响应 #3）：采用落盘缓冲 + ImageDecoder/BitmapFactory 双引擎解码，全面兼容 Android 8–17 照片选择器、HEIC/EXIF 旋转与透明图，支持系统文件选择器兜底与云相册空流提示\n- 同步通道切换与登录态探测加固：隔离切换校外/校园网通道后的旧请求错误回调，增强重定向门户页面下已登录 DOM 状态的自动识别"
 }

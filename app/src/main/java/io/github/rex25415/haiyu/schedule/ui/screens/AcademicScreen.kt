@@ -97,7 +97,11 @@ import io.github.rex25415.haiyu.schedule.model.GraduationCreditTargets
 import io.github.rex25415.haiyu.schedule.model.LevelExamItem
 import io.github.rex25415.haiyu.schedule.model.TodoTaskItem
 import io.github.rex25415.haiyu.schedule.ui.components.AcademicAnalyticsBottomSheet
+import io.github.rex25415.haiyu.schedule.ui.components.GpaCalcMode
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
+import io.github.rex25415.haiyu.schedule.ui.components.computeGradeMetrics
+import io.github.rex25415.haiyu.schedule.ui.components.deduplicateEffectiveGrades
+import io.github.rex25415.haiyu.schedule.ui.components.isGradePassed
 import io.github.rex25415.haiyu.schedule.ui.components.parseScoreNumeric
 import java.time.Instant
 import java.time.LocalDate
@@ -617,13 +621,17 @@ private fun GradesContent(
     }
     var selectedTerm by remember(termTags) { mutableStateOf("全部学期") }
     var selectedNatureFilter by remember { mutableStateOf("全部性质") }
+    var calcMode by remember { mutableStateOf(GpaCalcMode.EFFECTIVE_BEST) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearchField by remember { mutableStateOf(false) }
     var showTermDropdown by remember { mutableStateOf(false) }
+    var showCalcModeDropdown by remember { mutableStateOf(false) }
     var showAnalyticsSheet by remember { mutableStateOf(false) }
     var collapsedTerms by remember { mutableStateOf(setOf<String>()) }
     var selectedGradeDetail by remember { mutableStateOf<GradeItem?>(null) }
     var showEditTargetsDialog by remember { mutableStateOf(false) }
+
+    val globalDedup = remember(grades) { deduplicateEffectiveGrades(grades) }
 
     val filtered = remember(grades, selectedTerm, selectedNatureFilter, searchQuery) {
         grades.filter { g ->
@@ -649,25 +657,8 @@ private fun GradesContent(
             .sortedByDescending { it.key }
     }
 
-    val stats = remember(filtered) {
-        var totalCredits = 0.0
-        var weightedGp = 0.0
-        var weightedScore = 0.0
-        var numericCredits = 0.0
-        filtered.forEach { g ->
-            if (g.credit > 0) {
-                totalCredits += g.credit
-                weightedGp += g.gradePoint * g.credit
-                val numeric = parseScoreNumeric(g.score)
-                if (numeric != null) {
-                    weightedScore += numeric * g.credit
-                    numericCredits += g.credit
-                }
-            }
-        }
-        val gpa = if (totalCredits > 0) weightedGp / totalCredits else 0.0
-        val avgScore = if (numericCredits > 0) weightedScore / numericCredits else 0.0
-        Triple(gpa, avgScore, totalCredits)
+    val metrics = remember(filtered, calcMode) {
+        computeGradeMetrics(filtered, calcMode)
     }
 
     LazyColumn(
@@ -695,6 +686,7 @@ private fun GradesContent(
                     ) {
                         val scopeTitle = buildString {
                             append(if (selectedTerm == "全部学期") "累计加权平均绩点 (GPA)" else "$selectedTerm · GPA")
+                            append(" · ${calcMode.label}")
                             if (selectedNatureFilter != "全部性质") append(" · $selectedNatureFilter")
                         }
                         Text(
@@ -741,22 +733,46 @@ private fun GradesContent(
                         verticalAlignment = Alignment.Bottom
                     ) {
                         Text(
-                            text = String.format(Locale.US, "%.2f", stats.first),
+                            text = String.format(Locale.US, "%.2f", metrics.gpa),
                             color = heroFg,
                             fontSize = 36.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            StatSmallColumn("加权均分", String.format(Locale.US, "%.1f", stats.second), heroFg)
-                            StatSmallColumn("总学分", String.format(Locale.US, "%.1f", stats.third), heroFg)
-                            StatSmallColumn("门数", "${filtered.size}", heroFg)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            StatSmallColumn("加权均分", String.format(Locale.US, "%.1f", metrics.weightedAvgScore), heroFg)
+                            val creditLabel = when (calcMode) {
+                                GpaCalcMode.EFFECTIVE_BEST -> "已获/修读学分"
+                                GpaCalcMode.PASSED_ONLY -> "已获学分"
+                                GpaCalcMode.RAW_ALL -> "原始累算学分"
+                            }
+                            val creditVal = when (calcMode) {
+                                GpaCalcMode.EFFECTIVE_BEST -> "${String.format(Locale.US, "%.1f", metrics.earnedCredits)}/${String.format(Locale.US, "%.1f", metrics.totalCredits)}"
+                                GpaCalcMode.PASSED_ONLY -> String.format(Locale.US, "%.1f", metrics.earnedCredits)
+                                GpaCalcMode.RAW_ALL -> String.format(Locale.US, "%.1f", metrics.totalCredits)
+                            }
+                            StatSmallColumn(creditLabel, creditVal, heroFg)
+                            StatSmallColumn("门数", "${metrics.courseCount}", heroFg)
                         }
+                    }
+                    if (globalDedup.duplicateCourseCount > 0 && selectedTerm == "全部学期") {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = when (calcMode) {
+                                GpaCalcMode.EFFECTIVE_BEST -> "✓ 已自动合并 ${globalDedup.duplicateCourseCount} 门补考/重修重复记录（剔除重复分母 ${String.format(Locale.US, "%.2f", globalDedup.duplicateCreditsRemoved)} 学分）"
+                                GpaCalcMode.PASSED_ONLY -> "✓ 仅统计已及格通过课程（共通过 ${globalDedup.passedGrades.size} 门 · 获 ${String.format(Locale.US, "%.1f", globalDedup.earnedCredits)} 学分）"
+                                GpaCalcMode.RAW_ALL -> "提示：原始全计包含 ${globalDedup.duplicateCourseCount} 门初修与补考重复记录（多计 ${String.format(Locale.US, "%.2f", globalDedup.duplicateCreditsRemoved)} 学分）"
+                            },
+                            color = heroFg.copy(alpha = 0.86f),
+                            fontSize = 10.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
         }
 
-        // Slim Term Scope Picker + Level Exams Pill + Search Toggle + Nature Recompute Pills
+        // Slim Term Scope Picker + Calc Mode Pills + Level Exams Pill + Search Toggle + Nature Recompute Pills
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
@@ -807,6 +823,66 @@ private fun GradesContent(
                                     onClick = {
                                         selectedTerm = tag
                                         showTermDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Sleek 3-Mode GPA Calculation Dropdown (zero overflow even on 320dp portrait phones + clear rule hints!)
+                    Box {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showCalcModeDropdown = true }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = calcMode.label,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = "切换绩点口径",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showCalcModeDropdown,
+                            onDismissRequest = { showCalcModeDropdown = false }
+                        ) {
+                            GpaCalcMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column(modifier = Modifier.widthIn(max = 260.dp)) {
+                                            Text(
+                                                text = if (mode == GpaCalcMode.EFFECTIVE_BEST) "${mode.label}（推荐）" else mode.label,
+                                                fontWeight = if (calcMode == mode) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (calcMode == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = mode.shortHint,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        calcMode = mode
+                                        showCalcModeDropdown = false
                                     }
                                 )
                             }
@@ -870,7 +946,7 @@ private fun GradesContent(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (showSearchField) "收起搜索" else "搜课程",
+                                text = if (showSearchField) "收起" else "搜课",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.primary
@@ -926,12 +1002,18 @@ private fun GradesContent(
         groupedByTerm.forEach { (termKey, termGrades) ->
             val isCollapsed = termKey in collapsedTerms
             item(key = "header_$termKey") {
-                val termStat = remember(termGrades) {
+                val termStat = remember(termGrades, calcMode, globalDedup) {
+                    val activeGrades = when (calcMode) {
+                        GpaCalcMode.EFFECTIVE_BEST -> termGrades.filter { it.id !in globalDedup.supersededByMap }
+                        GpaCalcMode.PASSED_ONLY -> termGrades.filter { it.id !in globalDedup.supersededByMap && isGradePassed(it) }
+                        GpaCalcMode.RAW_ALL -> termGrades
+                    }
+                    val skippedDuplicates = termGrades.size - activeGrades.size
                     var cr = 0.0
                     var gpSum = 0.0
                     var scSum = 0.0
                     var scCr = 0.0
-                    termGrades.forEach { g ->
+                    activeGrades.forEach { g ->
                         if (g.credit > 0.0) {
                             cr += g.credit
                             gpSum += g.gradePoint * g.credit
@@ -944,8 +1026,9 @@ private fun GradesContent(
                     }
                     val gpa = if (cr > 0.0) gpSum / cr else 0.0
                     val avg = if (scCr > 0.0) scSum / scCr else 0.0
-                    Triple(gpa, avg, cr)
+                    listOf(gpa, avg, cr, skippedDuplicates.toDouble())
                 }
+                val skippedCount = termStat[3].toInt()
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(12.dp),
@@ -971,7 +1054,12 @@ private fun GradesContent(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "学期 GPA ${String.format(Locale.US, "%.2f", termStat.first)} · 加权均分 ${String.format(Locale.US, "%.1f", termStat.second)} · 共 ${String.format(Locale.US, "%.1f", termStat.third)} 学分",
+                                text = buildString {
+                                    append("学期 GPA ${String.format(Locale.US, "%.2f", termStat[0])} · 加权均分 ${String.format(Locale.US, "%.1f", termStat[1])} · 计入 ${String.format(Locale.US, "%.2f", termStat[2]).removeSuffix("0").removeSuffix(".")} 学分")
+                                    if (skippedCount > 0 && calcMode == GpaCalcMode.EFFECTIVE_BEST) {
+                                        append("（已去重 $skippedCount 条同课重复记录）")
+                                    }
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -989,11 +1077,13 @@ private fun GradesContent(
             if (!isCollapsed) {
                 items(termGrades, key = { it.id }) { grade ->
                     val numeric = parseScoreNumeric(grade.score)
+                    val supersededInfo = globalDedup.supersededByMap[grade.id]
                     val scoreColor = when {
                         numeric == null -> MaterialTheme.colorScheme.primary
                         numeric >= 90 -> if (isDark) Color(0xFF4ADE80) else Color(0xFF0E8A5F)
                         numeric >= 80 -> if (isDark) Color(0xFF60A5FA) else Color(0xFF1A6FD4)
                         numeric >= 60 -> MaterialTheme.colorScheme.onSurface
+                        supersededInfo?.isBestPassed == true -> MaterialTheme.colorScheme.onSurfaceVariant
                         else -> MaterialTheme.colorScheme.error
                     }
                     Card(
@@ -1018,6 +1108,24 @@ private fun GradesContent(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f, fill = false)
                                     )
+                                    if (grade.examNature.isNotBlank() && grade.examNature != "正常考试") {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        val isPassMakeup = isGradePassed(grade)
+                                        Surface(
+                                            color = if (isPassMakeup) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.tertiaryContainer,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = grade.examNature,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isPassMakeup) MaterialTheme.colorScheme.onPrimaryContainer
+                                                else MaterialTheme.colorScheme.onTertiaryContainer,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
                                     if (grade.isSimulated) {
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Surface(
@@ -1043,6 +1151,20 @@ private fun GradesContent(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (supersededInfo != null && calcMode != GpaCalcMode.RAW_ALL) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    val best = supersededInfo.bestAttempt
+                                    Text(
+                                        text = if (supersededInfo.isBestPassed) {
+                                            "✓ 已由${best.examNature}(${best.score}分)通过替代 · 不重复计入总学分"
+                                        } else {
+                                            "同课多次考试记录 · 已按最高分(${best.score}分)单次计入总学分"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (supersededInfo.isBestPassed) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 if (grade.breakdown.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(

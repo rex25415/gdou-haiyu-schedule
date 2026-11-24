@@ -644,7 +644,7 @@ object AppUpdateManager {
      * 生成克制、实用的同学分享文案与免翻下载链接（零广告感）
      */
     fun buildAppShareText(): String {
-        return "分享一个纯本地、无广告的广海三校区学业工具「海屿空间」（原名海屿课表，免校园网可一键同步课表、成绩/GPA、考试倒计时、DDL 与三款桌面小组件）：\n" +
+        return "分享一个纯本地、无广告的广海三校区学业工具「海屿空间」（原名海屿课表，免校园网可一键同步课表、成绩/GPA、考试倒计时、DDL 与四款桌面小组件）：\n" +
             "中文高速下载页（免翻 GitHub）：$DOWNLOAD_PAGE_URL"
     }
 

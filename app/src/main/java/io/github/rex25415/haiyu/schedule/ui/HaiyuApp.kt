@@ -1,6 +1,5 @@
 package io.github.rex25415.haiyu.schedule.ui
 
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.webkit.CookieManager
@@ -65,9 +64,7 @@ import io.github.rex25415.haiyu.schedule.update.AppReleaseInfo
 import io.github.rex25415.haiyu.schedule.update.AppUpdateManager
 import io.github.rex25415.haiyu.schedule.update.LegacyPackageDetector
 import io.github.rex25415.haiyu.schedule.update.UpdateCheckResult
-import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.WidgetScheduleHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -193,9 +190,7 @@ fun HaiyuApp(
     }
 
     fun syncWidgetsAndReminders() {
-        TodayScheduleWidgetProvider.refreshAllWidgets(context)
-        CountdownWidgetProvider.refreshAllWidgets(context)
-        NextClassWidgetProvider.refreshAllWidgets(context)
+        WidgetScheduleHelper.refreshAllWidgets(context)
         ClassReminderScheduler.rescheduleNextReminder(context)
     }
 
@@ -214,8 +209,10 @@ fun HaiyuApp(
         }
     }
 
-    // Custom schedule wallpaper decoded off the UI thread (RGB_565, <=1440px)
+    // Custom schedule wallpaper decoded off the UI thread (<=1440px ARGB_8888 for clean gradients)
     var scheduleBgBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var isImportingWallpaper by remember { mutableStateOf(false) }
+    var wallpaperStatus by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     LaunchedEffect(snapshot.settings.scheduleBgFileName) {
         val fileName = snapshot.settings.scheduleBgFileName
         scheduleBgBitmap = if (fileName.isBlank()) {
@@ -225,10 +222,7 @@ fun HaiyuApp(
                 val file = repo.getScheduleBackgroundFile(fileName)
                 if (file != null) {
                     try {
-                        val opts = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.RGB_565
-                        }
-                        BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
+                        BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
                     } catch (_: Exception) {
                         null
                     }
@@ -311,13 +305,20 @@ fun HaiyuApp(
 
     fun pickWallpaperUri(uri: Uri) {
         scope.launch {
+            isImportingWallpaper = true
+            wallpaperStatus = null
             val result = withContext(Dispatchers.IO) {
                 repo.saveScheduleBackgroundFromUri(uri)
             }
+            isImportingWallpaper = false
             result.onSuccess {
-                showToast("已应用自定义课表壁纸，可拖动下方滑块微调卡片透明度")
+                val msg = "已应用自定义课表壁纸，可拖动下方滑块微调卡片透明度"
+                wallpaperStatus = true to msg
+                showToast(msg)
             }.onFailure { err ->
-                showToast(err.message ?: "设置壁纸失败")
+                val msg = err.message ?: "设置壁纸失败，请换一张图片或尝试「从系统文件选图」"
+                wallpaperStatus = false to msg
+                showToast(msg)
             }
         }
     }
@@ -385,6 +386,7 @@ fun HaiyuApp(
                             SyncPortalScreen(
                                 isVisible = currentTab == 1,
                                 settings = snapshot.settings,
+                                courses = snapshot.courses,
                                 quickRefreshTrigger = quickRefreshTrigger,
                                 requestedMode = syncRequestedMode,
                                 modeRequestNonce = syncModeNonce,
@@ -401,6 +403,14 @@ fun HaiyuApp(
                                             preferDesktopUa = desktopUa
                                         )
                                     }
+                                },
+                                onToggleFavoriteBuilding = { campus, building ->
+                                    val added = repo.toggleFavoriteBuilding(campus, building)
+                                    showToast(if (added) "已置顶常去教学楼「$building」" else "已取消置顶「$building」")
+                                },
+                                onToggleFavoriteClassroom = { campus, building, room, seats, type ->
+                                    val added = repo.toggleFavoriteClassroom(campus, building, room, seats, type)
+                                    showToast(if (added) "已收藏自习教室「$room」" else "已取消收藏「$room」")
                                 },
                                 onCoursesSynced = { courses, startDate, totalWeeks, termLabel, yearCode, semCode, detectedCampusId, practiceCourses ->
                                     val detected = repo.replaceSyncedCourses(
@@ -694,10 +704,15 @@ fun HaiyuApp(
                                     repo.updateSettings(transform)
                                     syncWidgetsAndReminders()
                                 },
+                                isImportingWallpaper = isImportingWallpaper,
+                                wallpaperStatus = wallpaperStatus,
+                                onClearWallpaperStatus = { wallpaperStatus = null },
                                 onPickWallpaperUri = { uri -> pickWallpaperUri(uri) },
                                 onClearWallpaper = {
                                     repo.clearScheduleBackground()
-                                    showToast("已恢复默认清新课表背景")
+                                    val msg = "已恢复默认清新课表背景"
+                                    wallpaperStatus = true to msg
+                                    showToast(msg)
                                 },
                                 onToggleReminder = { enabled ->
                                     if (enabled) onRequestNotificationPermission()
@@ -711,11 +726,9 @@ fun HaiyuApp(
                                     showToast("已发送测试通知，请查看手机通知栏")
                                 },
                                 onRefreshWidget = {
-                                    TodayScheduleWidgetProvider.refreshAllWidgets(context)
-                                    CountdownWidgetProvider.refreshAllWidgets(context)
-                                    NextClassWidgetProvider.refreshAllWidgets(context)
+                                    WidgetScheduleHelper.refreshAllWidgets(context)
                                     ClassReminderScheduler.scheduleMidnightWidgetRefresh(context)
-                                    showToast("已立即刷新全部 3 款海屿桌面小组件")
+                                    showToast("已立即刷新全部 4 款海屿桌面小组件")
                                 },
                                 onExportWeekImage = {
                                     val curWeek = GdouTimeRules.calculateCurrentWeek(

@@ -124,6 +124,27 @@ data class EmptyClassroomItem(
     val campus: String = ""
 )
 
+data class ClassroomSlotStatus(
+    val startSection: Int,
+    val endSection: Int,
+    val isFree: Boolean,
+    val matchedRoomName: String = "",
+    val seats: String = "",
+    val roomType: String = ""
+)
+
+data class ClassroomDaySchedule(
+    val campus: GdouCampus,
+    val building: String,
+    val roomName: String,
+    val weekNumber: Int,
+    val dayOfWeek: Int,
+    val seats: String = "",
+    val roomType: String = "",
+    val slots: List<ClassroomSlotStatus> = emptyList(),
+    val siblingEmptyRooms: List<EmptyClassroomItem> = emptyList()
+)
+
 @Serializable
 data class ExamItem(
     val id: String = UUID.randomUUID().toString(),
@@ -181,7 +202,9 @@ data class AppSettings(
     val legacyCleanupDismissed: Boolean = false,
     val savedPartnerName: String = "",
     val savedPartnerCode: String = "",
-    val creditTargets: GraduationCreditTargets = GraduationCreditTargets()
+    val creditTargets: GraduationCreditTargets = GraduationCreditTargets(),
+    val favoriteBuildings: List<String> = emptyList(),
+    val favoriteClassrooms: List<String> = emptyList()
 )
 
 @Serializable

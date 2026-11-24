@@ -5,6 +5,8 @@
     android:previewLayout="@layout/widget_preview_countdown"
     android:minWidth="250dp"
     android:minHeight="110dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="102dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"

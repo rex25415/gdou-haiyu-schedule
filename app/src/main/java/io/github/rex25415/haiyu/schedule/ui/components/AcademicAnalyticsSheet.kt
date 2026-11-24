@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material3.Card
@@ -64,15 +65,168 @@ internal fun parseScoreNumeric(score: String): Double? {
         "优秀", "优" -> 95.0
         "良好", "良" -> 85.0
         "中等", "中" -> 75.0
-        "及格", "合格", "通过" -> 65.0
-        "不及格", "不合格", "缺考" -> 0.0
+        "及格", "合格", "通过", "免修" -> 65.0
+        "不及格", "不合格", "缺考", "舞弊", "取消资格" -> 0.0
         else -> null
     }
 }
 
+internal fun isGradePassed(grade: GradeItem): Boolean {
+    if (grade.gradePoint > 0.0) return true
+    val num = parseScoreNumeric(grade.score) ?: return false
+    return num >= 60.0
+}
+
+private val PRACTICE_COURSE_NAME_RE =
+    Regex("实验|实训|实习|训练|军事技能|军训|课程设计|毕业设计|毕业论文|社会实践|金工")
+
+/**
+ * GDOU Zhengfang's kcxzmc field only labels courses as "必修"/"任选"/"限选", while practical training
+ * and laboratory courses (e.g. 大学物理实验II, 海上求生训练, 基本安全训练, 工程训练) are identified by course name.
+ */
+internal fun isPracticeOrExperimentGrade(grade: GradeItem): Boolean {
+    val t = grade.courseType.trim()
+    if (t.contains("实践") || t.contains("实验")) return true
+    return PRACTICE_COURSE_NAME_RE.containsMatchIn(grade.courseName)
+}
+
+internal enum class GpaCalcMode(val label: String, val shortHint: String) {
+    EFFECTIVE_BEST("有效去重", "同名课初修与补考/重修自动取最佳成绩，不重复双倍计入挂科学分"),
+    PASSED_ONLY("仅已通过", "仅统计已及格通过（拿到学分）的课程均绩与已获学分"),
+    RAW_ALL("原始全计", "教务原始成绩单全部记录不合并直接算术加权")
+}
+
+internal data class SupersededGradeInfo(
+    val bestAttempt: GradeItem,
+    val isBestPassed: Boolean
+)
+
+internal data class DeduplicatedGradesResult(
+    val effectiveGrades: List<GradeItem>,
+    val passedGrades: List<GradeItem>,
+    val supersededByMap: Map<String, SupersededGradeInfo>,
+    val earnedCredits: Double,
+    val attemptedDistinctCredits: Double,
+    val duplicateCreditsRemoved: Double,
+    val duplicateCourseCount: Int,
+    val makeupRecoveredCourses: List<GradeItem>
+)
+
+/**
+ * Deduplicates multi-attempt courses (initial exam + 补考/重修) returned by Zhengfang's raw grade list.
+ * Without deduplication, a 4.5-credit course that failed in initial exam and makeup exam would be
+ * counted as 9.0 credits of 0.0 GPA, and a course passed in makeup exam (e.g. 37 -> 96) would still
+ * carry its old 1.0 credit of 0.0 GPA in the denominator.
+ */
+internal fun deduplicateEffectiveGrades(grades: List<GradeItem>): DeduplicatedGradesResult {
+    val grouped = grades.groupBy { g ->
+        if (g.isSimulated) "__sim_${g.id}" else g.courseName.trim()
+    }
+    val effective = ArrayList<GradeItem>(grouped.size)
+    val supersededMap = LinkedHashMap<String, SupersededGradeInfo>()
+    var duplicateCrRemoved = 0.0
+    var duplicateCourses = 0
+    val recovered = ArrayList<GradeItem>()
+
+    val attemptComparator = Comparator<GradeItem> { a, b ->
+        val passCmp = isGradePassed(a).compareTo(isGradePassed(b))
+        if (passCmp != 0) return@Comparator passCmp
+        val gpCmp = a.gradePoint.compareTo(b.gradePoint)
+        if (gpCmp != 0) return@Comparator gpCmp
+        val scA = parseScoreNumeric(a.score) ?: -1.0
+        val scB = parseScoreNumeric(b.score) ?: -1.0
+        val scCmp = scA.compareTo(scB)
+        if (scCmp != 0) return@Comparator scCmp
+        "${a.academicYear} ${a.semester}".compareTo("${b.academicYear} ${b.semester}")
+    }
+
+    for ((_, group) in grouped) {
+        if (group.size <= 1) {
+            effective.addAll(group)
+        } else {
+            duplicateCourses++
+            val best = group.maxWith(attemptComparator)
+            val bestPassed = isGradePassed(best)
+            effective.add(best)
+            var hadFailedAttempt = false
+            for (item in group) {
+                if (!isGradePassed(item)) hadFailedAttempt = true
+                if (item.id != best.id) {
+                    supersededMap[item.id] = SupersededGradeInfo(bestAttempt = best, isBestPassed = bestPassed)
+                    if (item.credit > 0.0) {
+                        duplicateCrRemoved += item.credit
+                    }
+                }
+            }
+            if (bestPassed && hadFailedAttempt) {
+                recovered.add(best)
+            }
+        }
+    }
+
+    val passed = effective.filter { isGradePassed(it) }
+    val earnedCr = passed.filter { it.credit > 0.0 }.sumOf { it.credit }
+    val attemptedCr = effective.filter { it.credit > 0.0 }.sumOf { it.credit }
+
+    return DeduplicatedGradesResult(
+        effectiveGrades = effective,
+        passedGrades = passed,
+        supersededByMap = supersededMap,
+        earnedCredits = earnedCr,
+        attemptedDistinctCredits = attemptedCr,
+        duplicateCreditsRemoved = duplicateCrRemoved,
+        duplicateCourseCount = duplicateCourses,
+        makeupRecoveredCourses = recovered
+    )
+}
+
+internal data class GradeStatMetrics(
+    val gpa: Double,
+    val weightedAvgScore: Double,
+    val totalCredits: Double,
+    val earnedCredits: Double,
+    val courseCount: Int
+)
+
+internal fun computeGradeMetrics(
+    grades: List<GradeItem>,
+    mode: GpaCalcMode = GpaCalcMode.EFFECTIVE_BEST
+): GradeStatMetrics {
+    val dedup = deduplicateEffectiveGrades(grades)
+    val targetList = when (mode) {
+        GpaCalcMode.EFFECTIVE_BEST -> dedup.effectiveGrades
+        GpaCalcMode.PASSED_ONLY -> dedup.passedGrades
+        GpaCalcMode.RAW_ALL -> grades
+    }
+    var totalCr = 0.0
+    var weightedGp = 0.0
+    var weightedScore = 0.0
+    var numericCr = 0.0
+    for (g in targetList) {
+        if (g.credit > 0.0) {
+            totalCr += g.credit
+            weightedGp += g.gradePoint * g.credit
+            val num = parseScoreNumeric(g.score)
+            if (num != null) {
+                weightedScore += num * g.credit
+                numericCr += g.credit
+            }
+        }
+    }
+    val gpa = if (totalCr > 0.0) weightedGp / totalCr else 0.0
+    val avg = if (numericCr > 0.0) weightedScore / numericCr else 0.0
+    return GradeStatMetrics(
+        gpa = gpa,
+        weightedAvgScore = avg,
+        totalCredits = totalCr,
+        earnedCredits = dedup.earnedCredits,
+        courseCount = targetList.size
+    )
+}
+
 /**
  * Full-depth academic analytics bottom sheet keeping the main grades ledger uncluttered while
- * offering semester GPA sparklines, graduation credit audit bars, CET/NCRE archives, and GPA planning.
+ * offering authentic deduplicated semester GPA sparklines, graduation credit audit bars, CET/NCRE archives, and GPA planning.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -83,8 +237,11 @@ fun AcademicAnalyticsBottomSheet(
     onOpenEditTargets: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val termGpaSeries = remember(grades) {
-        grades
+    val dedup = remember(grades) { deduplicateEffectiveGrades(grades) }
+    val effectiveGrades = dedup.effectiveGrades
+
+    val termGpaSeries = remember(effectiveGrades) {
+        effectiveGrades
             .filter { it.credit > 0.0 }
             .groupBy { "${it.academicYear} ${it.semester}" }
             .entries
@@ -103,17 +260,17 @@ fun AcademicAnalyticsBottomSheet(
             }
     }
 
-    val creditByCategory = remember(grades) {
-        grades
+    val creditByCategory = remember(dedup.passedGrades) {
+        dedup.passedGrades
             .filter { it.credit > 0.0 }
             .groupBy { g ->
                 val raw = g.courseType.trim()
                 when {
+                    isPracticeOrExperimentGrade(g) -> "实践/实验"
                     raw.isBlank() -> "其他课程"
-                    raw.contains("必修") -> "必修课"
-                    raw.contains("选修") || raw.contains("任选") || raw.contains("限选") -> "选修课"
-                    raw.contains("实践") || raw.contains("实验") -> "实践环节"
-                    raw.contains("通识") || raw.contains("公选") -> "通识/公选"
+                    raw.contains("必修") -> "必修理论"
+                    raw.contains("通识") || raw.contains("公选") || raw.contains("任选") -> "通识/公选"
+                    raw.contains("选修") || raw.contains("限选") -> "专业选修"
                     else -> raw.take(6)
                 }
             }
@@ -121,46 +278,39 @@ fun AcademicAnalyticsBottomSheet(
             .sortedByDescending { it.second }
     }
 
-    val allTermStats = remember(grades) {
-        var totalCr = 0.0
-        var weightedGp = 0.0
-        grades.forEach { g ->
-            if (g.credit > 0.0) {
-                totalCr += g.credit
-                weightedGp += g.gradePoint * g.credit
-            }
-        }
-        val gpa = if (totalCr > 0.0) weightedGp / totalCr else 0.0
-        gpa to totalCr
+    val effectiveMetrics = remember(grades) {
+        computeGradeMetrics(grades, GpaCalcMode.EFFECTIVE_BEST)
+    }
+    val passedMetrics = remember(grades) {
+        computeGradeMetrics(grades, GpaCalcMode.PASSED_ONLY)
     }
 
-    val lowScoreCourses = remember(grades) {
-        grades.filter { g ->
-            g.credit > 0.0 && !g.isSimulated && (
-                g.gradePoint <= 0.0 || (parseScoreNumeric(g.score)?.let { it < 60.0 } == true)
-            )
+    val lowScoreCourses = remember(effectiveGrades) {
+        effectiveGrades.filter { g ->
+            g.credit > 0.0 && !g.isSimulated && !isGradePassed(g)
         }
     }
 
-    val earnedMap = remember(grades, creditTargets) {
-        val valid = grades.filter {
-            it.credit > 0.0 && (it.gradePoint > 0.0 || (parseScoreNumeric(it.score)?.let { s -> s >= 60.0 } != false))
-        }
+    val earnedMap = remember(dedup.passedGrades, creditTargets) {
+        val valid = dedup.passedGrades.filter { it.credit > 0.0 }
         val total = valid.sumOf { it.credit }
-        val comp = valid.filter { it.courseType.contains("必修") }.sumOf { it.credit }
-        val prac = valid.filter { it.courseType.contains("实践") || it.courseType.contains("实验") }.sumOf { it.credit }
-        val gen = valid.filter { it.courseType.contains("通识") || it.courseType.contains("公选") }.sumOf { it.credit }
-        val elec = (total - comp - prac - gen).coerceAtLeast(0.0)
+        val prac = valid.filter { isPracticeOrExperimentGrade(it) }.sumOf { it.credit }
+        val nonPrac = valid.filterNot { isPracticeOrExperimentGrade(it) }
+        val comp = nonPrac.filter { it.courseType.contains("必修") }.sumOf { it.credit }
+        val gen = nonPrac.filter {
+            it.courseType.contains("通识") || it.courseType.contains("公选") || it.courseType.contains("任选")
+        }.sumOf { it.credit }
+        val elec = (total - prac - comp - gen).coerceAtLeast(0.0)
         listOf(
-            Triple("毕业总学分", total, creditTargets.totalRequired),
-            Triple("必修课学分", comp, creditTargets.compulsoryRequired),
+            Triple("毕业总学分 (已获)", total, creditTargets.totalRequired),
+            Triple("必修理论课学分", comp, creditTargets.compulsoryRequired),
             Triple("专业选修学分", elec, creditTargets.electiveRequired),
             Triple("通识/公选学分", gen, creditTargets.generalRequired),
-            Triple("实践教学环节", prac, creditTargets.practiceRequired)
+            Triple("实践/实验教学环节", prac, creditTargets.practiceRequired)
         )
     }
 
-    var targetGpaInput by remember { mutableStateOf("3.5") }
+    var targetGpaInput by remember { mutableStateOf("2.5") }
     var futureCreditsInput by remember { mutableStateOf("20") }
     var showLowScoreList by remember { mutableStateOf(false) }
 
@@ -201,12 +351,43 @@ fun AcademicAnalyticsBottomSheet(
                     shape = RoundedCornerShape(999.dp)
                 ) {
                     Text(
-                        text = "总 GPA ${String.format(Locale.US, "%.2f", allTermStats.first)}",
+                        text = "有效 GPA ${String.format(Locale.US, "%.2f", effectiveMetrics.gpa)}",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
+                }
+            }
+
+            // Authentic Deduplication & Passed Summary Banner
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "已获学分 ${String.format(Locale.US, "%.1f", dedup.earnedCredits)} 分 · 修读总学分 ${String.format(Locale.US, "%.1f", dedup.attemptedDistinctCredits)} 分 · 已通过课程 GPA ${String.format(Locale.US, "%.2f", passedMetrics.gpa)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    if (dedup.duplicateCourseCount > 0) {
+                        Text(
+                            text = buildString {
+                                append("智能校准：已自动合并 ${dedup.duplicateCourseCount} 门课程的初修与补考/重修重复记录（剔除重复累加学分 ${String.format(Locale.US, "%.2f", dedup.duplicateCreditsRemoved)} 分）")
+                                if (dedup.makeupRecoveredCourses.isNotEmpty()) {
+                                    append("，其中 ${dedup.makeupRecoveredCourses.size} 门已通过补考/重修消警（${dedup.makeupRecoveredCourses.joinToString("、") { it.courseName }}）。")
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.9f)
+                        )
+                    }
                 }
             }
 
@@ -219,7 +400,7 @@ fun AcademicAnalyticsBottomSheet(
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "各学期 GPA 走势（共 ${termGpaSeries.size} 学期）",
+                            text = "各学期有效 GPA 走势（共 ${termGpaSeries.size} 学期）",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -372,9 +553,14 @@ fun AcademicAnalyticsBottomSheet(
                     }
 
                     if (creditByCategory.isNotEmpty()) {
+                        val zeroCreditPassedCount = dedup.passedGrades.count { it.credit <= 0.0 }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Text(
-                            text = "已修学分课程性质分布（共 ${creditByCategory.sumOf { it.third }} 门）",
+                            text = buildString {
+                                append("含学分已获分布（去重通过 ${creditByCategory.sumOf { it.third }} 门")
+                                if (zeroCreditPassedCount > 0) append(" · 另 $zeroCreditPassedCount 门 0 学分已通过")
+                                append("）")
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -456,7 +642,7 @@ fun AcademicAnalyticsBottomSheet(
             }
 
             // 4. Target GPA Reverse Calculator
-            if (allTermStats.second > 0.0) {
+            if (effectiveMetrics.totalCredits > 0.0) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -467,7 +653,7 @@ fun AcademicAnalyticsBottomSheet(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "目标 GPA 反推测算（基于已修 ${String.format(Locale.US, "%.1f", allTermStats.second)} 学分）",
+                            text = "目标 GPA 反推测算（基于有效修读 ${String.format(Locale.US, "%.1f", effectiveMetrics.totalCredits)} 学分）",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -478,7 +664,7 @@ fun AcademicAnalyticsBottomSheet(
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
                         ) {
-                            listOf("2.5", "3.0", "3.5", "3.8", "4.0").forEach { preset ->
+                            listOf("2.0", "2.5", "3.0", "3.5", "3.8").forEach { preset ->
                                 val sel = targetGpaInput.trim() == preset
                                 Surface(
                                     color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -521,10 +707,10 @@ fun AcademicAnalyticsBottomSheet(
                         val targetVal = targetGpaInput.toDoubleOrNull()
                         val futureCrVal = futureCreditsInput.toDoubleOrNull()
                         if (targetVal != null && futureCrVal != null && futureCrVal > 0.0) {
-                            val plan = remember(allTermStats, targetVal, futureCrVal) {
+                            val plan = remember(effectiveMetrics, targetVal, futureCrVal) {
                                 GdouTimeRules.calculateTargetGpaPlan(
-                                    currentGpa = allTermStats.first,
-                                    currentCredits = allTermStats.second,
+                                    currentGpa = effectiveMetrics.gpa,
+                                    currentCredits = effectiveMetrics.totalCredits,
                                     targetGpa = targetVal,
                                     plannedFutureCredits = futureCrVal
                                 )
@@ -549,8 +735,36 @@ fun AcademicAnalyticsBottomSheet(
                 }
             }
 
-            // 5. Low-Score / Retake Reminder
+            // 5. Low-Score / Retake Reminder (Deduplicated: excludes courses already passed in makeup/retake!)
+            if (dedup.makeupRecoveredCourses.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "已通过补考/重修消警 ${dedup.makeupRecoveredCourses.size} 门：${dedup.makeupRecoveredCourses.joinToString("、") { "${it.courseName}(${it.score}分)" }}",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
             if (lowScoreCourses.isNotEmpty()) {
+                val lowCrSum = lowScoreCourses.sumOf { it.credit }
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(12.dp),
@@ -566,7 +780,7 @@ fun AcademicAnalyticsBottomSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "学业体检：${lowScoreCourses.size} 门课程待留意（补考/重修参考）",
+                                text = "学业体检：当前待通过/重修 ${lowScoreCourses.size} 门（去重后共 ${String.format(Locale.US, "%.1f", lowCrSum)} 学分）",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
@@ -580,14 +794,31 @@ fun AcademicAnalyticsBottomSheet(
                             )
                         }
                         if (showLowScoreList) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = lowScoreCourses.joinToString(" · ") {
-                                    "${it.courseName}(${it.score.ifBlank { "0" }}/${it.credit}分)"
-                                },
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.88f)
-                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                lowScoreCourses.forEach { item ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "• ${item.courseName}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                        )
+                                        Text(
+                                            text = "最高 ${item.score.ifBlank { "0" }} 分 · ${item.credit}学分",
+                                            fontSize = 10.5.sp,
+                                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

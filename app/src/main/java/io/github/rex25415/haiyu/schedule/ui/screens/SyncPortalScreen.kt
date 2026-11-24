@@ -96,8 +96,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.rex25415.haiyu.schedule.model.AppSettings
+import io.github.rex25415.haiyu.schedule.model.ClassroomDaySchedule
+import io.github.rex25415.haiyu.schedule.model.ClassroomSlotStatus
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem
+import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.ExamItem
 import io.github.rex25415.haiyu.schedule.model.GradeItem
 import io.github.rex25415.haiyu.schedule.model.LevelExamItem
@@ -118,6 +121,7 @@ import java.util.concurrent.atomic.AtomicReference
 fun SyncPortalScreen(
     isVisible: Boolean,
     settings: AppSettings,
+    courses: List<CourseItem> = emptyList(),
     quickRefreshTrigger: Int,
     requestedMode: Int = 0,
     modeRequestNonce: Int = 0,
@@ -125,6 +129,8 @@ fun SyncPortalScreen(
     onSyncStateChanged: (Boolean) -> Unit,
     onQuickRefreshNeedsLogin: (String) -> Unit,
     onUpdateChannelPrefs: (preferOffCampus: Boolean, preferDesktopUa: Boolean) -> Unit,
+    onToggleFavoriteBuilding: (GdouCampus, String) -> Unit = { _, _ -> },
+    onToggleFavoriteClassroom: (GdouCampus, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
     onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String, List<PracticeCourseItem>) -> Unit,
     onGradesSynced: (List<GradeItem>, List<LevelExamItem>) -> Unit,
     onExamsSynced: (List<ExamItem>) -> Unit,
@@ -145,6 +151,7 @@ fun SyncPortalScreen(
     var pageTitle by remember { mutableStateOf("广东海洋大学教务系统") }
     var loadProgress by remember { mutableIntStateOf(0) }
     var pageErrorMsg by remember { mutableStateOf<String?>(null) }
+    var domConfirmedLoggedIn by remember { mutableStateOf(false) }
 
     // Calm state guards to completely prevent jumping / redirect thrashing
     var hasAutoEnteredWfw by remember { mutableStateOf(false) }
@@ -153,6 +160,7 @@ fun SyncPortalScreen(
     var hasAutoFallbackOffCampus by remember { mutableStateOf(false) }
     var pendingWfwEnterRunnable by remember { mutableStateOf<Runnable?>(null) }
     var pendingMfaAdaptRunnable by remember { mutableStateOf<Runnable?>(null) }
+    var pendingDomProbeRunnable by remember { mutableStateOf<Runnable?>(null) }
 
     // Thread-safe URL mirror for GdouJsBridge strict HTTPS origin guard (Binder thread safe!)
     val trustedUrlRef = remember {
@@ -186,6 +194,11 @@ fun SyncPortalScreen(
     }
     var emptyClassroomResults by remember { mutableStateOf<List<EmptyClassroomItem>?>(null) }
     var emptyClassroomSummary by remember { mutableStateOf("") }
+    var inspectedClassroom by remember { mutableStateOf<ClassroomDaySchedule?>(null) }
+    var isInspectingRoom by remember { mutableStateOf(false) }
+    var pendingInspectFallbackMeta by remember {
+        mutableStateOf<Triple<GdouCampus, String, String>?>(null) // campus, seats, roomType
+    }
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
@@ -194,37 +207,19 @@ fun SyncPortalScreen(
         pendingWfwEnterRunnable = null
         pendingMfaAdaptRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingMfaAdaptRunnable = null
+        pendingDomProbeRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingDomProbeRunnable = null
     }
 
-    fun isMfaUrl(url: String?): Boolean {
-        val lower = url.orEmpty().lowercase()
-        return lower.contains("reauthcheck") ||
-            lower.contains("reauthloginview") ||
-            lower.contains("ismultifactor")
-    }
+    fun isMfaUrl(url: String?): Boolean = GdouSyncScript.isMfaUrl(url)
 
-    val isLoggedIntoJw = remember(currentUrl, pageTitle, pageErrorMsg) {
-        if (pageErrorMsg != null) return@remember false
-        val lower = currentUrl.lowercase()
-        val titleLower = pageTitle.lowercase()
-        val onJwOrWfw = lower.contains("jw.gdou.edu.cn") || lower.contains("wfw.gdou.edu.cn")
-        onJwOrWfw &&
-            !isMfaUrl(lower) &&
-            !lower.contains("auth_error") &&
-            !lower.contains("authserver.") &&
-            !lower.contains("/authserver/") &&
-            !lower.contains("sso.") &&
-            !lower.contains("/cas/login") &&
-            !lower.contains("login_slogin") &&
-            !lower.contains("/login") &&
-            !titleLower.contains("无法打开") &&
-            !titleLower.contains("出错") &&
-            !titleLower.contains("error") &&
-            !titleLower.contains("统一身份认证") &&
-            !titleLower.contains("多因子") &&
-            !titleLower.contains("正在跳转") &&
-            !titleLower.contains("登录") &&
-            !titleLower.contains("login")
+    val isLoggedIntoJw = remember(currentUrl, pageTitle, pageErrorMsg, domConfirmedLoggedIn) {
+        GdouSyncScript.resolveJwLoginState(
+            url = currentUrl,
+            pageTitle = pageTitle,
+            pageErrorMsg = pageErrorMsg,
+            domConfirmedLoggedIn = domConfirmedLoggedIn
+        )
     }
 
     val isSittingOnWfwRoot = remember(currentUrl, isLoggedIntoJw) {
@@ -291,6 +286,39 @@ fun SyncPortalScreen(
                 }
             }
 
+            override fun onClassroomDayScheduleLoaded(
+                campusLabel: String,
+                building: String,
+                roomName: String,
+                weekNumber: Int,
+                dayOfWeek: Int,
+                seats: String,
+                roomType: String,
+                slots: List<ClassroomSlotStatus>
+            ) {
+                mainHandler.post {
+                    isInspectingRoom = false
+                    val meta = pendingInspectFallbackMeta
+                    val resolvedCampus = meta?.first ?: when {
+                        campusLabel.contains("海滨") -> GdouCampus.HAIBIN
+                        campusLabel.contains("阳江") -> GdouCampus.YANGJIANG
+                        else -> GdouCampus.HUGUANG
+                    }
+                    val finalSeats = seats.ifBlank { meta?.second.orEmpty() }
+                    val finalType = roomType.ifBlank { meta?.third.orEmpty() }
+                    inspectedClassroom = ClassroomDaySchedule(
+                        campus = resolvedCampus,
+                        building = building,
+                        roomName = roomName,
+                        weekNumber = weekNumber,
+                        dayOfWeek = dayOfWeek,
+                        seats = finalSeats,
+                        roomType = finalType,
+                        slots = slots
+                    )
+                }
+            }
+
             override fun onComplete(summary: String) {
                 mainHandler.post {
                     val wasSilent = isSilentQuickRefresh || !latestVisible
@@ -309,6 +337,7 @@ fun SyncPortalScreen(
             override fun onError(errorMessage: String) {
                 mainHandler.post {
                     isSyncing = false
+                    isInspectingRoom = false
                     isSilentQuickRefresh = false
                     syncStatusText = null
                     onShowMessage(errorMessage)
@@ -373,6 +402,7 @@ fun SyncPortalScreen(
     fun switchChannel(offCampus: Boolean) {
         cancelPendingTransitions()
         useOffCampus = offCampus
+        domConfirmedLoggedIn = false
         hasAutoEnteredWfw = false
         hasAutoSwitchedForMfa = false
         hasAutoRecoveredRedirectLoop = false
@@ -447,6 +477,7 @@ fun SyncPortalScreen(
             .imePadding()
     ) {
         // Primary Dual-Mode Switcher (Web Sync Station <-> Native Empty Classroom Finder)
+        if (isVisible) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp
@@ -496,9 +527,10 @@ fun SyncPortalScreen(
                 }
             }
         }
+        }
 
         // Compact Top Browser Bar (only in Web Sync mode)
-        if (activePortalMode == 0) {
+        if (isVisible && activePortalMode == 0) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp
@@ -1001,10 +1033,34 @@ fun SyncPortalScreen(
                                 return true
                             }
 
+                            private fun probePortalDomLoginState(wv: WebView, expectedUrl: String, allowRetry: Boolean) {
+                                wv.evaluateJavascript(GdouSyncScript.DOM_PORTAL_PROBE_SCRIPT) { res ->
+                                    if (wv.url != expectedUrl && currentUrl != expectedUrl) return@evaluateJavascript
+                                    val loggedIn = res != null && res.contains("LOGGED_IN")
+                                    if (loggedIn) {
+                                        domConfirmedLoggedIn = true
+                                        pageErrorMsg = null
+                                        wv.title?.takeIf {
+                                            it.isNotBlank() && !it.startsWith("http", ignoreCase = true)
+                                        }?.let { pageTitle = it }
+                                    } else if (allowRetry) {
+                                        val retryTask = Runnable {
+                                            if (wv.url == expectedUrl || currentUrl == expectedUrl) {
+                                                probePortalDomLoginState(wv, expectedUrl, allowRetry = false)
+                                            }
+                                        }
+                                        pendingDomProbeRunnable?.let { mainHandler.removeCallbacks(it) }
+                                        pendingDomProbeRunnable = retryTask
+                                        mainHandler.postDelayed(retryTask, 450L)
+                                    }
+                                }
+                            }
+
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 // Always cancel any delayed auto-transition whenever a real navigation starts,
                                 // eliminating race conditions and unexpected jumping!
                                 cancelPendingTransitions()
+                                domConfirmedLoggedIn = false
                                 if (!url.isNullOrBlank()) {
                                     currentUrl = url
                                     trustedUrlRef.set(url)
@@ -1056,6 +1112,18 @@ fun SyncPortalScreen(
                                     return
                                 }
 
+                                if (
+                                    finishedUrl.startsWith("https://", ignoreCase = true) ||
+                                    finishedUrl.startsWith("http://", ignoreCase = true)
+                                ) {
+                                    wv.title?.takeIf {
+                                        it.isNotBlank() && !it.startsWith("http", ignoreCase = true)
+                                    }?.let { pageTitle = it }
+                                    if (GdouSyncScript.isUrlOnPortalLoginPath(finishedUrl)) {
+                                        probePortalDomLoginState(wv, finishedUrl, allowRetry = true)
+                                    }
+                                }
+
                                 // 2. Debounced, verified one-shot entry from WFW root into JW portal
                                 // Waits 1100ms so any server-side JS redirect to CAS/MFA finishes first without fighting!
                                 if (useOffCampus && !hasAutoEnteredWfw && finishedUrl.isNotBlank()) {
@@ -1105,6 +1173,12 @@ fun SyncPortalScreen(
                                 if (request?.isForMainFrame == true) {
                                     val desc = error?.description?.toString().orEmpty()
                                     val reqUrl = request.url?.toString().orEmpty()
+                                    if (desc.contains("ERR_ABORTED", ignoreCase = true)) {
+                                        return
+                                    }
+                                    if (GdouSyncScript.isStaleChannelError(useOffCampus, reqUrl)) {
+                                        return
+                                    }
                                     val upgradedHttp = GdouJsBridge.upgradeGdouHttpToHttps(reqUrl)
                                     if (upgradedHttp != null && desc.contains("CLEARTEXT", ignoreCase = true)) {
                                         mainHandler.post {
@@ -1260,17 +1334,20 @@ fun SyncPortalScreen(
                 }
             }
 
-            if (activePortalMode == 1) {
+            if (isVisible && activePortalMode == 1) {
                 EmptyClassroomPane(
                     settings = settings,
+                    courses = courses,
                     isLoggedIntoJw = isLoggedIntoJw,
                     isQuerying = isSyncing,
                     results = emptyClassroomResults,
                     summary = emptyClassroomSummary,
+                    inspectedSchedule = inspectedClassroom,
+                    isInspectingRoom = isInspectingRoom,
                     onGoToWebLogin = { activePortalMode = 0 },
                     onExecuteQuery = { campusKeyword, weekNumber, dayOfWeek, startSection, endSection, buildingKeyword ->
                         isSyncing = true
-                        syncStatusText = "正在查询空闲教室..."
+                        syncStatusText = "正在查询「${campusKeyword}校区」空闲教室..."
                         webViewRef?.evaluateJavascript(
                             GdouSyncScript.buildQueryEmptyClassroomsScript(
                                 campusKeyword = campusKeyword,
@@ -1278,11 +1355,45 @@ fun SyncPortalScreen(
                                 dayOfWeek = dayOfWeek,
                                 startSection = startSection,
                                 endSection = endSection,
-                                buildingKeyword = buildingKeyword
+                                buildingKeyword = buildingKeyword,
+                                fallbackAcademicYear = settings.lastSyncYearCode,
+                                fallbackSemesterCode = settings.lastSyncSemesterCode
                             ),
                             null
                         )
                     },
+                    onInspectRoomDay = { campus, weekNumber, dayOfWeek, buildingName, roomName, seats, roomType ->
+                        isInspectingRoom = true
+                        pendingInspectFallbackMeta = Triple(campus, seats, roomType)
+                        inspectedClassroom = ClassroomDaySchedule(
+                            campus = campus,
+                            building = buildingName,
+                            roomName = roomName,
+                            weekNumber = weekNumber,
+                            dayOfWeek = dayOfWeek,
+                            seats = seats,
+                            roomType = roomType,
+                            slots = emptyList()
+                        )
+                        webViewRef?.evaluateJavascript(
+                            GdouSyncScript.buildInspectRoomDayScheduleScript(
+                                campusKeyword = campus.label.removeSuffix("校区"),
+                                weekNumber = weekNumber,
+                                dayOfWeek = dayOfWeek,
+                                buildingName = buildingName,
+                                roomName = roomName,
+                                fallbackAcademicYear = settings.lastSyncYearCode,
+                                fallbackSemesterCode = settings.lastSyncSemesterCode
+                            ),
+                            null
+                        )
+                    },
+                    onDismissInspectedRoom = {
+                        isInspectingRoom = false
+                        inspectedClassroom = null
+                    },
+                    onToggleFavoriteBuilding = onToggleFavoriteBuilding,
+                    onToggleFavoriteClassroom = onToggleFavoriteClassroom,
                     onOpenOriginalWeb = {
                         activePortalMode = 0
                         if (!isLoggedIntoJw) {
@@ -1300,7 +1411,7 @@ fun SyncPortalScreen(
         }
 
         // Sleek Single-Row Bottom Sync Action Dock (only in Web Sync mode)
-        if (activePortalMode == 0) {
+        if (isVisible && activePortalMode == 0) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 4.dp,

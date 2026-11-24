@@ -119,6 +119,9 @@ fun SettingsScreen(
     onCopyDirectApkLink: (String) -> Unit,
     onCopyDiagnosticInfo: (String) -> Unit,
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
+    isImportingWallpaper: Boolean = false,
+    wallpaperStatus: Pair<Boolean, String>? = null,
+    onClearWallpaperStatus: () -> Unit = {},
     onPickWallpaperUri: (Uri) -> Unit,
     onClearWallpaper: () -> Unit,
     onToggleReminder: (Boolean) -> Unit,
@@ -164,6 +167,11 @@ fun SettingsScreen(
 
     val wallpaperPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) onPickWallpaperUri(uri)
+    }
+    val wallpaperDocPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) onPickWallpaperUri(uri)
     }
@@ -533,7 +541,7 @@ fun SettingsScreen(
                     WorkbenchDirectoryRow(
                         icon = Icons.Rounded.Widgets,
                         title = "桌面小组件与数据备份",
-                        subtitle = "3 款微件刷新 · .ics 日历 · 换机全量备份恢复",
+                        subtitle = "4 款微件（含 2×2）一键添置 · .ics · 全量备份",
                         showBadge = false,
                         onClick = { showWidgetsBackupSheet = true }
                     )
@@ -557,14 +565,30 @@ fun SettingsScreen(
     if (showAppearanceSheet) {
         AppearanceWorkbenchSheet(
             settings = settings,
+            isImportingWallpaper = isImportingWallpaper,
+            wallpaperStatus = wallpaperStatus,
             onUpdateSettings = onUpdateSettings,
             onPickWallpaper = {
-                wallpaperPicker.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                )
+                try {
+                    wallpaperPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                } catch (_: Exception) {
+                    try {
+                        wallpaperDocPicker.launch(arrayOf("image/*"))
+                    } catch (_: Exception) {}
+                }
+            },
+            onPickWallpaperFromFiles = {
+                try {
+                    wallpaperDocPicker.launch(arrayOf("image/*"))
+                } catch (_: Exception) {}
             },
             onClearWallpaper = onClearWallpaper,
-            onDismiss = { showAppearanceSheet = false }
+            onDismiss = {
+                onClearWallpaperStatus()
+                showAppearanceSheet = false
+            }
         )
     }
 

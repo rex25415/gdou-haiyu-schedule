@@ -15,9 +15,7 @@ import io.github.rex25415.haiyu.schedule.R
 import io.github.rex25415.haiyu.schedule.data.AppRepository
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.TermWeekPhase
-import io.github.rex25415.haiyu.schedule.widget.CountdownWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.NextClassWidgetProvider
-import io.github.rex25415.haiyu.schedule.widget.TodayScheduleWidgetProvider
+import io.github.rex25415.haiyu.schedule.widget.WidgetScheduleHelper
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -118,9 +116,7 @@ object ClassReminderScheduler {
         val intent = Intent(context, ClassReminderReceiver::class.java).apply {
             action = ACTION_MIDNIGHT_WIDGET_REFRESH
         }
-        val hasWidget = TodayScheduleWidgetProvider.hasAnyWidget(context) ||
-            CountdownWidgetProvider.hasAnyWidget(context) ||
-            NextClassWidgetProvider.hasAnyWidget(context)
+        val hasWidget = WidgetScheduleHelper.hasAnyWidget(context)
         if (!hasWidget) {
             val existing = PendingIntent.getBroadcast(
                 context,
