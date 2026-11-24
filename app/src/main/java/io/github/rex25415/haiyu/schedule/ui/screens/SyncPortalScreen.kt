@@ -449,6 +449,15 @@ fun SyncPortalScreen(
         onShowMessage(if (next) "已切换电脑排版" else "已切换手机排版（登录页推荐）")
     }
 
+    LaunchedEffect(isVisible, webViewRef) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (isVisible) {
+            wv.onResume()
+        } else {
+            wv.onPause()
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             cancelPendingTransitions()
@@ -1550,7 +1559,16 @@ fun SyncPortalScreen(
             onDismissRequest = { diagnosticDialogText = null },
             title = { Text("当前教务页诊断信息") },
             text = { Text(info, style = MaterialTheme.typography.bodySmall) },
-            confirmButton = { Button(onClick = { diagnosticDialogText = null }) { Text("知道了") } }
+            confirmButton = { Button(onClick = { diagnosticDialogText = null }) { Text("知道了") } },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                        cm?.setPrimaryClip(android.content.ClipData.newPlainText("haiyu_jw_diag", info))
+                        onShowMessage("已复制脱敏教务诊断信息")
+                    }
+                ) { Text("复制诊断文本") }
+            }
         )
     }
 

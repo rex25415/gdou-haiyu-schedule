@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
@@ -385,6 +386,7 @@ fun HaiyuApp(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .zIndex(if (currentTab == 1) 1f else 0f)
+                                .then(if (currentTab != 1) Modifier.clearAndSetSemantics {} else Modifier)
                         ) {
                             SyncPortalScreen(
                                 isVisible = currentTab == 1,
