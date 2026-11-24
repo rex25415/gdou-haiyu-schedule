@@ -161,7 +161,7 @@ fun AppUpdateDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 210.dp)
+                        .heightIn(max = 260.dp)
                 ) {
                     Text(
                         text = release.releaseNotes,

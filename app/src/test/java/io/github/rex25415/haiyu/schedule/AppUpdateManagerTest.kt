@@ -598,4 +598,88 @@ class AppUpdateManagerTest {
         assertEquals(1, io.github.rex25415.haiyu.schedule.data.computeBitmapInSampleSize(0, 0, 1440))
         assertEquals(4, io.github.rex25415.haiyu.schedule.data.computeBitmapInSampleSize(4000, 3000, 1440))
     }
+
+    @Test
+    fun cleanReleaseNotesStripsVerifyFooterAndTruncatesAtLineBoundary() {
+        val sampleBody = buildString {
+            appendLine("## 🌊 海屿空间 v3.3.0")
+            appendLine("💬 致各位海大同学：这是精简的人话版更新内容。")
+            appendLine("- 查空教室支持全天 5 大节逐节查看")
+            appendLine("- 修复补考与重修重复计算 GPA 的问题")
+            appendLine("---")
+            appendLine("### 📦 安装与校验信息")
+            appendLine("- SHA-256：`29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27`")
+        }
+        val cleaned = AppUpdateManager.cleanReleaseNotes(sampleBody)
+        assertTrue(cleaned.contains("查空教室支持全天 5 大节逐节查看"))
+        assertFalse(cleaned.contains("---"))
+        assertFalse(cleaned.contains("安装与校验信息"))
+        assertFalse(cleaned.contains("SHA-256"))
+
+        val markedBody = """
+            ## 🌊 海屿空间 v3.4.0
+            技术引言（不应在弹窗显示）
+            <!-- APP_NOTES_START -->
+            - 新功能 A：桌面极简方卡优化
+            - 新功能 B：自动清理临时缓存
+            <!-- APP_NOTES_END -->
+            ---
+            ### 文件校验
+            - 文件名：HaiyuSchedule-GDOU-v3.4.0.apk
+        """.trimIndent()
+        val markedClean = AppUpdateManager.cleanReleaseNotes(markedBody)
+        assertEquals("- 新功能 A：桌面极简方卡优化\n- 新功能 B：自动清理临时缓存", markedClean)
+
+        val longLines = (1..30).joinToString("\n") { i ->
+            "- 第 $i 条完整更新说明：保证在任何屏幕宽度下都不会截断在半个词语中间。"
+        }
+        val truncated = AppUpdateManager.cleanReleaseNotes(longLines)
+        assertTrue(truncated.length <= 900)
+        assertTrue(truncated.endsWith("中间。"))
+    }
+
+    @Test
+    fun staticManifestDynamicMirrorsAndExtendedDiagnosticsWork() {
+        val manifest = """
+            {
+              "tagName": "v3.3.0",
+              "versionName": "3.3.0",
+              "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk",
+              "expectedSha256": "29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27",
+              "mirrorPrefixes": [
+                "https://custom-mirror.example.com",
+                "http://insecure.example.com/",
+                "https://ghfast.top/"
+              ],
+              "releaseNotes": "- 精简摘要\n---\n### 📦 安装与校验信息\n- SHA-256：29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27"
+            }
+        """.trimIndent()
+        val parsed = AppUpdateManager.parseStaticManifestJson(manifest)
+        assertNotNull(parsed)
+        assertEquals(
+            listOf("https://custom-mirror.example.com/", "https://ghfast.top/"),
+            parsed!!.mirrorPrefixes
+        )
+        assertEquals("- 精简摘要", parsed.releaseNotes)
+
+        val routes = AppUpdateManager.buildDownloadRoutes(parsed)
+        assertEquals(3, routes.size)
+        assertTrue(routes[0].url.startsWith("https://custom-mirror.example.com/https://github.com/"))
+        assertTrue(routes[1].url.startsWith("https://ghfast.top/https://github.com/"))
+        assertEquals("GitHub 官方源", routes[2].label)
+
+        val extDiag = AppUpdateManager.buildDiagnosticInfo(
+            versionName = "3.3.0",
+            versionCode = 330,
+            androidRelease = "17",
+            sdkInt = 37,
+            campusLabel = "湖光主校区",
+            densityLabel = "紧凑一屏",
+            darkModeLabel = "跟随系统",
+            deviceModel = "Xiaomi 15",
+            channelLabel = "校外免校园网"
+        )
+        assertTrue(extDiag.contains("机型：Xiaomi 15"))
+        assertTrue(extDiag.contains("通道：校外免校园网"))
+    }
 }

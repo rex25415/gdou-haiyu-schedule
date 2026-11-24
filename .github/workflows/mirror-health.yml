@@ -1,0 +1,89 @@
+name: Mirror & Update Endpoint Health
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe Update Manifest & Download Mirrors
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Probe Pages latest.json, official release & acceleration mirrors
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request, urllib.error
+
+          local_manifest = json.loads(pathlib.Path("docs/latest.json").read_text(encoding="utf-8"))
+          pages_url = "https://rex25415.github.io/gdou-haiyu-schedule/latest.json"
+          official_apk = local_manifest["apkDownloadUrl"]
+          mirrors = local_manifest.get("mirrorPrefixes") or [
+              "https://gh-proxy.com/",
+              "https://ghfast.top/",
+              "https://ghproxy.net/",
+          ]
+
+          rows = []
+          def probe(label, url, method="HEAD"):
+              req = urllib.request.Request(url, method=method, headers={"User-Agent": "HaiyuHealthBot/1.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      return True, f"HTTP {resp.status}"
+              except urllib.error.HTTPError as e:
+                  if method == "HEAD" and e.code in (403, 405):
+                      req2 = urllib.request.Request(
+                          url,
+                          method="GET",
+                          headers={"User-Agent": "HaiyuHealthBot/1.0", "Range": "bytes=0-63"},
+                      )
+                      try:
+                          with urllib.request.urlopen(req2, timeout=15) as resp2:
+                              return True, f"HTTP {resp2.status} (Range GET)"
+                      except Exception as e2:
+                          return False, str(e2)[:80]
+                  return False, f"HTTP {e.code}"
+              except Exception as e:
+                  return False, str(e)[:80]
+
+          ok_pages, msg_pages = probe("GitHub Pages latest.json", pages_url, "GET")
+          rows.append(("GitHub Pages `latest.json`", pages_url, ok_pages, msg_pages))
+
+          ok_official, msg_official = probe("GitHub Official Release APK", official_apk, "HEAD")
+          rows.append(("GitHub 官方源 APK", official_apk, ok_official, msg_official))
+
+          mirror_ok_count = 0
+          for idx, prefix in enumerate(mirrors, 1):
+              p = prefix if prefix.endswith("/") else prefix + "/"
+              ok_m, msg_m = probe(f"国内加速线路 {idx}", p + official_apk, "HEAD")
+              if ok_m:
+                  mirror_ok_count += 1
+              rows.append((f"国内加速线路 {idx} (`{p}`)", p + official_apk, ok_m, msg_m))
+
+          summary_lines = [
+              "### 海屿空间下载通道健康巡检",
+              "",
+              f"- 当前清单版本：`{local_manifest.get('tagName')}` (`{local_manifest.get('apkFileName')}`)",
+              "",
+              "| 节点 | 状态 | 响应 |",
+              "| :--- | :---: | :--- |",
+          ]
+          for name, _, ok, msg in rows:
+              badge = "✅ 正常" if ok else "❌ 异常"
+              summary_lines.append(f"| {name} | {badge} | `{msg}` |")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("\n".join(summary_lines) + "\n")
+
+          print("\n".join(summary_lines))
+          if not ok_pages or not ok_official or mirror_ok_count == 0:
+              raise SystemExit(f"Health check failed: ok_pages={ok_pages}, ok_official={ok_official}, mirrors_ok={mirror_ok_count}")
+          PY

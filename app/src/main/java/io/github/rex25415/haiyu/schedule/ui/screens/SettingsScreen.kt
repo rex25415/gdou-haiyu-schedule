@@ -758,7 +758,19 @@ fun SettingsScreen(
     }
 
     if (showFeedbackDialog) {
-        val diagInfo = remember(settings.campus, settings.gridRowDensity, settings.darkMode) {
+        val diagInfo = remember(
+            settings.campus,
+            settings.preferOffCampusChannel,
+            settings.gridRowDensity,
+            settings.darkMode
+        ) {
+            val brand = Build.BRAND.orEmpty().trim()
+            val model = Build.MODEL.orEmpty().trim()
+            val deviceModel = when {
+                brand.isBlank() -> model
+                model.startsWith(brand, ignoreCase = true) -> model
+                else -> "$brand $model".trim()
+            }
             AppUpdateManager.buildDiagnosticInfo(
                 versionName = BuildConfig.VERSION_NAME,
                 versionCode = BuildConfig.VERSION_CODE,
@@ -766,7 +778,9 @@ fun SettingsScreen(
                 sdkInt = Build.VERSION.SDK_INT,
                 campusLabel = settings.campus.label,
                 densityLabel = settings.gridRowDensity.label,
-                darkModeLabel = settings.darkMode.label
+                darkModeLabel = settings.darkMode.label,
+                deviceModel = deviceModel,
+                channelLabel = if (settings.preferOffCampusChannel) "校外免校园网" else "校园网直连"
             )
         }
         FeedbackGuideDialog(

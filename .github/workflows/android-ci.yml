@@ -3,6 +3,10 @@ name: Android CI
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '*.md'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -16,7 +20,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Unit Tests & APK Build
+    name: Unit Tests, Lint & APK Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -39,11 +43,41 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
+      - name: Run Android Lint check
+        run: ./gradlew lintDebug --stacktrace
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Verify Release R8 build (unsigned/debug-key check)
         run: ./gradlew assembleRelease --stacktrace
+
+      - name: Write build & size summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### 海屿空间 CI 构建报告"
+            echo ""
+            python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET, os
+          total = fails = errs = skips = 0
+          for path in sorted(glob.glob("app/build/test-results/testDebugUnitTest/*.xml")):
+              root = ET.parse(path).getroot()
+              t = int(root.attrib.get("tests", 0))
+              f = int(root.attrib.get("failures", 0))
+              e = int(root.attrib.get("errors", 0))
+              s = int(root.attrib.get("skipped", 0))
+              total += t; fails += f; errs += e; skips += s
+              print(f"- `{root.attrib.get('name', path)}`: {t} tests ({f} fail, {e} err, {s} skip)")
+          print(f"\n**单元测试合计**: {total} 项（失败 {fails} / 错误 {errs} / 跳过 {skips}）\n")
+          for label, apk in [("Debug APK", "app/build/outputs/apk/debug/app-debug.apk"),
+                             ("Release R8 APK", "app/build/outputs/apk/release/app-release.apk")]:
+              if os.path.exists(apk):
+                  sz = os.path.getsize(apk)
+                  print(f"- **{label}**: `{sz:,}` bytes ({sz / 1048576:.2f} MB)")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v7
@@ -51,3 +85,15 @@ jobs:
           name: haiyu-schedule-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
+
+      - name: Upload Lint & unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: haiyu-test-and-lint-reports
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+            app/build/test-results/testDebugUnitTest/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,284 @@
+name: Cloud Signed Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '语义化版本号（如 3.4.0，留空则沿用 app/build.gradle.kts 当前 versionName）'
+        required: false
+        default: ''
+        type: string
+      version_code:
+        description: 'Android versionCode 整数（如 340，留空则沿用当前 versionCode）'
+        required: false
+        default: ''
+        type: string
+      release_notes:
+        description: '面向同学的更新要点（可选，支持多行；留空时默认生成简洁说明）'
+        required: false
+        default: ''
+        type: string
+      prerelease:
+        description: '作为测试版 Pre-release 发布（不覆盖正式版 docs/latest.json）'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cloud-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, Sign & Publish APK Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      EXPECTED_CERT_SHA256: '9d7c62e6a8b6099970964d7ff8cf6918c82422d2b37985523f40517898ec26ce'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify signing secrets are configured
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::缺少签名 Secrets！请在仓库 Settings -> Secrets and variables -> Actions 中配置：RELEASE_KEYSTORE_BASE64、RELEASE_KEYSTORE_PASSWORD、RELEASE_KEY_ALIAS、RELEASE_KEY_PASSWORD。"
+            exit 1
+          fi
+
+      - name: Resolve version & release mode
+        id: meta
+        env:
+          INPUT_VER: ${{ github.event.inputs.version_name }}
+          INPUT_CODE: ${{ github.event.inputs.version_code }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          python3 - <<'PY'
+          import os, re, pathlib
+          gradle_path = pathlib.Path("app/build.gradle.kts")
+          text = gradle_path.read_text(encoding="utf-8")
+          cur_ver = re.search(r'versionName\s*=\s*"([^"]+)"', text).group(1)
+          cur_code = int(re.search(r'versionCode\s*=\s*(\d+)', text).group(1))
+          ref = os.environ.get("GITHUB_REF", "")
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+          if event == "push" and ref.startswith("refs/tags/v"):
+              tag_name = ref[len("refs/tags/"):]
+              ver_name = tag_name[1:]
+              is_pre = ("-" in ver_name)
+              ver_code = cur_code
+          else:
+              ver_name = (os.environ.get("INPUT_VER") or "").strip().lstrip("vV") or cur_ver
+              code_raw = (os.environ.get("INPUT_CODE") or "").strip()
+              ver_code = int(code_raw) if code_raw else cur_code
+              tag_name = f"v{ver_name}"
+              is_pre = os.environ.get("INPUT_PRERELEASE", "false").lower() == "true"
+
+          if not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', ver_name):
+              raise SystemExit(f"Invalid versionName: {ver_name}")
+
+          if ver_name != cur_ver or ver_code != cur_code:
+              text = re.sub(r'(versionCode\s*=\s*)\d+', rf'\g<1>{ver_code}', text, count=1)
+              text = re.sub(r'(versionName\s*=\s*")[^"]+(")', rf'\g<1>{ver_name}\g<2>', text, count=1)
+              gradle_path.write_text(text, encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"tag_name={tag_name}\n")
+              out.write(f"version_name={ver_name}\n")
+              out.write(f"version_code={ver_code}\n")
+              out.write(f"is_prerelease={'true' if is_pre else 'false'}\n")
+              out.write(f"apk_name=HaiyuSchedule-GDOU-{tag_name}.apk\n")
+          PY
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Materialize temporary release signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/haiyu-release.jks"
+          cat > keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/haiyu-release.jks
+          storePassword=$STORE_PASS
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASS
+          EOF
+
+      - name: Run unit tests, Lint & signed Release APK build
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest lintDebug assembleRelease --stacktrace
+
+      - name: Verify APK signature & compute hashes
+        id: apk
+        run: |
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          APK_OUT="$RUNNER_TEMP/${{ steps.meta.outputs.apk_name }}"
+          cp "$APK_SRC" "$APK_OUT"
+
+          APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::Android build-tools apksigner not found"
+            exit 1
+          fi
+          "$APKSIGNER" verify --print-certs "$APK_OUT" | tee "$RUNNER_TEMP/apksigner.txt"
+          CERT_SHA256="$(grep -i 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apksigner.txt" | awk -F': ' '{print tolower($2)}' | tr -d '[:space:]')"
+          if [ "$CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::签名证书指纹不匹配！实际=$CERT_SHA256 预期=$EXPECTED_CERT_SHA256"
+            exit 1
+          fi
+
+          APK_BYTES="$(wc -c < "$APK_OUT" | tr -d '[:space:]')"
+          APK_SHA256="$(sha256sum "$APK_OUT" | awk '{print tolower($1)}')"
+          APK_MB="$(python3 -c "print(f'{${APK_BYTES}/1048576:.2f}')")"
+          {
+            echo "apk_path=$APK_OUT"
+            echo "apk_bytes=$APK_BYTES"
+            echo "apk_mb=$APK_MB"
+            echo "apk_sha256=$APK_SHA256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Release notes & update docs/latest.json (stable only)
+        env:
+          INPUT_NOTES: ${{ github.event.inputs.release_notes }}
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          VER_NAME: ${{ steps.meta.outputs.version_name }}
+          IS_PRE: ${{ steps.meta.outputs.is_prerelease }}
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          APK_BYTES: ${{ steps.apk.outputs.apk_bytes }}
+          APK_MB: ${{ steps.apk.outputs.apk_mb }}
+          APK_SHA: ${{ steps.apk.outputs.apk_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, pathlib
+
+          tag = os.environ["TAG_NAME"]
+          ver = os.environ["VER_NAME"]
+          is_pre = os.environ["IS_PRE"] == "true"
+          apk_name = os.environ["APK_NAME"]
+          apk_bytes = int(os.environ["APK_BYTES"])
+          apk_mb = os.environ["APK_MB"]
+          apk_sha = os.environ["APK_SHA"]
+          cert_sha = os.environ["EXPECTED_CERT_SHA256"]
+          raw_notes = (os.environ.get("INPUT_NOTES") or "").strip()
+          if not raw_notes:
+              raw_notes = (
+                  f"💬 致各位海大同学：海屿空间 {tag} 已通过云端自动化测试并完成统一签名构建，覆盖安装自动保留全部课表与设置！\n\n"
+                  "- 体验细节优化与已知问题修复\n"
+                  "- 全部单元测试与 Android Lint 检查通过"
+              )
+
+          notes_md = "\n".join([
+              f"## 🌊 海屿空间 {tag}",
+              "",
+              "<!-- APP_NOTES_START -->",
+              raw_notes,
+              "<!-- APP_NOTES_END -->",
+              "",
+              "### 文件校验",
+              "- 中文极速下载主页：https://rex25415.github.io/gdou-haiyu-schedule/",
+              f"- 文件名：{apk_name}（{apk_mb} MB / {apk_bytes:,} bytes）",
+              "- 包名：io.github.rex25415.haiyu.schedule",
+              f"- SHA-256（安装包）：{apk_sha}",
+              f"- SHA-256（签名证书）：{cert_sha}",
+          ])
+          pathlib.Path(os.environ["RUNNER_TEMP"], "release_notes.md").write_text(notes_md, encoding="utf-8")
+
+          if not is_pre:
+              latest_path = pathlib.Path("docs/latest.json")
+              existing = json.loads(latest_path.read_text(encoding="utf-8")) if latest_path.exists() else {}
+              mirrors = existing.get("mirrorPrefixes") or [
+                  "https://gh-proxy.com/",
+                  "https://ghfast.top/",
+                  "https://ghproxy.net/",
+              ]
+              manifest = {
+                  "tagName": tag,
+                  "versionName": ver,
+                  "title": f"海屿空间 {tag}",
+                  "apkFileName": apk_name,
+                  "apkSizeBytes": apk_bytes,
+                  "apkDownloadUrl": f"https://github.com/rex25415/gdou-haiyu-schedule/releases/download/{tag}/{apk_name}",
+                  "expectedSha256": apk_sha,
+                  "htmlUrl": f"https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/{tag}",
+                  "mirrorPrefixes": mirrors,
+                  "releaseNotes": raw_notes,
+              }
+              latest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+              index_path = pathlib.Path("docs/index.html")
+              html = index_path.read_text(encoding="utf-8")
+              official_url = manifest["apkDownloadUrl"]
+              html = re.sub(r'(<span class="badge" id="verBadge">)[^<]*(</span>)', rf'\g<1>{tag} 正式版\g<2>', html)
+              html = re.sub(r'(<span class="badge" id="sizeBadge">)[^<]*(</span>)', rf'\g<1>包体 {apk_mb} MB\g<2>', html)
+              html = re.sub(r'id="dlPrimary"[^>]*href="[^"]+"', f'id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/{official_url}"', html)
+              html = re.sub(r'id="dlMirror2"[^>]*href="[^"]+"', f'id="dlMirror2" class="alt-btn" href="https://ghfast.top/{official_url}"', html)
+              html = re.sub(r'id="dlMirror3"[^>]*href="[^"]+"', f'id="dlMirror3" class="alt-btn" href="https://ghproxy.net/{official_url}"', html)
+              html = re.sub(r'id="dlOfficial"[^>]*href="[^"]+"', f'id="dlOfficial" class="alt-btn" href="{official_url}"', html)
+              html = re.sub(r'(<div class="hash-box" id="shaBox">)[^<]*(</div>)', rf'\g<1>{apk_sha}\g<2>', html)
+              html = re.sub(r'"约 \d+\.\d+ MB"', f'"约 {apk_mb} MB"', html)
+              index_path.write_text(html, encoding="utf-8")
+          PY
+
+      - name: Commit updated manifests back to main (workflow_dispatch stable)
+        if: github.event_name == 'workflow_dispatch' && steps.meta.outputs.is_prerelease != 'true'
+        run: |
+          if [ -n "$(git status --porcelain app/build.gradle.kts docs/latest.json docs/index.html)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/build.gradle.kts docs/latest.json docs/index.html
+            git commit -m "chore(release): publish ${{ steps.meta.outputs.tag_name }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Publish GitHub Release & upload signed APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          IS_PRE: ${{ steps.meta.outputs.is_prerelease }}
+          APK_OUT: ${{ steps.apk.outputs.apk_path }}
+        run: |
+          PRE_FLAG=""
+          TARGET_OPT=""
+          TITLE="海屿空间 $TAG_NAME"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET_OPT="--target $(git rev-parse HEAD)"
+          fi
+          if [ "$IS_PRE" = "true" ]; then
+            PRE_FLAG="--prerelease"
+            TITLE="海屿空间 $TAG_NAME（测试预览版）"
+          fi
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$APK_OUT" --clobber
+            gh release edit "$TAG_NAME" --title "$TITLE" --notes-file "$RUNNER_TEMP/release_notes.md"
+          else
+            gh release create "$TAG_NAME" "$APK_OUT" $PRE_FLAG $TARGET_OPT --title "$TITLE" --notes-file "$RUNNER_TEMP/release_notes.md"
+          fi
+
+      - name: Always scrub temporary signing files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/haiyu-release.jks" "$RUNNER_TEMP/apksigner.txt" "$RUNNER_TEMP/release_notes.md" keystore.properties

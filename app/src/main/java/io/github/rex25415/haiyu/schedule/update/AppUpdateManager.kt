@@ -34,7 +34,8 @@ data class AppReleaseInfo(
     val apkDownloadUrl: String,
     val apkFileName: String,
     val apkSizeBytes: Long,
-    val expectedSha256: String? = null
+    val expectedSha256: String? = null,
+    val mirrorPrefixes: List<String> = emptyList()
 )
 
 sealed interface UpdateCheckResult {
@@ -109,7 +110,17 @@ object AppUpdateManager {
         val hasSha = !release.expectedSha256.isNullOrBlank()
         val routes = mutableListOf<ApkDownloadRoute>()
         if (hasSha && officialUrl.startsWith("https://github.com/", ignoreCase = true)) {
-            VERIFIED_MIRROR_PREFIXES.forEach { (label, prefix) ->
+            val effectiveMirrors = if (release.mirrorPrefixes.isNotEmpty()) {
+                release.mirrorPrefixes.mapIndexed { idx, rawPrefix ->
+                    val normalized = if (rawPrefix.endsWith("/")) rawPrefix else "$rawPrefix/"
+                    val defaultLabel = VERIFIED_MIRROR_PREFIXES.firstOrNull { it.second == normalized }?.first
+                        ?: "国内加速线路 ${idx + 1}"
+                    defaultLabel to normalized
+                }
+            } else {
+                VERIFIED_MIRROR_PREFIXES
+            }
+            effectiveMirrors.forEach { (label, prefix) ->
                 routes.add(ApkDownloadRoute(label = label, url = "$prefix$officialUrl", requiresSha256 = true))
             }
         }
@@ -244,6 +255,16 @@ object AppUpdateManager {
             val apkSize = root["apkSizeBytes"]?.jsonPrimitive?.longOrNull ?: 0L
             val sha = root["expectedSha256"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase(Locale.US)
                 ?.takeIf { it.length == 64 && it.all { ch -> ch in '0'..'9' || ch in 'a'..'f' } }
+            val dynamicMirrors = try {
+                root["mirrorPrefixes"]?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
+                    ?.filter { it.startsWith("https://", ignoreCase = true) }
+                    ?.map { if (it.endsWith("/")) it else "$it/" }
+                    ?.distinct()
+                    .orEmpty()
+            } catch (_: Exception) {
+                emptyList()
+            }
 
             AppReleaseInfo(
                 tagName = finalTag,
@@ -254,7 +275,8 @@ object AppUpdateManager {
                 apkDownloadUrl = apkUrl,
                 apkFileName = apkName,
                 apkSizeBytes = apkSize,
-                expectedSha256 = sha
+                expectedSha256 = sha,
+                mirrorPrefixes = dynamicMirrors
             )
         } catch (_: Exception) {
             null
@@ -275,35 +297,76 @@ object AppUpdateManager {
         }
     }
 
-    private fun cleanReleaseNotes(raw: String): String {
+    private fun truncateAtLineBoundary(text: String, maxChars: Int = 900): String {
+        if (text.length <= maxChars) return text
+        val result = StringBuilder()
+        for (line in text.lines()) {
+            val nextLen = if (result.isEmpty()) line.length else result.length + 1 + line.length
+            if (nextLen > maxChars) {
+                if (result.isEmpty()) {
+                    return text.take((maxChars - 1).coerceAtLeast(1)).trimEnd() + "…"
+                }
+                break
+            }
+            if (result.isNotEmpty()) result.append('\n')
+            result.append(line)
+        }
+        return result.toString().trimEnd()
+    }
+
+    internal fun cleanReleaseNotes(raw: String): String {
         if (raw.isBlank()) return "优化体验并修复已知问题，建议更新到最新版本。"
-        val cleaned = raw
-            .replace("\r\n", "\n")
-            .lines()
-            .filterNot { line ->
-                val t = line.trim()
-                t.startsWith("SHA-256", ignoreCase = true) ||
-                    t.startsWith("- SHA-256", ignoreCase = true) ||
-                    t.startsWith("### 文件校验") ||
-                    t.startsWith("- 文件名") ||
-                    t.startsWith("- 包名") ||
-                    t.contains("中文极速下载主页") ||
-                    t.contains("点击下方") ||
-                    t.contains("若你已安装") ||
-                    t.startsWith("## 🌊 海屿课表") ||
-                    t.startsWith("## 🌊 海屿空间")
+        val normalized = raw.replace("\r\n", "\n")
+        val scopedText = run {
+            val startTag = "<!-- APP_NOTES_START -->"
+            val endTag = "<!-- APP_NOTES_END -->"
+            val sIdx = normalized.indexOf(startTag)
+            val eIdx = if (sIdx >= 0) normalized.indexOf(endTag, sIdx + startTag.length) else -1
+            if (sIdx >= 0 && eIdx > sIdx) {
+                normalized.substring(sIdx + startTag.length, eIdx)
+            } else {
+                normalized
             }
-            .joinToString("\n") { line ->
-                line
-                    .replace(Regex("^#{1,4}\\s*"), "")
-                    .replace(Regex("\\[([^\\]]+)]\\(https?://[^)]+\\)"), "$1")
-                    .replace("**", "")
-                    .replace("`", "")
-                    .trimEnd()
+        }
+
+        val keptLines = mutableListOf<String>()
+        for (line in scopedText.lines()) {
+            val t = line.trim()
+            if (t == "---" ||
+                t == "***" ||
+                t == "___" ||
+                t.startsWith("### 文件校验") ||
+                t.startsWith("### 📦") ||
+                t.startsWith("## 📦") ||
+                t.contains("安装与校验信息")
+            ) {
+                break
             }
+            if (t.startsWith("SHA-256", ignoreCase = true) ||
+                t.startsWith("- SHA-256", ignoreCase = true) ||
+                t.startsWith("- 文件名") ||
+                t.startsWith("- 包名") ||
+                t.contains("中文极速下载主页") ||
+                t.contains("点击下方") ||
+                t.contains("若你已安装") ||
+                t.startsWith("## 🌊 海屿课表") ||
+                t.startsWith("## 🌊 海屿空间")
+            ) {
+                continue
+            }
+            keptLines += line
+                .replace(Regex("^#{1,4}\\s*"), "")
+                .replace(Regex("\\[([^\\]]+)]\\(https?://[^)]+\\)"), "$1")
+                .replace("**", "")
+                .replace("`", "")
+                .trimEnd()
+        }
+
+        val collapsed = keptLines
+            .joinToString("\n")
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
-            .take(1000)
+        val cleaned = truncateAtLineBoundary(collapsed, maxChars = 900)
         return cleaned.ifBlank { "优化体验并修复已知问题，建议更新到最新版本。" }
     }
 
@@ -673,10 +736,17 @@ object AppUpdateManager {
         sdkInt: Int,
         campusLabel: String,
         densityLabel: String,
-        darkModeLabel: String
+        darkModeLabel: String,
+        deviceModel: String = "",
+        channelLabel: String = ""
     ): String {
-        return "海屿空间 v$versionName (build $versionCode) | Android $androidRelease (API $sdkInt) | " +
-            "校区：$campusLabel | 课表密度：$densityLabel | 外观：$darkModeLabel"
+        return buildString {
+            append("海屿空间 v$versionName (build $versionCode) | Android $androidRelease (API $sdkInt)")
+            if (deviceModel.isNotBlank()) append(" | 机型：${deviceModel.trim()}")
+            append(" | 校区：$campusLabel")
+            if (channelLabel.isNotBlank()) append(" | 通道：${channelLabel.trim()}")
+            append(" | 课表密度：$densityLabel | 外观：$darkModeLabel")
+        }
     }
 
     /**

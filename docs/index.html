@@ -345,7 +345,7 @@
 
       function applyRelease(tag, official, sizeBytes, htmlUrl, sha256) {
         if (!tag || !official) return;
-        var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 1.65 MB";
+        var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 1.92 MB";
         document.getElementById("verBadge").textContent = tag + " 正式版";
         document.getElementById("sizeBadge").textContent = "包体 " + mb;
         document.getElementById("dlPrimary").href = "https://gh-proxy.com/" + official;
