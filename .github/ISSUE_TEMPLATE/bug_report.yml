@@ -7,12 +7,12 @@ body:
     attributes:
       value: |
         感谢反馈！提交前请**切勿附带学号、姓名、密码或完整个人成绩截图**，以免泄露个人隐私。
-        可在 App「设置 → 反馈与建议 → 复制纯脱敏环境信息」一键粘贴到下方。
+        可在 App「设置 → 应用更新、分享与开源合规 → 反馈与诊断 → 复制纯脱敏环境信息」一键粘贴到下方。
   - type: textarea
     id: env
     attributes:
       label: 环境信息（可直接粘贴 App 复制的脱敏信息）
-      placeholder: "海屿空间 v3.1.0 | Android 15 | 校区：海滨 | 课表密度：标准舒适"
+      placeholder: "海屿空间 v3.3.0 | Android 15 | 校区：海滨 | 课表密度：标准舒适"
     validations:
       required: true
   - type: dropdown

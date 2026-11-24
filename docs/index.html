@@ -76,7 +76,11 @@
       font-weight: 600;
     }
     .dl-primary {
-      display: block;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
       width: 100%;
       text-align: center;
       background: #fff;
@@ -84,30 +88,38 @@
       font-size: 17px;
       font-weight: 800;
       text-decoration: none;
-      padding: 15px 20px;
+      padding: 13px 16px;
       border-radius: 14px;
       box-shadow: 0 8px 20px rgba(0,0,0,0.14);
       transition: transform 0.12s ease;
+    }
+    .dl-primary .dl-sub {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
     }
     .dl-primary:active { transform: scale(0.985); }
     .dl-meta { text-align: center; font-size: 12px; opacity: 0.9; margin-top: 9px; }
     .alt-links {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(4, 1fr);
       gap: 8px;
       margin-top: 14px;
     }
     .alt-btn {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       text-align: center;
       text-decoration: none;
       color: #fff;
       background: rgba(255,255,255,0.14);
       border: 1px solid rgba(255,255,255,0.28);
-      padding: 9px 10px;
+      padding: 9px 8px;
       border-radius: 11px;
       font-size: 12.5px;
       font-weight: 600;
+      white-space: nowrap;
     }
     .card {
       background: var(--card);
@@ -128,26 +140,38 @@
     }
     .grid-3 {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
     }
     .feat {
       background: #f5fbf9;
       border: 1px solid #e0f0ec;
       border-radius: 14px;
-      padding: 13px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
-    .feat h3 { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+    .feat h3 { font-size: 14.5px; font-weight: 700; color: var(--text); line-height: 1.35; }
     .feat p { font-size: 12.5px; color: var(--muted); }
     .shots {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 10px;
+    }
+    .shots figure {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
     .shots img {
       width: 100%;
+      aspect-ratio: 9 / 16;
+      object-fit: cover;
       border-radius: 14px;
       border: 1px solid var(--border);
+      background: #edf6f4;
       box-shadow: 0 4px 12px rgba(0,0,0,0.06);
       display: block;
     }
@@ -156,6 +180,15 @@
       font-size: 11.5px;
       color: var(--muted);
       margin-top: 6px;
+      white-space: nowrap;
+    }
+    .shots-hint {
+      display: none;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      opacity: 0.85;
     }
     .hash-box {
       background: #f1f6f5;
@@ -167,16 +200,29 @@
       color: #21403c;
       margin-top: 6px;
     }
+    .sec-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+      margin-top: 10px;
+    }
     .copy-btn {
-      margin-top: 8px;
       background: var(--primary);
       color: #fff;
       border: none;
       border-radius: 9px;
-      padding: 7px 13px;
+      padding: 8px 14px;
       font-size: 12.5px;
       font-weight: 600;
       cursor: pointer;
+    }
+    .sec-link {
+      font-size: 12.5px;
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
     }
     .faq-item { padding: 9px 0; border-bottom: 1px dashed var(--border); }
     .faq-item:last-child { border-bottom: none; }
@@ -192,15 +238,38 @@
       border: 1px solid #f8d9b8;
     }
     footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 4px 8px;
       text-align: center;
       margin-top: 24px;
       font-size: 12px;
       color: var(--muted);
     }
-    footer a { color: var(--primary); text-decoration: none; font-weight: 600; }
-    @media (max-width: 560px) {
-      .shots { grid-template-columns: 1fr; max-width: 280px; margin: 0 auto; }
-      .hero h1 { font-size: 23px; }
+    footer a, footer span.nowrap { color: var(--primary); text-decoration: none; font-weight: 600; white-space: nowrap; }
+    @media (max-width: 720px) {
+      .grid-3 { grid-template-columns: 1fr; }
+      .alt-links { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 22px 16px; border-radius: 20px; }
+      .hero h1 { font-size: 22px; }
+      .shots {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        gap: 12px;
+        padding-bottom: 4px;
+      }
+      .shots figure {
+        flex: 0 0 68%;
+        max-width: 240px;
+        scroll-snap-align: start;
+      }
+      .shots-hint { display: block; }
     }
   </style>
 </head>
@@ -240,7 +309,8 @@
       </div>
 
       <a id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">
-        立即下载安卓版（国内加速线路 1 · 推荐）
+        <span>立即下载安卓版</span>
+        <span class="dl-sub">国内加速线路 1 · 推荐</span>
       </a>
       <div class="dl-meta" id="dlMeta">包名 io.github.rex25415.haiyu.schedule · 海屿开源统一发布签名 · 内置运行时签名验真</div>
 
@@ -248,7 +318,7 @@
         <a id="dlMirror2" class="alt-btn" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 2</a>
         <a id="dlMirror3" class="alt-btn" href="https://ghproxy.net/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">国内加速线路 3</a>
         <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.3.0/HaiyuSchedule-GDOU-v3.3.0.apk">GitHub 官方直链</a>
-        <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">查看更新日志与源码</a>
+        <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">更新日志与源码</a>
       </div>
     </section>
 
@@ -256,16 +326,16 @@
       <h2>✨ 为什么选海屿空间？</h2>
       <div class="grid-3">
         <div class="feat">
-          <h3>校园网 / 校外免 VPN 智能双通道</h3>
-          <p>自动探测校园网直连与校外通用入口，4G/5G 流量或宿舍 Wi-Fi 均可直连正方教务，一键拉取课表、校历、成绩/GPA、考场座位。</p>
+          <h3>校园网 / 校外免 VPN 双通道</h3>
+          <p>自动识别校园 Wi-Fi 与 4G/5G 校外访问，免开 VPN 一键同步正方课表、成绩/GPA、考场座位与全校空教室。</p>
         </div>
         <div class="feat">
-          <h3>广海三校区自动识别与精准错峰</h3>
-          <p>自动匹配湖光（广学/明德楼）、海滨（实验楼/实+房号/球场）、阳江（慎思/非慎思楼）错峰作息，支持 11-12 节晚课。</p>
+          <h3>广海三校区精准错峰作息</h3>
+          <p>自动识别湖光（广学/明德楼）、海滨（实验楼/实+房号/球场）、阳江（慎思/非慎思楼）错峰时间表与 11-12 节晚课。</p>
         </div>
         <div class="feat">
-          <h3>全能校园学业空间 · 零冗余清爽体验</h3>
-          <p>支持课表百宝箱、微缩单行预告条、空教室实时查询与全天节次时间轴、期末考试周投影与提醒、双人离线空课对比、GPA 补考重修去重与目标反推、考勤备忘、万能倒计时置顶、Android 8–17 零权限壁纸及四款桌面小组件。</p>
+          <h3>高颜值工具箱 & 四款微件</h3>
+          <p>内置空教室实时查、GPA 补考去重与反推、双人离线空课对比、考试周投影、万能倒计时、零权限壁纸与 4 款桌面小组件。</p>
         </div>
       </div>
     </section>
@@ -274,18 +344,23 @@
       <h2>📱 界面预览</h2>
       <div class="shots">
         <figure>
-          <img src="screenshots/light_schedule.png" alt="海屿空间日间主界面" loading="lazy" />
+          <img src="screenshots/light_schedule.png" alt="海屿空间清爽日间课表" />
           <figcaption>清爽日间 · 7 天课表</figcaption>
         </figure>
         <figure>
-          <img src="screenshots/dark_ocean.png" alt="海屿空间深色模式" loading="lazy" />
-          <figcaption>深海蔚蓝 · 护眼深色</figcaption>
+          <img src="screenshots/dark_ocean.png" alt="海屿空间护眼深色模式" />
+          <figcaption>护眼深色 · 自动适配</figcaption>
         </figure>
         <figure>
-          <img src="screenshots/poster_7day.png" alt="海屿空间高清7天长图" loading="lazy" />
-          <figcaption>一键生成高清相册海报</figcaption>
+          <img src="screenshots/campus_hub.png" alt="广海官方服务与教务公告" />
+          <figcaption>官方公告 · 校历门户</figcaption>
+        </figure>
+        <figure>
+          <img src="screenshots/poster_7day.png" alt="海屿空间一键生成高清相册海报" />
+          <figcaption>一键生成高清海报</figcaption>
         </figure>
       </div>
+      <div class="shots-hint">← 左右滑动查看全部功能截图 →</div>
     </section>
 
     <section class="card">
@@ -295,8 +370,10 @@
       </p>
       <div style="font-size:12.5px;font-weight:700;margin-top:8px;">当前安装包 SHA-256 校验值：</div>
       <div class="hash-box" id="shaBox">29a9198544edc63f324cc721d8a2729bb271aa653533c681a08c280331a9ca27</div>
-      <button class="copy-btn" id="copyShaBtn" type="button">复制 SHA-256 校验值</button>
-      <a href="https://github.com/rex25415/gdou-haiyu-schedule/blob/main/SECURITY.md" style="margin-left:10px;font-size:12.5px;color:var(--primary);font-weight:600;text-decoration:none;">查看完整安全合规白皮书 →</a>
+      <div class="sec-actions">
+        <button class="copy-btn" id="copyShaBtn" type="button">复制 SHA-256 校验值</button>
+        <a class="sec-link" href="https://github.com/rex25415/gdou-haiyu-schedule/blob/main/SECURITY.md">查看完整安全合规白皮书 →</a>
+      </div>
     </section>
 
     <section class="card">
@@ -324,8 +401,10 @@
     </div>
 
     <footer>
-      由 <a href="https://github.com/rex25415">GitHub @rex25415</a> 开源维护 ·
-      <a href="https://github.com/rex25415/gdou-haiyu-schedule">项目源码</a> ·
+      <span class="nowrap">由 <a href="https://github.com/rex25415">GitHub @rex25415</a> 开源维护</span>
+      <span>·</span>
+      <a href="https://github.com/rex25415/gdou-haiyu-schedule">项目源码</a>
+      <span>·</span>
       <a href="https://github.com/rex25415/gdou-haiyu-schedule/issues/new/choose">问题反馈 / 提建议</a>
     </footer>
   </div>

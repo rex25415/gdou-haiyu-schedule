@@ -215,18 +215,22 @@ jobs:
               )
 
           notes_md = "\n".join([
-              f"## 🌊 海屿空间 {tag}",
+              f"> 📥 **给普通同学的下载指路**：请滑到本页最下方 **`Assets`** 展开列表，点击 **`{apk_name}`** 下载安装（不要下载 `Source code` 压缩包）；微信/QQ 内打开或下载慢推荐使用免梯国内加速主页：https://rex25415.github.io/gdou-haiyu-schedule/",
               "",
               "<!-- APP_NOTES_START -->",
               raw_notes,
               "<!-- APP_NOTES_END -->",
               "",
-              "### 文件校验",
+              "<details>",
+              "<summary>🔐 安装包与签名 SHA-256 校验信息（点此展开核对）</summary>",
+              "",
               "- 中文极速下载主页：https://rex25415.github.io/gdou-haiyu-schedule/",
-              f"- 文件名：{apk_name}（{apk_mb} MB / {apk_bytes:,} bytes）",
-              "- 包名：io.github.rex25415.haiyu.schedule",
-              f"- SHA-256（安装包）：{apk_sha}",
-              f"- SHA-256（签名证书）：{cert_sha}",
+              f"- 文件名：`{apk_name}`（{apk_mb} MB / {apk_bytes:,} bytes）",
+              "- 包名：`io.github.rex25415.haiyu.schedule`",
+              f"- SHA-256（安装包）：`{apk_sha}`",
+              f"- SHA-256（签名证书）：`{cert_sha}`",
+              "",
+              "</details>",
           ])
           pathlib.Path(os.environ["RUNNER_TEMP"], "release_notes.md").write_text(notes_md, encoding="utf-8")
 
@@ -264,15 +268,25 @@ jobs:
               html = re.sub(r'(<div class="hash-box" id="shaBox">)[^<]*(</div>)', rf'\g<1>{apk_sha}\g<2>', html)
               html = re.sub(r'"约 \d+\.\d+ MB"', f'"约 {apk_mb} MB"', html)
               index_path.write_text(html, encoding="utf-8")
+
+              readme_path = pathlib.Path("README.md")
+              if readme_path.exists():
+                  readme = readme_path.read_text(encoding="utf-8")
+                  readme = re.sub(
+                      r'badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v[0-9A-Za-z._-]+-0C7D72',
+                      f'badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-{tag}-0C7D72',
+                      readme,
+                  )
+                  readme_path.write_text(readme, encoding="utf-8")
           PY
 
       - name: Commit updated manifests back to main (workflow_dispatch stable)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && steps.meta.outputs.is_prerelease != 'true'
         run: |
-          if [ -n "$(git status --porcelain app/build.gradle.kts docs/latest.json docs/index.html)" ]; then
+          if [ -n "$(git status --porcelain app/build.gradle.kts docs/latest.json docs/index.html README.md)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add app/build.gradle.kts docs/latest.json docs/index.html
+            git add app/build.gradle.kts docs/latest.json docs/index.html README.md
             git commit -m "chore(release): publish ${{ steps.meta.outputs.tag_name }}"
             git push origin HEAD:main
           fi
