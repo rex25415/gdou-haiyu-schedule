@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.4.3",
-  "versionName": "3.4.3",
-  "title": "海屿空间 v3.4.3",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.4.3.apk",
+  "tagName": "v3.5.0",
+  "versionName": "3.5.0",
+  "title": "海屿空间 v3.5.0",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.5.0.apk",
   "apkSizeBytes": 2114925,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.3/HaiyuSchedule-GDOU-v3.4.3.apk",
-  "expectedSha256": "dce2176f4fdcc5862103f9b35c23c2d7a375da069a1ce0f81509df4deec74f75",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.3",
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk",
+  "expectedSha256": "41a3b434de701f5288d6632e983fe66d414f5422e9de5ba0a83fc14f6080c30c",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.0",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "🚨 紧急补充更新（建议校外与走读同学全部升级）：v3.4.3 针对「无校园网 / 校外免校园网（WebVPN）」及离校切网场景进行了专项深审与实测修复（覆盖安装自动保留全部本地课表、成绩与设置）。\n\n- 🌐 修复「校外免校园网（WebVPN）」同步误报过期：移除 WebVPN 下会直接跳转 /login 的裸根路径回退，防止查询成绩/考场某候选接口 404 时误判登录态失效，并补全 WEB VPN / wengine-vpn 登录拦截页识别\n- ⚡ 校外从课表页直接点刷新告别 18 秒卡顿：校外或离校断直连后，点击课表右上角 🔄 会在后台 ≤ 2.8 秒并发探测可用通道并无感切至「校外免校园网」续期或报错重试，不再在不可达直连地址上干等\n- 🧭 顺滑引导与交互细节修复：需要重新登录跳转「教务」页时自动切回「教务登录与同步」面板（不再停在「查空教室」）；网页后退导致通道与当前地址错位时支持直接点击当前通道芯片一键纠偏重进\n- 🧩 兼容旧版正方页面：消除残余 Array.prototype.find 调用以彻底兼容 Prototype.js 注入页面"
+  "releaseNotes": "🚀 重磅架构升级（强烈建议全部同学更新，覆盖安装自动保留全部本地课表、成绩与设置）：\n\n为了彻底根治此前反复出现、折腾了好久的几大顽疾——「校外登录后反复误报教务登录态已过期」「打开教务页加载极慢、切页掉帧卡顿」「弹出输入法时界面穿透」「离校切 5G 后卡在直连地址超时」——v3.5.0 花了大量精力从底层彻底重写了整套教务同步引擎，并重塑了「教务中心」界面：\n\n- ⚡ 彻底重写纯 Kotlin 原生 HTTPS 同步引擎（零常驻 WebView）：不再在后台养着上百 MB 的内嵌浏览器，直接绕开广海 WebVPN 374KB 代理重写脚本与 3.7MB 无用登录装饰背景图；切页彻底告别卡顿掉帧，校外 5G 全量同步缩短至约 2 秒、刷课表 1 秒内完成，同时根治登录后误报「登录态已过期」顽疾\n- 🌐 跨网与登录全链路提速：4G/5G 蜂窝流量 0ms 秒判校外通道跳过内网超时；支持空 Cookie 0-RTT 瞬时识别、校园网 CASTGC → 校外 WebVPN 跨通道静默换票、HTTP Keep-Alive 连接复用、学年学期与空教室上下文 10 分钟缓存预热、以及成绩与等级考并发拉取\n- 🔐 全屏官方认证体验彻底修复：认证浮层提升至根级全屏遮盖底栏，根治此前手机软键盘弹出穿透露出背后页面、认证刚通过闪现登录按钮、居中弹窗与底部黑条 Toast 重叠的问题；认证拿到票据的瞬间立刻销毁网页释放内存\n- 🧭 全新「教务中心」界面 & 刷新自动查调课：与课表/学业/设置统一视觉语言，去除所有重复按钮；未登录态清爽专注，已登录态新增本学期数据概览与「刷新课表 · 检查调课」（自动比对本地课表播报是否有换教室/调时间变动，并保留手动调课），下半区仅保留唯一一个「访问广海正方教务官网」直连入口（评教/选课/培养方案），同时打通「查空教室」登录后自动回跳闭环"
 }
