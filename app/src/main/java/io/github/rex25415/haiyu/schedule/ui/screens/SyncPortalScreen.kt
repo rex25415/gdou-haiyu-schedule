@@ -1,23 +1,5 @@
 package io.github.rex25415.haiyu.schedule.ui.screens
 
-import android.annotation.SuppressLint
-import android.graphics.Bitmap
-import android.net.Uri
-import android.net.http.SslError
-import android.os.Handler
-import android.os.Looper
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.CookieManager
-import android.webkit.JsResult
-import android.webkit.SslErrorHandler
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,1924 +13,755 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.EventNote
-import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.Assessment
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Computer
-import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Explore
-import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.MeetingRoom
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import io.github.rex25415.haiyu.schedule.model.AppSettings
 import io.github.rex25415.haiyu.schedule.model.ClassroomDaySchedule
-import io.github.rex25415.haiyu.schedule.model.ClassroomSlotStatus
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.model.EmptyClassroomItem
-import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.ExamItem
+import io.github.rex25415.haiyu.schedule.model.GdouCampus
 import io.github.rex25415.haiyu.schedule.model.GradeItem
 import io.github.rex25415.haiyu.schedule.model.LevelExamItem
 import io.github.rex25415.haiyu.schedule.model.PracticeCourseItem
 import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
-import io.github.rex25415.haiyu.schedule.sync.GdouJsBridge
-import io.github.rex25415.haiyu.schedule.sync.GdouSyncCallback
+import io.github.rex25415.haiyu.schedule.sync.GdouNativeSyncEngine
 import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
+import io.github.rex25415.haiyu.schedule.sync.NativeCallResult
 import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import io.github.rex25415.haiyu.schedule.sync.NetworkProbeResult
+import io.github.rex25415.haiyu.schedule.sync.QuickRefreshNativeOutcome
+import io.github.rex25415.haiyu.schedule.sync.SessionCheckResult
+import io.github.rex25415.haiyu.schedule.sync.SyncChannel
 import io.github.rex25415.haiyu.schedule.sync.TermOptionsPayload
 import io.github.rex25415.haiyu.schedule.ui.components.EmptyClassroomPane
-import kotlinx.coroutines.delay
-import java.util.concurrent.atomic.AtomicReference
+import io.github.rex25415.haiyu.schedule.ui.components.WebSheetMode
+import io.github.rex25415.haiyu.schedule.ui.components.WebSheetRequest
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalLayoutApi::class)
-@SuppressLint("SetJavaScriptEnabled")
+data class ExternalAuthTrigger(
+    val nonce: Int = 0,
+    val channel: SyncChannel = SyncChannel.WEBVPN,
+    val resumeUrl: String = GdouSyncScript.URL_WEBVPN_CAS_LOGIN,
+    val reason: String = "",
+    val isMfa: Boolean = false,
+    val isWebVpnDenied: Boolean = false,
+    val autoQuickRefreshAfterLogin: Boolean = false
+)
+
+private enum class PortalSessionUiState {
+    CHECKING,
+    READY,
+    NEEDS_AUTH,
+    NETWORK_ERROR
+}
+
+/**
+ * 全原生 Material 3「教务中心」（教务同步 & 实时查空教室）：
+ * - 与「学业中心 / 设置与工作台」完全同源的顶栏大标题、SingleChoiceSegmentedButtonRow、20dp 无框洁白卡片与宽屏约束；
+ * - 零常驻 WebView：未登录时为纯净专注的广海官方连接引导页；认证通过原子切入分步建连过渡态（0 帧闪现）；
+ * - 已登录态围绕「刷新课表 · 检查调课」智能比对与「一键全同步」，下半区仅保留唯一不重复的「访问广海正方教务官网」直连卡片。
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun SyncPortalScreen(
-    isVisible: Boolean,
+    nativeEngine: GdouNativeSyncEngine,
     settings: AppSettings,
     courses: List<CourseItem> = emptyList(),
-    quickRefreshTrigger: Int,
+    gradesCount: Int = 0,
+    examsCount: Int = 0,
     requestedMode: Int = 0,
     modeRequestNonce: Int = 0,
+    autoStartSyncOnEnter: Boolean = false,
+    onConsumeAutoStartSync: () -> Unit = {},
+    externalAuthTrigger: ExternalAuthTrigger = ExternalAuthTrigger(),
+    onConsumeExternalAuthTrigger: () -> Unit = {},
+    onOpenWebSheet: (
+        request: WebSheetRequest,
+        onAuthCompleted: (SyncChannel) -> Unit,
+        onDismissed: (wasFullBrowser: Boolean) -> Unit
+    ) -> Unit,
     onLoginStateChanged: (Boolean) -> Unit,
     onSyncStateChanged: (Boolean) -> Unit,
-    onQuickRefreshNeedsLogin: (String) -> Unit,
     onUpdateChannelPrefs: (preferOffCampus: Boolean, preferDesktopUa: Boolean) -> Unit,
     onToggleFavoriteBuilding: (GdouCampus, String) -> Unit = { _, _ -> },
     onToggleFavoriteClassroom: (GdouCampus, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
-    onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String, List<PracticeCourseItem>) -> Unit,
+    onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String, List<PracticeCourseItem>) -> GdouCampus?,
     onGradesSynced: (List<GradeItem>, List<LevelExamItem>) -> Unit,
     onExamsSynced: (List<ExamItem>) -> Unit,
+    onGradeSkipReasonChanged: (String?) -> Unit = {},
     onShowMessage: (String) -> Unit,
-    onNavigateBackToSchedule: () -> Unit = {},
-    onOpenCampusServices: () -> Unit = {},
-    onSyncFinishedJumpSchedule: () -> Unit
+    @Suppress("UNUSED_PARAMETER") onOpenCampusServices: () -> Unit = {},
+    onSyncFinishedJumpSchedule: () -> Unit,
+    onSyncFinishedJumpAcademic: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val latestVisible by rememberUpdatedState(isVisible)
-    val latestSettings by rememberUpdatedState(settings)
+    val scope = rememberCoroutineScope()
 
-    var useOffCampus by remember { mutableStateOf(settings.preferOffCampusChannel) }
-    var desktopMode by remember { mutableStateOf(settings.preferDesktopUa) }
-    var currentUrl by remember {
-        mutableStateOf(if (settings.preferOffCampusChannel) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS)
-    }
-    var pageTitle by remember { mutableStateOf("广东海洋大学教务系统") }
-    var loadProgress by remember { mutableIntStateOf(0) }
-    var pageErrorMsg by remember { mutableStateOf<String?>(null) }
-    var domConfirmedLoggedIn by remember { mutableStateOf(false) }
-    var isPageSettled by remember { mutableStateOf(false) }
-
-    // Calm state guards to completely prevent jumping / redirect thrashing
-    var hasAutoEnteredWfw by remember { mutableStateOf(false) }
-    var hasAutoTriggeredWebVpnCas by remember { mutableStateOf(false) }
-    var hasAutoSwitchedForMfa by remember { mutableStateOf(false) }
-    var hasAutoRecoveredRedirectLoop by remember { mutableStateOf(false) }
-    var hasAutoFallbackOffCampus by remember { mutableStateOf(false) }
-    var pendingWfwEnterRunnable by remember { mutableStateOf<Runnable?>(null) }
-    var pendingMfaAdaptRunnable by remember { mutableStateOf<Runnable?>(null) }
-    var pendingDomProbeRunnable by remember { mutableStateOf<Runnable?>(null) }
-
-    // Thread-safe URL mirror for GdouJsBridge strict HTTPS origin guard (Binder thread safe!)
-    val trustedUrlRef = remember {
-        AtomicReference(
-            if (settings.preferOffCampusChannel) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
+    var activeChannel by remember {
+        mutableStateOf(
+            when {
+                nativeEngine.lastReadyChannel != null -> nativeEngine.lastReadyChannel!!
+                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) -> SyncChannel.WEBVPN
+                settings.preferOffCampusChannel -> SyncChannel.WEBVPN
+                else -> SyncChannel.ON_CAMPUS
+            }
         )
     }
+    var activePortalMode by remember { mutableIntStateOf(requestedMode.coerceIn(0, 1)) }
+    LaunchedEffect(modeRequestNonce) {
+        if (modeRequestNonce > 0) activePortalMode = requestedMode.coerceIn(0, 1)
+    }
 
-    // Real-time campus vs off-campus network probe state
+    var sessionState by remember { mutableStateOf(PortalSessionUiState.CHECKING) }
+    var isPostAuthConnecting by remember { mutableStateOf(false) }
+    var sessionLatencyMs by remember { mutableStateOf<Long?>(null) }
+    var sessionStatusHint by remember { mutableStateOf("正在连接广海教务...") }
+    var lastAuthResumeUrl by remember { mutableStateOf(activeChannel.authStartUrl()) }
+    var lastWebVpnDenied by remember { mutableStateOf(false) }
+
     var networkProbe by remember {
         mutableStateOf(NetworkProbeResult(state = CampusNetworkState.PROBING, isOnWifi = false))
     }
     var probeTrigger by remember { mutableIntStateOf(0) }
-    var slowLoadHint by remember { mutableStateOf(false) }
 
     var isSyncing by remember { mutableStateOf(false) }
-    var isSilentQuickRefresh by remember { mutableStateOf(false) }
     var syncStatusText by remember { mutableStateOf<String?>(null) }
-    var handledQuickRefreshTrigger by remember { mutableIntStateOf(0) }
-    var pendingQuickRefreshAfterSso by remember { mutableStateOf(false) }
-    var pendingSsoAwaitingPageStart by remember { mutableStateOf(false) }
-    var ssoRecoveryUsedForRefresh by remember { mutableStateOf(false) }
-    var pendingSsoTimeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
-    var pendingQuickProbeActive by remember { mutableStateOf(false) }
-    var pendingQuickProbeNonce by remember { mutableIntStateOf(0) }
-    var pendingQuickProbeTimeoutReason by remember { mutableStateOf("请先在教务页完成登录，即可随时一键刷新课表") }
     var pendingSyncMode by remember { mutableStateOf("all") }
+    var pendingAutoActionAfterAuth by remember { mutableStateOf<String?>(null) } // "quick" | "all" | "courses" | "exams" | "empty_room" | null
     var termOptionsDialog by remember { mutableStateOf<TermOptionsPayload?>(null) }
-    var showQuickNavMenu by remember { mutableStateOf(false) }
-    var showSingleSyncMenu by remember { mutableStateOf(false) }
     var syncSuccessSummary by remember { mutableStateOf<String?>(null) }
     var evalInterceptBanner by remember { mutableStateOf<String?>(null) }
-    var jsAlertDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
-    var jsConfirmDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
+    var showSingleSyncMenu by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var diagnosticDialogText by remember { mutableStateOf<String?>(null) }
-    var activePortalMode by remember { mutableIntStateOf(requestedMode.coerceIn(0, 1)) }
-    LaunchedEffect(modeRequestNonce) {
-        if (modeRequestNonce > 0) {
-            activePortalMode = requestedMode.coerceIn(0, 1)
-        }
-    }
+
+    // Empty Classroom state
     var emptyClassroomResults by remember { mutableStateOf<List<EmptyClassroomItem>?>(null) }
     var emptyClassroomSummary by remember { mutableStateOf("") }
     var inspectedClassroom by remember { mutableStateOf<ClassroomDaySchedule?>(null) }
     var isInspectingRoom by remember { mutableStateOf(false) }
-    var pendingInspectFallbackMeta by remember {
-        mutableStateOf<Triple<GdouCampus, String, String>?>(null) // campus, seats, roomType
+
+    val isLoggedIntoJw = sessionState == PortalSessionUiState.READY
+
+    LaunchedEffect(isLoggedIntoJw) { onLoginStateChanged(isLoggedIntoJw) }
+    LaunchedEffect(isSyncing) { onSyncStateChanged(isSyncing) }
+
+    fun extractGradeSkipReason(summary: String): String? {
+        return Regex("成绩跳过\\(([^)]+)\\)").find(summary)?.groupValues?.getOrNull(1)?.trim()
     }
 
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
-    fun cancelPendingTransitions() {
-        pendingWfwEnterRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingWfwEnterRunnable = null
-        pendingMfaAdaptRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingMfaAdaptRunnable = null
-        pendingDomProbeRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingDomProbeRunnable = null
+    fun openDiagnosticDialog() {
+        diagnosticDialogText = buildString {
+            appendLine("同步架构：纯 Kotlin 原生 HTTPS 并发引擎（0 常驻 WebView）")
+            appendLine("当前通道：${activeChannel.label}")
+            appendLine("会话状态：$sessionState (${sessionLatencyMs ?: "-"}ms)")
+            appendLine(
+                "网络探测：" + when (networkProbe.state) {
+                    CampusNetworkState.PROBING -> "探测中"
+                    CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（教务 ${networkProbe.jwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
+                    CampusNetworkState.OFF_CAMPUS_ONLY -> "校外通道可用（WebVPN ${networkProbe.wfwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
+                    CampusNetworkState.OFFLINE_OR_BLOCKED -> "网络暂未连通"
+                }
+            )
+            appendLine("当前学期：${settings.academicYearLabel} (${settings.lastSyncYearCode}/${settings.lastSyncSemesterCode})")
+            appendLine("已缓存菜单数：${nativeEngine.getCachedMenuEndpoints(activeChannel)?.dynamicLinks?.size ?: 0}")
+        }
     }
 
-    fun clearPendingSsoRecovery() {
-        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        pendingSsoTimeoutRunnable = null
-        pendingQuickRefreshAfterSso = false
-        pendingSsoAwaitingPageStart = false
-        pendingQuickProbeActive = false
-    }
+    lateinit var verifySessionNow: (
+        channel: SyncChannel,
+        forceReverify: Boolean,
+        autoTriggerAction: Boolean,
+        openAuthIfNeeded: Boolean,
+        checkingHint: String
+    ) -> Unit
 
-    fun notifyQuickRefreshNeedsLogin(reason: String) {
-        clearPendingSsoRecovery()
-        isSyncing = false
-        isSilentQuickRefresh = false
-        syncStatusText = null
-        activePortalMode = 0
-        onQuickRefreshNeedsLogin(reason)
-    }
-
-    fun isLikelyNetworkFailureMessage(msg: String): Boolean {
-        val m = msg.lowercase()
-        return m.contains("网络") ||
-            m.contains("未连通") ||
-            m.contains("failed to fetch") ||
-            m.contains("load failed") ||
-            m.contains("timeout") ||
-            m.contains("timed out") ||
-            m.contains("abort")
-    }
-
-    fun evalJwScript(script: String) {
-        val wv = webViewRef ?: return
-        wv.onResume()
-        wv.evaluateJavascript(script, null)
-    }
-
-    fun beginQuickRefreshSsoRecovery(
-        wv: WebView,
-        statusText: String,
-        timeoutReason: String,
-        forceReloadEntry: Boolean,
-        targetOffCampus: Boolean = useOffCampus
+    fun openAuthSheet(
+        channel: SyncChannel,
+        resumeUrl: String = channel.authStartUrl(),
+        isMfa: Boolean = false,
+        activateWeComTab: Boolean = false,
+        holdOnWebVpnLogin: Boolean = false,
+        autoActionAfter: String? = null
     ) {
-        pendingQuickProbeActive = false
-        ssoRecoveryUsedForRefresh = true
-        pendingQuickRefreshAfterSso = true
-        isSyncing = true
-        syncStatusText = statusText
-        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        val timeoutTask = Runnable {
-            if (pendingQuickRefreshAfterSso) {
-                notifyQuickRefreshNeedsLogin(timeoutReason)
-            }
+        activeChannel = channel
+        if (autoActionAfter != null) pendingAutoActionAfterAuth = autoActionAfter
+        val title = when {
+            isMfa -> "统一认证二次安全验证"
+            activateWeComTab -> "WebVPN 企业微信扫码"
+            channel == SyncChannel.WFW_LEGACY -> "备用校外微门户登录"
+            channel == SyncChannel.ON_CAMPUS -> "校园网统一身份认证"
+            else -> "广海统一身份认证"
         }
-        pendingSsoTimeoutRunnable = timeoutTask
-        mainHandler.postDelayed(timeoutTask, 18_000L)
-        val channelChanged = targetOffCampus != useOffCampus
-        if (channelChanged) {
-            useOffCampus = targetOffCampus
-            if (targetOffCampus) hasAutoFallbackOffCampus = true
-        }
-        if (forceReloadEntry || channelChanged) {
-            cancelPendingTransitions()
-            pageErrorMsg = null
-            domConfirmedLoggedIn = false
-            isPageSettled = false
-            loadProgress = 0
-            hasAutoEnteredWfw = false
-            hasAutoTriggeredWebVpnCas = false
-            hasAutoSwitchedForMfa = false
-            pendingSsoAwaitingPageStart = true
-            val entry = if (targetOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
-            currentUrl = entry
-            trustedUrlRef.set(entry)
-            wv.onResume()
-            wv.stopLoading()
-            wv.loadUrl(entry)
-        } else {
-            pendingSsoAwaitingPageStart = false
-            wv.onResume()
-        }
-    }
-
-    fun isMfaUrl(url: String?): Boolean = GdouSyncScript.isMfaUrl(url)
-
-    val isLoggedIntoJw = remember(currentUrl, pageTitle, pageErrorMsg, domConfirmedLoggedIn) {
-        GdouSyncScript.resolveJwLoginState(
-            url = currentUrl,
-            pageTitle = pageTitle,
-            pageErrorMsg = pageErrorMsg,
-            domConfirmedLoggedIn = domConfirmedLoggedIn
+        onOpenWebSheet(
+            WebSheetRequest(
+                mode = WebSheetMode.AUTH_ONLY,
+                channel = channel,
+                startUrl = resumeUrl,
+                titleHint = title,
+                preferDesktopUa = isMfa || activateWeComTab,
+                activateWeComTab = activateWeComTab,
+                holdOnWebVpnLogin = holdOnWebVpnLogin
+            ),
+            { authedChannel ->
+                activeChannel = authedChannel
+                isPostAuthConnecting = true
+                sessionState = PortalSessionUiState.CHECKING
+                sessionStatusHint = "正在建立教务连接..."
+                verifySessionNow(authedChannel, true, true, false, "正在建立教务连接...")
+            },
+            { _ -> }
         )
     }
 
-    val isSittingOnWfwRoot = remember(currentUrl, pageTitle, pageErrorMsg, isLoggedIntoJw) {
-        if (!pageErrorMsg.isNullOrBlank()) return@remember false
-        val uri = try { Uri.parse(currentUrl) } catch (_: Exception) { null }
-        val host = uri?.host.orEmpty().lowercase()
-        val path = uri?.path.orEmpty()
-        val query = uri?.query.orEmpty()
-        val lowerUrl = currentUrl.lowercase()
-        val title = pageTitle
-        if (
-            query.contains("ticket=") ||
-            query.contains("cas_login=") ||
-            lowerUrl.contains("/authserver/") ||
-            isMfaUrl(lowerUrl) ||
-            title.contains("统一身份认证") ||
-            title.contains("多因子") ||
-            title.contains("跳转") ||
-            title.contains("登录")
-        ) {
-            return@remember false
+    fun openFullBrowser(pathOrFullUrl: String, title: String) {
+        val targetUrl = if (pathOrFullUrl.startsWith("https://", ignoreCase = true)) {
+            pathOrFullUrl
+        } else {
+            val clean = GdouNativeSyncEngine.stripProxyPrefix(pathOrFullUrl)
+            activeChannel.baseJwUrl() + clean
         }
-        val onWfwRoot = isLoggedIntoJw &&
-            host == "wfw.gdou.edu.cn" &&
-            (path.isEmpty() || path == "/" || path == "/index.html")
-        val onWebVpnRoot = host == "webvpn.gdou.edu.cn" &&
-            !lowerUrl.contains(GdouSyncScript.WEBVPN_JW_HEX) &&
-            !lowerUrl.contains("/wengine-vpn/") &&
-            path.trimEnd('/') != "/login" &&
-            (path.isEmpty() || path == "/" || path == "/index.html" || path.startsWith("/portal"))
-        onWfwRoot || onWebVpnRoot
+        onOpenWebSheet(
+            WebSheetRequest(
+                mode = WebSheetMode.FULL_BROWSER,
+                channel = activeChannel,
+                startUrl = targetUrl,
+                titleHint = title,
+                preferDesktopUa = settings.preferDesktopUa
+            ),
+            {},
+            { wasFullBrowser ->
+                if (wasFullBrowser) {
+                    verifySessionNow(activeChannel, false, false, false, "正在校验教务连接...")
+                }
+            }
+        )
     }
 
-    LaunchedEffect(isLoggedIntoJw) {
-        onLoginStateChanged(isLoggedIntoJw)
-    }
-
-    LaunchedEffect(isLoggedIntoJw, isPageSettled) {
-        if (isLoggedIntoJw && isPageSettled) {
-            hasAutoEnteredWfw = false
-            hasAutoTriggeredWebVpnCas = false
+    fun openDynamicModuleInBrowser(keywords: List<String>, label: String) {
+        val menu = nativeEngine.getCachedMenuEndpoints(activeChannel)
+        val matched = menu?.dynamicLinks?.firstOrNull { entry ->
+            keywords.any { kw -> entry.title.contains(kw) }
+        }
+        if (matched != null) {
+            openFullBrowser(matched.path, label)
+        } else {
+            openFullBrowser("/xtgl/index_initMenu.html?jsdm=xs", "广海正方教务官网")
         }
     }
 
-    LaunchedEffect(isSyncing) {
-        onSyncStateChanged(isSyncing)
-    }
-
-    val syncCallback = remember {
-        object : GdouSyncCallback {
-            override fun onProgress(message: String) {
-                mainHandler.post { syncStatusText = message }
-            }
-
-            override fun onTermOptionsLoaded(options: TermOptionsPayload) {
-                mainHandler.post {
-                    isSyncing = false
-                    isSilentQuickRefresh = false
-                    syncStatusText = null
-                    termOptionsDialog = options
-                }
-            }
-
-            override fun onCoursesSynced(
-                courses: List<CourseItem>,
-                startDate: String?,
-                totalWeeks: Int,
-                termLabel: String,
-                yearCode: String,
-                semesterCode: String,
-                detectedCampusId: String,
-                practiceCourses: List<PracticeCourseItem>
-            ) {
-                mainHandler.post {
-                    onCoursesSynced(courses, startDate, totalWeeks, termLabel, yearCode, semesterCode, detectedCampusId, practiceCourses)
-                }
-            }
-
-            override fun onGradesSynced(grades: List<GradeItem>, levelExams: List<LevelExamItem>) {
-                mainHandler.post { onGradesSynced(grades, levelExams) }
-            }
-
-            override fun onExamsSynced(exams: List<ExamItem>) {
-                mainHandler.post { onExamsSynced(exams) }
-            }
-
-            override fun onEmptyClassroomsLoaded(rooms: List<EmptyClassroomItem>, summary: String) {
-                mainHandler.post {
-                    isSyncing = false
-                    syncStatusText = null
-                    emptyClassroomResults = rooms
-                    emptyClassroomSummary = summary
-                    activePortalMode = 1
-                }
-            }
-
-            override fun onClassroomDayScheduleLoaded(
-                campusLabel: String,
-                building: String,
-                roomName: String,
-                weekNumber: Int,
-                dayOfWeek: Int,
-                seats: String,
-                roomType: String,
-                slots: List<ClassroomSlotStatus>
-            ) {
-                mainHandler.post {
-                    isInspectingRoom = false
-                    val meta = pendingInspectFallbackMeta
-                    val resolvedCampus = meta?.first ?: when {
-                        campusLabel.contains("海滨") -> GdouCampus.HAIBIN
-                        campusLabel.contains("阳江") -> GdouCampus.YANGJIANG
-                        else -> GdouCampus.HUGUANG
-                    }
-                    val finalSeats = seats.ifBlank { meta?.second.orEmpty() }
-                    val finalType = roomType.ifBlank { meta?.third.orEmpty() }
-                    inspectedClassroom = ClassroomDaySchedule(
-                        campus = resolvedCampus,
-                        building = building,
-                        roomName = roomName,
-                        weekNumber = weekNumber,
-                        dayOfWeek = dayOfWeek,
-                        seats = finalSeats,
-                        roomType = finalType,
-                        slots = slots
+    fun runQuickRefreshInWorkbench(channel: SyncChannel = activeChannel) {
+        if (isSyncing) return
+        val previousCoursesSnapshot = courses
+        scope.launch {
+            isSyncing = true
+            syncStatusText = "正在刷新课表并检查调课..."
+            val outcome = nativeEngine.quickRefreshCourses(
+                context = context,
+                preferredChannel = channel,
+                savedYear = settings.lastSyncYearCode,
+                savedSem = settings.lastSyncSemesterCode,
+                savedTermLabel = settings.academicYearLabel,
+                onProgress = { msg -> syncStatusText = msg }
+            )
+            isSyncing = false
+            syncStatusText = null
+            when (outcome) {
+                is QuickRefreshNativeOutcome.Success -> {
+                    activeChannel = outcome.channel
+                    sessionState = PortalSessionUiState.READY
+                    evalInterceptBanner = null
+                    val diff = GdouNativeSyncEngine.summarizeCourseRefreshDiff(
+                        previousCourses = previousCoursesSnapshot,
+                        nextCourses = outcome.courses,
+                        practiceCount = outcome.practiceCourses.size
+                    )
+                    val detected = onCoursesSynced(
+                        outcome.courses,
+                        outcome.startDate,
+                        outcome.totalWeeks,
+                        outcome.termLabel,
+                        outcome.yearCode,
+                        outcome.semesterCode,
+                        outcome.detectedCampusId,
+                        outcome.practiceCourses
+                    )
+                    val campusChanged = detected != null && detected != settings.campus
+                    onShowMessage(
+                        if (campusChanged) "${diff.message} · 已切换「${detected!!.label}」作息"
+                        else diff.message
                     )
                 }
-            }
-
-            override fun onComplete(summary: String) {
-                mainHandler.post {
-                    clearPendingSsoRecovery()
-                    val wasSilent = isSilentQuickRefresh || !latestVisible
-                    isSyncing = false
-                    isSilentQuickRefresh = false
-                    syncStatusText = null
-                    evalInterceptBanner = null
-                    if (wasSilent) {
-                        onShowMessage(summary)
-                    } else {
-                        syncSuccessSummary = summary
-                        onShowMessage(summary)
-                    }
+                is QuickRefreshNativeOutcome.NeedsLogin -> {
+                    activeChannel = outcome.channel
+                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                    lastWebVpnDenied = outcome.isWebVpnDenied
+                    lastAuthResumeUrl = outcome.resumeUrl
+                    sessionStatusHint = outcome.reason
+                    openAuthSheet(
+                        channel = outcome.channel,
+                        resumeUrl = outcome.resumeUrl,
+                        isMfa = outcome.isMfa,
+                        autoActionAfter = "quick"
+                    )
                 }
-            }
-
-            override fun onError(errorMessage: String) {
-                mainHandler.post {
-                    val wasSilent = isSilentQuickRefresh
-                    val wv = webViewRef
-                    if (wasSilent && !useOffCampus && !ssoRecoveryUsedForRefresh && wv != null && isLikelyNetworkFailureMessage(errorMessage)) {
-                        ssoRecoveryUsedForRefresh = true
-                        isSyncing = true
-                        syncStatusText = "直连受限，正在探测校外通道..."
-                        pendingQuickProbeActive = true
-                        pendingQuickProbeTimeoutReason = "当前校园网直连不可达，请在「校外免校园网」登录后刷新课表"
-                        pendingQuickProbeNonce++
-                        return@post
-                    }
-                    if (!useOffCampus && isLikelyNetworkFailureMessage(errorMessage)) {
-                        probeTrigger++
-                    }
-                    clearPendingSsoRecovery()
-                    isSyncing = false
-                    isInspectingRoom = false
-                    isSilentQuickRefresh = false
-                    syncStatusText = null
-                    if (errorMessage.contains("评教") || errorMessage.contains("确认通知")) {
-                        evalInterceptBanner = errorMessage
-                    }
-                    onShowMessage(errorMessage)
-                }
-            }
-
-            override fun onQuickRefreshNeedsLogin(reason: String) {
-                mainHandler.post {
-                    val wv = webViewRef
-                    if (!ssoRecoveryUsedForRefresh && wv != null) {
-                        if (!useOffCampus) {
-                            ssoRecoveryUsedForRefresh = true
-                            isSyncing = true
-                            syncStatusText = "正在探测校内外可用通道..."
-                            pendingQuickProbeActive = true
-                            pendingQuickProbeTimeoutReason = reason
-                            pendingQuickProbeNonce++
-                        } else {
-                            beginQuickRefreshSsoRecovery(
-                                wv = wv,
-                                statusText = "教务会话正在自动续期...",
-                                timeoutReason = reason,
-                                forceReloadEntry = true
-                            )
-                        }
-                    } else {
-                        notifyQuickRefreshNeedsLogin(reason)
-                    }
+                is QuickRefreshNativeOutcome.Error -> {
+                    if (outcome.isEvalIntercept) evalInterceptBanner = outcome.message
+                    onShowMessage(outcome.message)
                 }
             }
         }
     }
 
     fun startSyncFlow(mode: String) {
-        if (webViewRef == null) return
-        clearPendingSsoRecovery()
-        isSilentQuickRefresh = false
+        if (isSyncing) return
         pendingSyncMode = mode
-        if (mode == "grades") {
-            isSyncing = true
-            syncStatusText = "正在拉取全部历史成绩与绩点..."
-            evalJwScript(GdouSyncScript.buildSyncScript("grades", "", "", ""))
-            return
-        }
-        isSyncing = true
-        syncStatusText = "正在读取教务学年学期..."
-        evalJwScript(GdouSyncScript.buildFetchTermOptionsScript())
-    }
-
-    fun startQuickRefreshCourses(silent: Boolean, allowSsoRecovery: Boolean = true) {
-        val wv = webViewRef
-        if (wv == null) {
-            notifyQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
-            return
-        }
-        if (allowSsoRecovery) {
-            ssoRecoveryUsedForRefresh = false
-            clearPendingSsoRecovery()
-        }
-        isSilentQuickRefresh = silent
-        isSyncing = true
-        syncStatusText = "正在校验教务会话并刷新课表..."
-        wv.onResume()
-
-        val activeWvUrl = wv.url.takeUnless { it.isNullOrBlank() } ?: currentUrl
-        val loggedInNow = isLoggedIntoJw || GdouSyncScript.resolveJwLoginState(
-            url = activeWvUrl,
-            pageTitle = wv.title ?: pageTitle,
-            pageErrorMsg = pageErrorMsg,
-            domConfirmedLoggedIn = domConfirmedLoggedIn
-        )
-        val loadingActive = loadProgress in 1..99 && pageErrorMsg == null
-
-        if (!loggedInNow && allowSsoRecovery && !ssoRecoveryUsedForRefresh && (silent || !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl) || loadingActive)) {
-            if (!useOffCampus) {
-                ssoRecoveryUsedForRefresh = true
-                syncStatusText = "正在探测校内外可用通道..."
-                pendingQuickProbeActive = true
-                pendingQuickProbeTimeoutReason = "请先在教务页完成登录，即可随时一键刷新课表"
-                pendingQuickProbeNonce++
-                return
-            }
-            val loadingRedirect = loadingActive && !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl)
-            beginQuickRefreshSsoRecovery(
-                wv = wv,
-                statusText = "正在校验教务会话并刷新课表...",
-                timeoutReason = "请先在教务页完成登录，即可随时一键刷新课表",
-                forceReloadEntry = !loadingRedirect
-            )
-            return
-        }
-
-        if (loggedInNow && !isPageSettled && loadingActive && allowSsoRecovery && !ssoRecoveryUsedForRefresh) {
-            beginQuickRefreshSsoRecovery(
-                wv = wv,
-                statusText = "正在校验教务会话并刷新课表...",
-                timeoutReason = "教务页面响应超时，请稍后重试",
-                forceReloadEntry = false
-            )
-            return
-        }
-
-        if (loggedInNow && !isPageSettled && !loadingActive) {
-            isPageSettled = true
-        }
-
-        evalJwScript(
-            GdouSyncScript.buildQuickRefreshCoursesScript(
-                academicYear = latestSettings.lastSyncYearCode,
-                semesterCode = latestSettings.lastSyncSemesterCode,
-                termLabel = latestSettings.academicYearLabel
-            )
-        )
-    }
-
-    // Off-campus fast channel probe for cold-start / walked-off-campus quick refresh so it NEVER stalls 18s on blocked jw.gdou.edu.cn
-    LaunchedEffect(pendingQuickProbeNonce) {
-        if (pendingQuickProbeNonce == 0 || !pendingQuickProbeActive) return@LaunchedEffect
-        val wv = webViewRef
-        if (wv == null) {
-            notifyQuickRefreshNeedsLogin(pendingQuickProbeTimeoutReason)
-            return@LaunchedEffect
-        }
-        val result = NetworkChannelProbe.probe(context)
-        networkProbe = result
-        if (!pendingQuickProbeActive) return@LaunchedEffect
-        pendingQuickProbeActive = false
-        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(useOffCampus, result.state)) {
-            beginQuickRefreshSsoRecovery(
-                wv = wv,
-                statusText = "当前为校外网络，已自动切校外通道校验会话...",
-                timeoutReason = pendingQuickProbeTimeoutReason,
-                forceReloadEntry = true,
-                targetOffCampus = true
-            )
-            onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
-        } else if (result.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
-            notifyQuickRefreshNeedsLogin("当前网络暂未连通学校服务器，请检查网络或切换通道后重试")
-        } else {
-            beginQuickRefreshSsoRecovery(
-                wv = wv,
-                statusText = "正在校验教务会话并刷新课表...",
-                timeoutReason = pendingQuickProbeTimeoutReason,
-                forceReloadEntry = true,
-                targetOffCampus = useOffCampus
-            )
-        }
-    }
-
-    // Listen to one-tap quick refresh requests from ScheduleScreen (waits cleanly if WebView is still initializing)
-    LaunchedEffect(quickRefreshTrigger, webViewRef) {
-        if (quickRefreshTrigger > handledQuickRefreshTrigger && webViewRef != null) {
-            handledQuickRefreshTrigger = quickRefreshTrigger
-            startQuickRefreshCourses(silent = !latestVisible, allowSsoRecovery = true)
-        }
-    }
-
-    // Continue deferred quick-refresh only AFTER new navigation has started AND settled (never inject into unloading frame!)
-    LaunchedEffect(isLoggedIntoJw, isPageSettled, pendingQuickRefreshAfterSso, pendingSsoAwaitingPageStart) {
-        if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
-            delay(180L)
-            if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
-                clearPendingSsoRecovery()
-                startQuickRefreshCourses(
-                    silent = isSilentQuickRefresh || !latestVisible,
-                    allowSsoRecovery = false
-                )
-            }
-        }
-    }
-
-    // Safety watchdog so a disrupted JS fetch/navigation can NEVER leave the UI spinner locked forever
-    LaunchedEffect(isSyncing, pendingQuickRefreshAfterSso) {
-        if (isSyncing && !pendingQuickRefreshAfterSso) {
-            delay(35_000L)
-            if (isSyncing && !pendingQuickRefreshAfterSso) {
+        scope.launch {
+            if (mode == "grades") {
+                isSyncing = true
+                syncStatusText = "正在同步历史成绩与绩点..."
+                val res = nativeEngine.syncModules(activeChannel, "grades", "", "", "") { syncStatusText = it }
                 isSyncing = false
-                isInspectingRoom = false
-                isSilentQuickRefresh = false
                 syncStatusText = null
-                onShowMessage("教务同步请求超时，请检查网络或刷新教务页后重试")
+                if (res.authExpired != null) {
+                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                    lastWebVpnDenied = res.authExpired.isWebVpnDenied
+                    openAuthSheet(activeChannel, res.authExpired.resumeUrl, isMfa = res.authExpired.isMfa)
+                    return@launch
+                }
+                if (res.evalInterceptMessage != null) evalInterceptBanner = res.evalInterceptMessage
+                val gOk = res.gradesResult as? NativeCallResult.Success
+                if (gOk != null) {
+                    onGradesSynced(gOk.data.grades, gOk.data.levelExams)
+                    extractGradeSkipReason(res.summaryText)?.let { onGradeSkipReasonChanged(it) }
+                    syncSuccessSummary = res.summaryText
+                } else {
+                    onShowMessage(res.errorText ?: "成绩同步失败")
+                }
+                return@launch
+            }
+
+            isSyncing = true
+            syncStatusText = "正在读取学年学期..."
+            when (val opts = nativeEngine.fetchAcademicOptions(activeChannel)) {
+                is NativeCallResult.Success -> {
+                    isSyncing = false
+                    syncStatusText = null
+                    sessionState = PortalSessionUiState.READY
+                    termOptionsDialog = opts.data
+                }
+                is NativeCallResult.AuthExpired -> {
+                    isSyncing = false
+                    syncStatusText = null
+                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                    lastWebVpnDenied = opts.isWebVpnDenied
+                    lastAuthResumeUrl = opts.resumeUrl
+                    sessionStatusHint = opts.message
+                    openAuthSheet(activeChannel, opts.resumeUrl, isMfa = opts.isMfa, autoActionAfter = mode)
+                }
+                is NativeCallResult.EvalIntercept -> {
+                    isSyncing = false
+                    syncStatusText = null
+                    evalInterceptBanner = opts.message
+                    onShowMessage(opts.message)
+                }
+                is NativeCallResult.Failure -> {
+                    isSyncing = false
+                    syncStatusText = null
+                    if (opts.isNetworkError && activeChannel == SyncChannel.ON_CAMPUS) {
+                        probeTrigger++
+                    }
+                    onShowMessage(opts.message)
+                }
             }
         }
     }
 
-    fun switchChannel(offCampus: Boolean, persistChoice: Boolean = true) {
-        cancelPendingTransitions()
-        if (persistChoice) {
-            clearPendingSsoRecovery()
-            ssoRecoveryUsedForRefresh = false
-        } else if (pendingQuickRefreshAfterSso) {
-            pendingSsoAwaitingPageStart = true
-        }
-        useOffCampus = offCampus
-        domConfirmedLoggedIn = false
-        isPageSettled = false
-        loadProgress = 0
-        hasAutoEnteredWfw = false
-        hasAutoTriggeredWebVpnCas = false
-        hasAutoSwitchedForMfa = false
-        hasAutoRecoveredRedirectLoop = false
-        pageErrorMsg = null
-        if (persistChoice) {
-            onUpdateChannelPrefs(offCampus, desktopMode)
-        }
-        val url = if (offCampus) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
-        currentUrl = url
-        trustedUrlRef.set(url)
-        webViewRef?.stopLoading()
-        webViewRef?.loadUrl(url)
-    }
-
-    val latestUseOffCampus by rememberUpdatedState(useOffCampus)
-    val latestLoggedIntoJw by rememberUpdatedState(isLoggedIntoJw)
-    val latestCurrentUrl by rememberUpdatedState(currentUrl)
-    val latestLoadProgress by rememberUpdatedState(loadProgress)
-    val latestPageErrorMsg by rememberUpdatedState(pageErrorMsg)
-
-    // Smart On-Campus / Off-Campus probe when Sync tab is visible (temporary fallback never clobbers saved preference)
-    LaunchedEffect(isVisible, probeTrigger) {
-        if (!isVisible) return@LaunchedEffect
-        val result = NetworkChannelProbe.probe(context)
-        networkProbe = result
-        // Re-read live WebView state AFTER probe() suspends so an active SSO flow is never aborted by stale state
-        val inActiveSsoFlow = latestLoadProgress in 1..99 &&
-            latestPageErrorMsg == null &&
-            !GdouSyncScript.isBareJwEntryUrl(latestCurrentUrl)
-        if (latestLoggedIntoJw || inActiveSsoFlow) {
-            return@LaunchedEffect
-        }
-        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(latestUseOffCampus, result.state) &&
-            !hasAutoFallbackOffCampus
-        ) {
-            hasAutoFallbackOffCampus = true
-            switchChannel(offCampus = true, persistChoice = false)
-            onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
-        } else if (NetworkChannelProbe.shouldAutoRestoreOnCampus(
-                userPrefersOffCampus = latestSettings.preferOffCampusChannel,
-                currentlyOffCampus = latestUseOffCampus,
-                state = result.state,
-                isLoggedIntoJw = latestLoggedIntoJw
-            )
-        ) {
-            hasAutoFallbackOffCampus = false
-            switchChannel(offCampus = false, persistChoice = false)
-            onShowMessage("已连回校园网，已自动恢复「校园网直连」")
-        }
-    }
-
-    // Surface calm one-tap guidance if CAS/SSO redirect stalls > 4.5s on white transition screen
-    LaunchedEffect(isVisible, loadProgress, currentUrl, pageErrorMsg, isLoggedIntoJw) {
-        slowLoadHint = false
-        if (isVisible && loadProgress in 1..99 && pageErrorMsg == null && !isLoggedIntoJw) {
-            delay(4500L)
-            if (loadProgress in 1..99 && pageErrorMsg == null && !isLoggedIntoJw) {
-                slowLoadHint = true
-            }
-        }
-    }
-
-    fun toggleDesktopUa() {
-        cancelPendingTransitions()
-        val next = !desktopMode
-        desktopMode = next
-        pageErrorMsg = null
-        onUpdateChannelPrefs(useOffCampus, next)
-        webViewRef?.let { wv ->
-            wv.settings.userAgentString = if (next) {
-                GdouSyncScript.DESKTOP_USER_AGENT
-            } else {
-                WebSettings.getDefaultUserAgent(context)
-            }
-            wv.settings.useWideViewPort = next
-            wv.settings.loadWithOverviewMode = next
-            wv.reload()
-        }
-        onShowMessage(if (next) "已切换电脑排版" else "已切换手机排版（登录页推荐）")
-    }
-
-    val shouldKeepWebViewActive = (isVisible && activePortalMode == 0) ||
-        activePortalMode == 1 ||
-        isSyncing ||
-        isInspectingRoom ||
-        pendingQuickRefreshAfterSso
-
-    LaunchedEffect(shouldKeepWebViewActive, webViewRef) {
-        val wv = webViewRef ?: return@LaunchedEffect
-        if (shouldKeepWebViewActive) {
-            wv.onResume()
-        } else {
-            wv.onPause()
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            cancelPendingTransitions()
-            clearPendingSsoRecovery()
-            CookieManager.getInstance().flush()
-        }
-    }
-
-    // Android 16 Predictive-Back friendly handling inside Sync WebView
-    BackHandler(enabled = isVisible) {
-        if (activePortalMode == 1) {
-            activePortalMode = 0
-        } else {
-            val wv = webViewRef
-            if (wv != null && wv.canGoBack()) {
-                wv.goBack()
-            } else {
-                onNavigateBackToSchedule()
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .imePadding()
-    ) {
-        // Primary Dual-Mode Switcher (Web Sync Station <-> Native Empty Classroom Finder)
-        if (isVisible) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(
-                    0 to (Icons.Rounded.Public to "教务登录与同步"),
-                    1 to (Icons.Rounded.MeetingRoom to "查空教室")
-                ).forEach { (idx, iconAndTitle) ->
-                    val sel = activePortalMode == idx
-                    Surface(
-                        color = if (sel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { activePortalMode = idx }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = iconAndTitle.first,
-                                contentDescription = null,
-                                tint = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = iconAndTitle.second,
-                                fontSize = 12.sp,
-                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                                color = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false
-                            )
+    verifySessionNow = { channel, forceReverify, autoTriggerAction, openAuthIfNeeded, checkingHint ->
+        scope.launch {
+            sessionState = PortalSessionUiState.CHECKING
+            sessionStatusHint = checkingHint
+            val result = nativeEngine.establishOrVerifySession(channel, forceReverify = forceReverify)
+            isPostAuthConnecting = false
+            when (result) {
+                is SessionCheckResult.Ready -> {
+                    activeChannel = result.channel
+                    sessionState = PortalSessionUiState.READY
+                    sessionLatencyMs = result.latencyMs
+                    lastWebVpnDenied = false
+                    sessionStatusHint = "连接正常"
+                    if (autoTriggerAction) {
+                        val pending = pendingAutoActionAfterAuth
+                        pendingAutoActionAfterAuth = null
+                        when (pending) {
+                            "quick" -> runQuickRefreshInWorkbench(result.channel)
+                            "empty_room" -> activePortalMode = 1
+                            "all", "courses", "exams" -> startSyncFlow(pending)
+                            else -> startSyncFlow("all")
                         }
+                    } else {
+                        // Silently warm academic year/semester picker in background -> 0ms instant open on tap!
+                        scope.launch { nativeEngine.prefetchAcademicOptionsQuietly(result.channel) }
+                    }
+                }
+                is SessionCheckResult.NeedsAuth -> {
+                    activeChannel = result.channel
+                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                    lastAuthResumeUrl = result.resumeUrl
+                    lastWebVpnDenied = result.isWebVpnDenied
+                    sessionStatusHint = result.reason
+                    if (openAuthIfNeeded || (autoTriggerAction && (result.isMfa || result.isWebVpnDenied))) {
+                        openAuthSheet(
+                            channel = result.channel,
+                            resumeUrl = result.resumeUrl,
+                            isMfa = result.isMfa,
+                            autoActionAfter = pendingAutoActionAfterAuth ?: "all"
+                        )
+                    }
+                }
+                is SessionCheckResult.NetworkError -> {
+                    sessionState = PortalSessionUiState.NETWORK_ERROR
+                    sessionStatusHint = result.message
+                    if (channel == SyncChannel.ON_CAMPUS) {
+                        probeTrigger++
                     }
                 }
             }
         }
-        }
+    }
 
-        // Compact Top Browser Bar (only in Web Sync mode)
-        if (isVisible && activePortalMode == 0) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+    // Handle external login request once (e.g., home screen quick-refresh detected expired session)
+    LaunchedEffect(externalAuthTrigger.nonce) {
+        if (externalAuthTrigger.nonce > 0) {
+            val trig = externalAuthTrigger
+            onConsumeExternalAuthTrigger()
+            activeChannel = trig.channel
+            lastWebVpnDenied = trig.isWebVpnDenied
+            lastAuthResumeUrl = trig.resumeUrl
+            sessionState = PortalSessionUiState.NEEDS_AUTH
+            if (trig.reason.isNotBlank()) {
+                sessionStatusHint = trig.reason
+            }
+            openAuthSheet(
+                channel = trig.channel,
+                resumeUrl = trig.resumeUrl,
+                isMfa = trig.isMfa,
+                autoActionAfter = if (trig.autoQuickRefreshAfterLogin) "quick" else null
+            )
+        }
+    }
+
+    // Initial lightweight pure-HTTP session check (0ms instant when cookies empty!)
+    LaunchedEffect(Unit) {
+        if (externalAuthTrigger.nonce == 0) {
+            if (autoStartSyncOnEnter) {
+                onConsumeAutoStartSync()
+                pendingAutoActionAfterAuth = "all"
+                verifySessionNow(activeChannel, false, true, true, "正在连接广海教务...")
+            } else {
+                verifySessionNow(activeChannel, false, false, false, "正在连接广海教务...")
+            }
+        }
+    }
+
+    // Lightweight background network probe (cached 45s; skips dead campus socket on pure 4G/5G!)
+    LaunchedEffect(probeTrigger) {
+        val probe = NetworkChannelProbe.probeCached(
+            context = context,
+            maxAgeMs = 45_000L,
+            forceRefresh = probeTrigger > 0
+        )
+        networkProbe = probe
+        if (sessionState != PortalSessionUiState.READY) {
+            if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(activeChannel.isOffCampus, probe.state)) {
+                activeChannel = SyncChannel.WEBVPN
+                verifySessionNow(SyncChannel.WEBVPN, true, false, false, "正在连接校外通道...")
+            } else if (
+                NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                    userPrefersOffCampus = settings.preferOffCampusChannel,
+                    currentlyOffCampus = activeChannel.isOffCampus,
+                    state = probe.state,
+                    isLoggedIntoJw = false
+                )
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                activeChannel = SyncChannel.ON_CAMPUS
+                verifySessionNow(SyncChannel.ON_CAMPUS, true, false, false, "正在连接校园网教务...")
+            }
+        }
+    }
+
+    fun switchChannel(target: SyncChannel, persistChoice: Boolean = true) {
+        activeChannel = target
+        lastWebVpnDenied = false
+        evalInterceptBanner = null
+        if (persistChoice) {
+            onUpdateChannelPrefs(target.isOffCampus, settings.preferDesktopUa)
+        }
+        verifySessionNow(target, true, false, false, "正在切换至${target.label}...")
+    }
+
+    fun togglePrimaryChannel() {
+        val target = if (activeChannel == SyncChannel.ON_CAMPUS) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+        switchChannel(target)
+    }
+
+    val shortChannelLabel = when (activeChannel) {
+        SyncChannel.ON_CAMPUS -> "校园网直连"
+        SyncChannel.WEBVPN -> "校外免校园网"
+        SyncChannel.WFW_LEGACY -> "校外备用(wfw)"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxSize()
+        ) {
+            // Unified Top Header matching AcademicScreen & SettingsScreen DNA
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 1.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    IconButton(
-                        onClick = { webViewRef?.let { if (it.canGoBack()) it.goBack() } },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 4.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Rounded.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = pageTitle,
-                                style = MaterialTheme.typography.titleSmall,
+                                text = "教务中心",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            val (badgeBg, badgeFg, badgeLabel) = when (sessionState) {
+                                PortalSessionUiState.READY -> Triple(
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                                    MaterialTheme.colorScheme.onPrimaryContainer,
+                                    "已连接"
+                                )
+                                PortalSessionUiState.CHECKING -> Triple(
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                    "连接中"
+                                )
+                                PortalSessionUiState.NETWORK_ERROR -> Triple(
+                                    MaterialTheme.colorScheme.errorContainer,
+                                    MaterialTheme.colorScheme.onErrorContainer,
+                                    "未连通"
+                                )
+                                PortalSessionUiState.NEEDS_AUTH -> Triple(
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                    "未登录"
+                                )
+                            }
+                            Surface(
+                                color = badgeBg,
+                                shape = RoundedCornerShape(999.dp)
+                            ) {
+                                Text(
+                                    text = badgeLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = badgeFg,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.5.dp)
+                                )
+                            }
+                        }
+
+                        Box {
+                            IconButton(
+                                onClick = { showOverflowMenu = true },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MoreVert,
+                                    contentDescription = "更多选项",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (activeChannel == SyncChannel.ON_CAMPUS) "切换至校外免校园网"
+                                            else "切换至校园网直连"
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.SwapHoriz, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        togglePrimaryChannel()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("重新检测连接") },
+                                    leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        probeTrigger++
+                                        verifySessionNow(activeChannel, true, false, false, "正在重新校验连接...")
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("网络与引擎诊断") },
+                                    leadingIcon = { Icon(Icons.Rounded.BugReport, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        openDiagnosticDialog()
+                                    }
+                                )
+                                if (isLoggedIntoJw) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "退出当前教务账号",
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Rounded.DeleteSweep,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            nativeEngine.clearAllCookiesAndCache()
+                                            sessionState = PortalSessionUiState.NEEDS_AUTH
+                                            lastWebVpnDenied = false
+                                            evalInterceptBanner = null
+                                            sessionStatusHint = "已退出教务登录"
+                                            onShowMessage("已退出教务账号并清除会话缓存")
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = activePortalMode == 0,
+                            onClick = { activePortalMode = 0 },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                        ) {
+                            Text(
+                                text = "教务同步",
+                                fontSize = 12.5.sp,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            text = currentUrl.removePrefix("https://").removePrefix("http://"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Box {
-                        IconButton(
-                            onClick = { showQuickNavMenu = true },
-                            modifier = Modifier.size(34.dp)
+                        SegmentedButton(
+                            selected = activePortalMode == 1,
+                            onClick = { activePortalMode = 1 },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                         ) {
-                            Icon(Icons.Rounded.Explore, contentDescription = "教务直达")
-                        }
-                        DropdownMenu(
-                            expanded = showQuickNavMenu,
-                            onDismissRequest = { showQuickNavMenu = false }
-                        ) {
-                            val shortcuts = listOf(
-                                Triple("进入广海教务主页", "__WFW_JW__", Icons.Rounded.Public),
-                                Triple("查空教室（自习推荐）", "cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", Icons.Rounded.MeetingRoom),
-                                Triple("个人课表查询页", "kbcx/xskbcx_cxXskbcxIndex.html?gnmkdm=N2151&layout=default", Icons.Rounded.CalendarMonth),
-                                Triple("学生成绩查询页", "cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default", Icons.Rounded.Assessment),
-                                Triple("考试信息查询页", "kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default", Icons.AutoMirrored.Rounded.EventNote)
-                            )
-                            shortcuts.forEach { (label, path, icon) ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    leadingIcon = { Icon(icon, contentDescription = null) },
-                                    onClick = {
-                                        showQuickNavMenu = false
-                                        if (path == "__WFW_JW__") {
-                                            val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
-                                            webViewRef?.loadUrl(entry)
-                                        } else if (!isLoggedIntoJw) {
-                                            onShowMessage("请先完成广海教务登录，再打开「$label」")
-                                        } else {
-                                            evalJwScript(GdouSyncScript.buildQuickNavigateScript(path))
-                                        }
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            val dynamicModules = listOf(
-                                "教学评价（评教入口）" to listOf("评价", "评教", "问卷"),
-                                "自主选课入口" to listOf("自主选课", "选课"),
-                                "学业情况 / 培养方案" to listOf("学业情况", "培养方案", "修读情况")
-                            )
-                            dynamicModules.forEach { (label, kws) ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    leadingIcon = { Icon(Icons.Rounded.School, contentDescription = null) },
-                                    onClick = {
-                                        showQuickNavMenu = false
-                                        if (!isLoggedIntoJw) {
-                                            onShowMessage("请先完成广海教务登录，再打开「$label」")
-                                        } else {
-                                            evalJwScript(GdouSyncScript.buildDynamicMenuNavigateScript(kws, label))
-                                        }
-                                    }
-                                )
-                            }
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("广海官方公告与校历") },
-                                leadingIcon = { Icon(Icons.Rounded.AccountBalance, contentDescription = null) },
-                                onClick = {
-                                    showQuickNavMenu = false
-                                    onOpenCampusServices()
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("查看当前页诊断信息") },
-                                leadingIcon = { Icon(Icons.Rounded.BugReport, contentDescription = null) },
-                                onClick = {
-                                    showQuickNavMenu = false
-                                    val wvUrl = webViewRef?.url.orEmpty()
-                                    val cookies = try {
-                                        val raw = CookieManager.getInstance().getCookie(wvUrl).orEmpty()
-                                        raw.split(";").mapNotNull { it.trim().substringBefore("=", "").takeIf(String::isNotBlank) }.joinToString(", ")
-                                    } catch (_: Exception) { "无" }
-                                    diagnosticDialogText = buildString {
-                                        appendLine("当前通道：${if (useOffCampus) "校外通用(免校园网)" else "校园网直连"}")
-                                        appendLine(
-                                            "网络探测：" + when (networkProbe.state) {
-                                                CampusNetworkState.PROBING -> "探测中"
-                                                CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（教务 ${networkProbe.jwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
-                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外或直连受限（校外通道 ${networkProbe.wfwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
-                                                CampusNetworkState.OFFLINE_OR_BLOCKED -> "网络未连通或校园网未认证"
-                                            }
-                                        )
-                                        appendLine("页面排版：${if (desktopMode) "电脑版" else "手机版"}")
-                                        appendLine("页面标题：$pageTitle")
-                                        appendLine("实际URL：$wvUrl")
-                                        appendLine("加载进度：$loadProgress%")
-                                        appendLine("识别已登录：$isLoggedIntoJw")
-                                        appendLine("桥接域名白名单校验：${GdouJsBridge.isTrustedGdouOrigin(wvUrl)}")
-                                        appendLine("Cookie键名(已脱敏)：${cookies.ifBlank { "空" }}")
-                                        if (pageErrorMsg != null) appendLine("最近报错：$pageErrorMsg")
-                                    }
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("清除登录缓存并重登", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Rounded.DeleteSweep,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                },
-                                onClick = {
-                                    showQuickNavMenu = false
-                                    cancelPendingTransitions()
-                                    hasAutoSwitchedForMfa = false
-                                    hasAutoEnteredWfw = false
-                                    hasAutoTriggeredWebVpnCas = false
-                                    CookieManager.getInstance().removeAllCookies {
-                                        CookieManager.getInstance().flush()
-                                        mainHandler.post {
-                                            webViewRef?.clearCache(true)
-                                            switchChannel(useOffCampus)
-                                            onShowMessage("已清除登录缓存，可重新登录")
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = {
-                            cancelPendingTransitions()
-                            pageErrorMsg = null
-                            webViewRef?.reload()
-                        },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新网页")
-                    }
-                }
-
-                // Unmistakable High-Contrast 2-Segment Channel Switcher (solid primary + checkmark = active!)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            // Segment 1: Off-Campus Universal Channel
-                            Surface(
-                                color = if (useOffCampus) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                shape = RoundedCornerShape(9.dp),
-                                modifier = Modifier
-                                    .weight(1.18f)
-                                    .height(30.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .clickable {
-                                        val mismatch = useOffCampus && (
-                                            pageErrorMsg != null ||
-                                                (currentUrl.contains("jw.gdou.edu.cn", ignoreCase = true) && !currentUrl.contains("webvpn", ignoreCase = true))
-                                            )
-                                        if (!useOffCampus || mismatch) switchChannel(true)
-                                    }
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                ) {
-                                    if (useOffCampus) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Check,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                    }
-                                    Text(
-                                        text = "校外免校园网",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (useOffCampus) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (useOffCampus) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-
-                            // Segment 2: On-Campus Direct Channel
-                            Surface(
-                                color = if (!useOffCampus) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                shape = RoundedCornerShape(9.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(30.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .clickable {
-                                        val mismatch = !useOffCampus && (
-                                            pageErrorMsg != null ||
-                                                currentUrl.contains("webvpn.gdou.edu.cn", ignoreCase = true) ||
-                                                currentUrl.contains("wfw.gdou.edu.cn", ignoreCase = true)
-                                            )
-                                        if (useOffCampus || mismatch) switchChannel(false)
-                                    }
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                ) {
-                                    if (!useOffCampus) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Check,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                    }
-                                    Text(
-                                        text = "校园网直连",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (!useOffCampus) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (!useOffCampus) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Neutral UA mode chip (single clean toggle with icon + label, distinct from channel switcher)
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(
-                            0.8.dp,
-                            MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { toggleDesktopUa() }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (desktopMode) Icons.Rounded.Computer else Icons.Rounded.PhoneAndroid,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = if (desktopMode) "电脑版" else "手机版",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
+                                text = "查空教室",
+                                fontSize = 12.5.sp,
                                 maxLines = 1,
                                 softWrap = false,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
-        }
 
-        // Dedicated non-confusing slim network banner ONLY when actionable (never clips or mimics a channel tab!)
-        if (networkProbe.state == CampusNetworkState.ON_CAMPUS_DIRECT_READY && useOffCampus && !isLoggedIntoJw) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        switchChannel(false)
-                        onShowMessage("已切至「校园网直连」，加载更快更稳")
-                    }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "检测到当前处于校园网，点此切「校园网直连」加载更快",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-        } else if (networkProbe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { probeTrigger++ }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "当前网络暂未连通学校服务器（请检查流量或先登录校园网认证），点此重测",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        imageVector = Icons.Rounded.Refresh,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-        }
-
-        if (loadProgress in 1..99) {
-            LinearProgressIndicator(
-                progress = { loadProgress / 100f },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp)
-            )
-        }
-
-        if (slowLoadHint && !isLoggedIntoJw && pageErrorMsg == null) {
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "统一认证跳转较慢，可点刷新或切换通道",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(7.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(7.dp))
-                            .clickable { switchChannel(!useOffCampus) }
-                    ) {
-                        Text(
-                            text = if (useOffCampus) "切直连" else "切校外通道",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        shape = RoundedCornerShape(7.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(7.dp))
-                            .clickable {
-                                slowLoadHint = false
-                                webViewRef?.reload()
-                            }
-                    ) {
-                        Text(
-                            text = "刷新",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Calm helper strip when sitting on off-campus portal root (gives user clear control)
-        if (isSittingOnWfwRoot) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        cancelPendingTransitions()
-                        hasAutoEnteredWfw = true
-                        val targetEntry = if (currentUrl.contains("wfw.gdou.edu.cn", ignoreCase = true)) {
-                            GdouSyncScript.URL_WFW_JW_ENTRY
-                        } else {
-                            GdouSyncScript.URL_WEBVPN_JW_ENTRY
-                        }
-                        webViewRef?.loadUrl(targetEntry)
-                    }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "已登录校外通道，点此直接进入广海教务系统",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-        if (evalInterceptBanner != null) {
-            Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "需先完成教务教学评价或确认通知，才可同步完整数据",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                evalInterceptBanner = null
-                                webViewRef?.evaluateJavascript(
-                                    GdouSyncScript.buildDynamicMenuNavigateScript(listOf("评价", "评教", "问卷"), "教学评价"),
-                                    null
-                                )
-                            }
-                    ) {
-                        Text(
-                            text = "去评教",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "关闭提示",
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable { evalInterceptBanner = null }
-                    )
-                }
-            }
-        }
-        } // end if (activePortalMode == 0) header & helper banners
-
-        // Spacious WebView / Native Empty-Classroom Area (WebView stays mounted to preserve cookies!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clipToBounds()
-        ) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                update = { view ->
-                    view.visibility = when {
-                        isVisible && activePortalMode == 0 -> View.VISIBLE
-                        shouldKeepWebViewActive -> View.INVISIBLE
-                        else -> View.GONE
-                    }
-                },
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        val cm = CookieManager.getInstance()
-                        cm.setAcceptCookie(true)
-                        cm.setAcceptThirdPartyCookies(this, true)
-
-                        this.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            allowFileAccess = false
-                            allowContentAccess = false
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            setSupportZoom(true)
-                            setSupportMultipleWindows(false)
-                            useWideViewPort = desktopMode
-                            loadWithOverviewMode = desktopMode
-                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                            userAgentString = if (desktopMode) {
-                                GdouSyncScript.DESKTOP_USER_AGENT
-                            } else {
-                                WebSettings.getDefaultUserAgent(ctx)
-                            }
-                        }
-
-                        addJavascriptInterface(
-                            GdouJsBridge(
-                                callback = syncCallback,
-                                currentUrlProvider = { trustedUrlRef.get() }
-                            ),
-                            "HaiyuBridge"
-                        )
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                loadProgress = newProgress
-                            }
-
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                if (!title.isNullOrBlank()) pageTitle = title
-                            }
-
-                            override fun onJsAlert(
-                                view: WebView?,
-                                url: String?,
-                                message: String?,
-                                result: JsResult?
-                            ): Boolean {
-                                if (result != null) {
-                                    jsAlertDialog = (message ?: "网页提示") to result
-                                    return true
-                                }
-                                return super.onJsAlert(view, url, message, result)
-                            }
-
-                            override fun onJsConfirm(
-                                view: WebView?,
-                                url: String?,
-                                message: String?,
-                                result: JsResult?
-                            ): Boolean {
-                                if (result != null) {
-                                    jsConfirmDialog = (message ?: "确认操作？") to result
-                                    return true
-                                }
-                                return super.onJsConfirm(view, url, message, result)
-                            }
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                val u = request?.url?.toString() ?: return false
-                                if (u.startsWith("https://", ignoreCase = true)) return false
-                                if (request?.isForMainFrame == false) return true
-                                // Transparently upgrade GDOU internal http:// redirects (e.g. jziotlogin -> http://authserver) to HTTPS!
-                                val upgraded = GdouJsBridge.upgradeGdouHttpToHttps(u)
-                                if (upgraded != null) {
-                                    view?.loadUrl(upgraded)
-                                    return true
-                                }
-                                // Strict HTTPS-only navigation; block non-GDOU cleartext http://, file://, javascript:, intent://
-                                return true
-                            }
-
-                            private fun probePortalDomLoginState(wv: WebView, expectedUrl: String, allowRetry: Boolean) {
-                                wv.evaluateJavascript(GdouSyncScript.DOM_PORTAL_PROBE_SCRIPT) { res ->
-                                    if (wv.url != expectedUrl && currentUrl != expectedUrl) return@evaluateJavascript
-                                    val loggedIn = res != null && res.contains("LOGGED_IN")
-                                    if (loggedIn) {
-                                        domConfirmedLoggedIn = true
-                                        pageErrorMsg = null
-                                        wv.title?.takeIf {
-                                            it.isNotBlank() && !it.startsWith("http", ignoreCase = true)
-                                        }?.let { pageTitle = it }
-                                    } else if (allowRetry) {
-                                        val retryTask = Runnable {
-                                            if (wv.url == expectedUrl || currentUrl == expectedUrl) {
-                                                probePortalDomLoginState(wv, expectedUrl, allowRetry = false)
-                                            }
-                                        }
-                                        pendingDomProbeRunnable?.let { mainHandler.removeCallbacks(it) }
-                                        pendingDomProbeRunnable = retryTask
-                                        mainHandler.postDelayed(retryTask, 450L)
-                                    }
-                                }
-                            }
-
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                // Always cancel any delayed auto-transition whenever a real navigation starts,
-                                // eliminating race conditions and unexpected jumping!
-                                cancelPendingTransitions()
-                                pendingSsoAwaitingPageStart = false
-                                domConfirmedLoggedIn = false
-                                isPageSettled = false
-                                if (!url.isNullOrBlank()) {
-                                    currentUrl = url
-                                    trustedUrlRef.set(url)
-                                    pageErrorMsg = null
-                                }
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                if (pendingSsoAwaitingPageStart) {
-                                    return
-                                }
-                                if (!url.isNullOrBlank()) {
-                                    currentUrl = url
-                                    trustedUrlRef.set(url)
-                                }
-                                isPageSettled = true
-                                CookieManager.getInstance().flush()
-                                val wv = view ?: return
-                                val finishedUrl = url.orEmpty()
-
-                                // 1. Calm single-shot MFA page adaptation (after redirect chain settles, never interrupts POST/302)
-                                if (isMfaUrl(finishedUrl)) {
-                                    if (!desktopMode && !hasAutoSwitchedForMfa) {
-                                        val adaptTask = Runnable {
-                                            if (isMfaUrl(wv.url) && !desktopMode && !hasAutoSwitchedForMfa) {
-                                                hasAutoSwitchedForMfa = true
-                                                desktopMode = true
-                                                wv.settings.userAgentString = GdouSyncScript.DESKTOP_USER_AGENT
-                                                wv.settings.useWideViewPort = true
-                                                wv.settings.loadWithOverviewMode = true
-                                                wv.reload()
-                                                onShowMessage("已自动适配二次验证页面，请完成企业微信/短信验证")
-                                            }
-                                        }
-                                        pendingMfaAdaptRunnable = adaptTask
-                                        mainHandler.postDelayed(adaptTask, 350L)
-                                    } else {
-                                        // Make desktop MFA page nicely centered on portrait phone screens
-                                        wv.evaluateJavascript(
-                                            """
-                                            (function(){
-                                                if(!document.getElementById('haiyu-mfa-viewport')){
-                                                    var m = document.querySelector('meta[name=viewport]');
-                                                    if(!m){ m = document.createElement('meta'); m.name='viewport'; document.head.appendChild(m); }
-                                                    m.id = 'haiyu-mfa-viewport';
-                                                    m.content = 'width=device-width, initial-scale=0.68, maximum-scale=2.0, user-scalable=yes';
-                                                }
-                                            })();
-                                            """.trimIndent(),
-                                            null
-                                        )
-                                    }
-                                    return
-                                }
-
-                                if (
-                                    finishedUrl.startsWith("https://", ignoreCase = true) ||
-                                    finishedUrl.startsWith("http://", ignoreCase = true)
-                                ) {
-                                    wv.title?.takeIf {
-                                        it.isNotBlank() && !it.startsWith("http", ignoreCase = true)
-                                    }?.let { pageTitle = it }
-                                    if (GdouSyncScript.isUrlOnPortalLoginPath(finishedUrl) || GdouSyncScript.isBareJwEntryUrl(finishedUrl)) {
-                                        probePortalDomLoginState(wv, finishedUrl, allowRetry = true)
-                                    }
-                                }
-
-                                // 2. Debounced, verified one-shot entry from official WebVPN (/login -> CAS -> portal root -> JW) & legacy WFW root
-                                if (useOffCampus && finishedUrl.isNotBlank()) {
-                                    val uri = try { Uri.parse(finishedUrl) } catch (_: Exception) { null }
-                                    val host = uri?.host.orEmpty().lowercase()
-                                    val path = uri?.path.orEmpty()
-                                    val trimmedPath = path.trimEnd('/')
-                                    val query = uri?.query.orEmpty()
-                                    val lowerFinished = finishedUrl.lowercase()
-                                    val title = wv.title.orEmpty()
-
-                                    // A) WebVPN /login gate -> auto-trigger CAS SSO once (preserves error display if CAS returned an error)
-                                    val isWebVpnLoginGate = host == "webvpn.gdou.edu.cn" &&
-                                        trimmedPath == "/login" &&
-                                        !query.contains("cas_login=true") &&
-                                        !query.contains("ticket=") &&
-                                        !hasAutoTriggeredWebVpnCas
-                                    if (isWebVpnLoginGate) {
-                                        val casTask = Runnable {
-                                            wv.evaluateJavascript(
-                                                """
-                                                (function(){
-                                                    var h = (location.hostname || '').toLowerCase();
-                                                    var p = (location.pathname || '').replace(/\/+$/, '');
-                                                    var errEl = document.getElementById('error-message');
-                                                    var hasErr = errEl && getComputedStyle(errEl).display !== 'none' && (errEl.innerText || '').trim().length > 0;
-                                                    var hasCas = !!document.querySelector('a#cas-login, a[href*="cas_login=true"]');
-                                                    return (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCas && !hasErr) ? 'GO_CAS' : 'SKIP';
-                                                })();
-                                                """.trimIndent()
-                                            ) { res ->
-                                                if (res != null && res.contains("GO_CAS") && !hasAutoTriggeredWebVpnCas) {
-                                                    hasAutoTriggeredWebVpnCas = true
-                                                    wv.loadUrl(GdouSyncScript.URL_WEBVPN_CAS_LOGIN)
-                                                }
-                                            }
-                                        }
-                                        pendingWfwEnterRunnable = casTask
-                                        mainHandler.postDelayed(casTask, 120L)
-                                    }
-
-                                    // B) Authenticated WebVPN portal root -> jump directly into proxied JW portal (single SSO!)
-                                    val isWebVpnPortalRoot = !hasAutoEnteredWfw &&
-                                        host == "webvpn.gdou.edu.cn" &&
-                                        trimmedPath != "/login" &&
-                                        !lowerFinished.contains(GdouSyncScript.WEBVPN_JW_HEX) &&
-                                        !lowerFinished.contains("/authserver/") &&
-                                        !lowerFinished.contains("/wengine-vpn/") &&
-                                        (path.isEmpty() || path == "/" || path == "/index.html" || path.startsWith("/portal") || path.startsWith("/en")) &&
-                                        !query.contains("ticket=") &&
-                                        !query.contains("cas_login=") &&
-                                        !title.contains("跳转") &&
-                                        !title.contains("统一身份认证") &&
-                                        !title.contains("多因子")
-                                    if (isWebVpnPortalRoot) {
-                                        val enterWebVpnTask = Runnable {
-                                            wv.evaluateJavascript(
-                                                """
-                                                (function(){
-                                                    var h = (location.hostname || '').toLowerCase();
-                                                    var p = (location.pathname || '');
-                                                    var txt = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 400) : '';
-                                                    var looksAuth = txt.includes('统一身份认证') || txt.includes('多因子') || !!document.querySelector('a#cas-login, input[type=password]');
-                                                    return (h === 'webvpn.gdou.edu.cn' && p !== '/login' && !looksAuth) ? 'READY' : 'WAIT';
-                                                })();
-                                                """.trimIndent()
-                                            ) { res ->
-                                                if (res != null && res.contains("READY") && !hasAutoEnteredWfw) {
-                                                    hasAutoEnteredWfw = true
-                                                    wv.loadUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
-                                                }
-                                            }
-                                        }
-                                        pendingWfwEnterRunnable = enterWebVpnTask
-                                        mainHandler.postDelayed(enterWebVpnTask, 200L)
-                                    }
-
-                                    // C) Legacy WFW root fallback if user opened wfw.gdou.edu.cn manually
-                                    val isStrictWfwRoot = !hasAutoEnteredWfw &&
-                                        host == "wfw.gdou.edu.cn" &&
-                                        (path.isEmpty() || path == "/" || path == "/index.html") &&
-                                        !query.contains("ticket=") &&
-                                        !title.contains("跳转") &&
-                                        !title.contains("统一身份认证") &&
-                                        !title.contains("多因子") &&
-                                        !title.contains("登录")
-                                    if (isStrictWfwRoot) {
-                                        val enterTask = Runnable {
-                                            wv.evaluateJavascript(
-                                                """
-                                                (function(){
-                                                    var h = (location.hostname || '').toLowerCase();
-                                                    var p = location.pathname || '';
-                                                    var txt = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 400) : '';
-                                                    var isRoot = (h === 'wfw.gdou.edu.cn') && (p === '' || p === '/' || p === '/index.html');
-                                                    var looksAuth = txt.includes('统一身份认证') || txt.includes('多因子') || txt.includes('正在跳转') || !!document.querySelector('input[type=password]');
-                                                    return (isRoot && !looksAuth) ? 'READY' : 'WAIT';
-                                                })();
-                                                """.trimIndent()
-                                            ) { res ->
-                                                if (res != null && res.contains("READY") && !hasAutoEnteredWfw) {
-                                                    hasAutoEnteredWfw = true
-                                                    wv.loadUrl(GdouSyncScript.URL_WFW_JW_ENTRY)
-                                                }
-                                            }
-                                        }
-                                        pendingWfwEnterRunnable = enterTask
-                                        mainHandler.postDelayed(enterTask, 300L)
-                                    }
-                                }
-
-                                // 3. During background quick-refresh SSO validation: if landed cleanly on an interactive login screen, stop recovery and bring user to Tab 1
-                                if (pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
-                                    val stillResolved = GdouSyncScript.resolveJwLoginState(
-                                        url = finishedUrl,
-                                        pageTitle = wv.title ?: pageTitle,
-                                        pageErrorMsg = pageErrorMsg,
-                                        domConfirmedLoggedIn = domConfirmedLoggedIn
-                                    )
-                                    if (!stillResolved && GdouSyncScript.mightBeInteractiveLoginUrl(finishedUrl)) {
-                                        val canAutoCasFlag = if (useOffCampus && !hasAutoTriggeredWebVpnCas) "true" else "false"
-                                        wv.evaluateJavascript(
-                                            """
-                                            (function(){
-                                                var errEl = document.getElementById('error-message');
-                                                var hasVpnErr = !!(errEl && getComputedStyle(errEl).display !== 'none' && (errEl.innerText || '').trim().length > 0);
-                                                var hasLoginForm = !!document.querySelector('input[type="password"], #captchaImg, #dynamicCode, #sliderCaptchaDiv');
-                                                var hasCasAutoLink = !!document.querySelector('a#cas-login, a[href*="cas_login=true"]');
-                                                var h = (location.hostname || '').toLowerCase();
-                                                var p = (location.pathname || '').replace(/\/+$/, '');
-                                                if (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCasAutoLink && !hasVpnErr) {
-                                                    return $canAutoCasFlag ? 'AUTO_ADVANCE' : 'NEED_LOGIN';
-                                                }
-                                                return (hasLoginForm || hasVpnErr) ? 'NEED_LOGIN' : 'WAIT';
-                                            })();
-                                            """.trimIndent()
-                                        ) { res ->
-                                            if (res != null && res.contains("NEED_LOGIN") && pendingQuickRefreshAfterSso) {
-                                                notifyQuickRefreshNeedsLogin("教务登录已失效，请重新登录后即可刷新课表")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?
-                            ) {
-                                if (request?.isForMainFrame == true) {
-                                    val desc = error?.description?.toString().orEmpty()
-                                    val reqUrl = request.url?.toString().orEmpty()
-                                    if (desc.contains("ERR_ABORTED", ignoreCase = true)) {
-                                        return
-                                    }
-                                    if (GdouSyncScript.isStaleChannelError(useOffCampus, reqUrl)) {
-                                        return
-                                    }
-                                    val upgradedHttp = GdouJsBridge.upgradeGdouHttpToHttps(reqUrl)
-                                    if (upgradedHttp != null && desc.contains("CLEARTEXT", ignoreCase = true)) {
-                                        mainHandler.post {
-                                            pageErrorMsg = null
-                                            view?.loadUrl(upgradedHttp)
-                                        }
-                                        return
-                                    }
-                                    val isRedirectLoop = desc.contains("ERR_TOO_MANY_REDIRECTS", ignoreCase = true) ||
-                                        reqUrl.contains("auth_error", ignoreCase = true)
-                                    if (isRedirectLoop && !hasAutoRecoveredRedirectLoop) {
-                                        hasAutoRecoveredRedirectLoop = true
-                                        hasAutoEnteredWfw = false
-                                        hasAutoTriggeredWebVpnCas = false
-                                        hasAutoSwitchedForMfa = false
-                                        CookieManager.getInstance().removeAllCookies {
-                                            CookieManager.getInstance().flush()
-                                            mainHandler.post {
-                                                pageErrorMsg = null
-                                                view?.clearCache(true)
-                                                val freshUrl = if (useOffCampus) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
-                                                view?.loadUrl(freshUrl)
-                                                onShowMessage("旧会话异常，已自动清理缓存并重连")
-                                            }
-                                        }
-                                        return
-                                    }
-                                    val isUnreachableOnCampus = !useOffCampus && !hasAutoFallbackOffCampus && (
-                                        desc.contains("ERR_NAME_NOT_RESOLVED", ignoreCase = true) ||
-                                            desc.contains("ERR_CONNECTION_TIMED_OUT", ignoreCase = true) ||
-                                            desc.contains("ERR_TIMED_OUT", ignoreCase = true) ||
-                                            desc.contains("ERR_ADDRESS_UNREACHABLE", ignoreCase = true) ||
-                                            desc.contains("ERR_CONNECTION_REFUSED", ignoreCase = true)
-                                        )
-                                    if (isUnreachableOnCampus) {
-                                        hasAutoFallbackOffCampus = true
-                                        mainHandler.post {
-                                            switchChannel(offCampus = true, persistChoice = false)
-                                            onShowMessage("校园网直连暂不可达，已自动切至「校外通用(免校园网)」")
-                                        }
-                                        return
-                                    }
-                                    pageErrorMsg = "页面加载失败（${desc.ifBlank { "网络超时或无法连接" }}）"
-                                    if (pendingQuickRefreshAfterSso) {
-                                        mainHandler.post {
-                                            notifyQuickRefreshNeedsLogin("暂无法连接教务页，请检查网络或切换通道后重试")
-                                        }
-                                    }
-                                }
-                            }
-
-                            override fun onReceivedSslError(
-                                view: WebView?,
-                                handler: SslErrorHandler?,
-                                error: SslError?
-                            ) {
-                                // Strict TLS security: NEVER silently bypass SSL errors (prevents MITM attacks)
-                                handler?.cancel()
-                                mainHandler.post {
-                                    pageErrorMsg = "检测到 HTTPS 安全证书异常，为保护账号安全已自动拦截本次连接（请检查网络代理或先完成校园网认证）。"
-                                }
-                            }
-                        }
-
-                        webViewRef = this
-                        loadUrl(currentUrl)
-                    }
-                }
-            )
-
-            // Network Error Helper Overlay
-            if (pageErrorMsg != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.94f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.WifiOff,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(40.dp)
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text("当前通道连接不上学校教务", style = MaterialTheme.typography.titleMedium)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "${pageErrorMsg!!}\n如使用手机流量或校外网络，建议用「校外通用(免校园网)」；在校内 Wi-Fi 下也可切到「校园网直连」。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = {
-                                        cancelPendingTransitions()
-                                        hasAutoEnteredWfw = false
-                                        hasAutoTriggeredWebVpnCas = false
-                                        hasAutoSwitchedForMfa = false
-                                        hasAutoRecoveredRedirectLoop = false
-                                        CookieManager.getInstance().removeAllCookies {
-                                            CookieManager.getInstance().flush()
-                                            mainHandler.post {
-                                                pageErrorMsg = null
-                                                webViewRef?.clearCache(true)
-                                                switchChannel(useOffCampus)
-                                            }
-                                        }
-                                    }
-                                ) { Text("清缓存重连") }
-                                Button(
-                                    onClick = { switchChannel(!useOffCampus) }
-                                ) {
-                                    Text(if (useOffCampus) "切到校园网直连" else "切到校外通用")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Sync Progress Floating Pill
-            if (isSyncing && syncStatusText != null) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.inverseSurface,
-                    tonalElevation = 6.dp,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.inversePrimary
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = syncStatusText!!,
-                            color = MaterialTheme.colorScheme.inverseOnSurface,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-
-            if (isVisible && activePortalMode == 1) {
+            if (activePortalMode == 1) {
+                // 100% Native HTTP Empty Classroom Finder (ZERO WebView!)
                 EmptyClassroomPane(
                     settings = settings,
                     courses = courses,
@@ -1958,47 +771,102 @@ fun SyncPortalScreen(
                     summary = emptyClassroomSummary,
                     inspectedSchedule = inspectedClassroom,
                     isInspectingRoom = isInspectingRoom,
-                    onGoToWebLogin = { activePortalMode = 0 },
+                    onGoToWebLogin = {
+                        activePortalMode = 0
+                        openAuthSheet(activeChannel, autoActionAfter = "empty_room")
+                    },
                     onExecuteQuery = { campusKeyword, weekNumber, dayOfWeek, startSection, endSection, buildingKeyword ->
-                        isSyncing = true
-                        syncStatusText = "正在查询「${campusKeyword}校区」空闲教室..."
-                        evalJwScript(
-                            GdouSyncScript.buildQueryEmptyClassroomsScript(
-                                campusKeyword = campusKeyword,
-                                weekNumber = weekNumber,
-                                dayOfWeek = dayOfWeek,
-                                startSection = startSection,
-                                endSection = endSection,
-                                buildingKeyword = buildingKeyword,
-                                fallbackAcademicYear = settings.lastSyncYearCode,
-                                fallbackSemesterCode = settings.lastSyncSemesterCode
-                            )
-                        )
+                        scope.launch {
+                            isSyncing = true
+                            syncStatusText = "正在查询${campusKeyword}校区空教室..."
+                            when (
+                                val res = nativeEngine.queryEmptyClassrooms(
+                                    channel = activeChannel,
+                                    campusKeyword = campusKeyword,
+                                    weekNumber = weekNumber,
+                                    dayOfWeek = dayOfWeek,
+                                    startSection = startSection,
+                                    endSection = endSection,
+                                    buildingKeyword = buildingKeyword,
+                                    fallbackAcademicYear = settings.lastSyncYearCode,
+                                    fallbackSemesterCode = settings.lastSyncSemesterCode
+                                )
+                            ) {
+                                is NativeCallResult.Success -> {
+                                    emptyClassroomResults = res.data.rooms
+                                    emptyClassroomSummary = res.data.summary
+                                }
+                                is NativeCallResult.AuthExpired -> {
+                                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                                    onShowMessage(res.message)
+                                    openAuthSheet(activeChannel, res.resumeUrl, isMfa = res.isMfa, autoActionAfter = "empty_room")
+                                }
+                                is NativeCallResult.EvalIntercept -> {
+                                    evalInterceptBanner = res.message
+                                    onShowMessage(res.message)
+                                }
+                                is NativeCallResult.Failure -> {
+                                    onShowMessage(res.message)
+                                }
+                            }
+                            isSyncing = false
+                            syncStatusText = null
+                        }
                     },
                     onInspectRoomDay = { campus, weekNumber, dayOfWeek, buildingName, roomName, seats, roomType ->
-                        isInspectingRoom = true
-                        pendingInspectFallbackMeta = Triple(campus, seats, roomType)
-                        inspectedClassroom = ClassroomDaySchedule(
-                            campus = campus,
-                            building = buildingName,
-                            roomName = roomName,
-                            weekNumber = weekNumber,
-                            dayOfWeek = dayOfWeek,
-                            seats = seats,
-                            roomType = roomType,
-                            slots = emptyList()
-                        )
-                        evalJwScript(
-                            GdouSyncScript.buildInspectRoomDayScheduleScript(
-                                campusKeyword = campus.label.removeSuffix("校区"),
+                        scope.launch {
+                            isInspectingRoom = true
+                            inspectedClassroom = ClassroomDaySchedule(
+                                campus = campus,
+                                building = buildingName,
+                                roomName = roomName,
                                 weekNumber = weekNumber,
                                 dayOfWeek = dayOfWeek,
-                                buildingName = buildingName,
-                                roomName = roomName,
-                                fallbackAcademicYear = settings.lastSyncYearCode,
-                                fallbackSemesterCode = settings.lastSyncSemesterCode
+                                seats = seats,
+                                roomType = roomType,
+                                slots = emptyList()
                             )
-                        )
+                            when (
+                                val res = nativeEngine.inspectRoomDaySchedule(
+                                    channel = activeChannel,
+                                    campusKeyword = campus.label.removeSuffix("校区"),
+                                    weekNumber = weekNumber,
+                                    dayOfWeek = dayOfWeek,
+                                    buildingName = buildingName,
+                                    roomName = roomName,
+                                    fallbackAcademicYear = settings.lastSyncYearCode,
+                                    fallbackSemesterCode = settings.lastSyncSemesterCode
+                                )
+                            ) {
+                                is NativeCallResult.Success -> {
+                                    inspectedClassroom = ClassroomDaySchedule(
+                                        campus = campus,
+                                        building = res.data.building.ifBlank { buildingName },
+                                        roomName = res.data.roomName.ifBlank { roomName },
+                                        weekNumber = res.data.weekNumber,
+                                        dayOfWeek = res.data.dayOfWeek,
+                                        seats = res.data.seats.ifBlank { seats },
+                                        roomType = res.data.roomType.ifBlank { roomType },
+                                        slots = res.data.slots
+                                    )
+                                }
+                                is NativeCallResult.AuthExpired -> {
+                                    inspectedClassroom = null
+                                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                                    onShowMessage(res.message)
+                                    openAuthSheet(activeChannel, res.resumeUrl, isMfa = res.isMfa, autoActionAfter = "empty_room")
+                                }
+                                is NativeCallResult.EvalIntercept -> {
+                                    inspectedClassroom = null
+                                    onShowMessage(res.message)
+                                }
+                                is NativeCallResult.Failure -> {
+                                    inspectedClassroom = null
+                                    onShowMessage(res.message)
+                                }
+                            }
+                            isInspectingRoom = false
+                        }
                     },
                     onDismissInspectedRoom = {
                         isInspectingRoom = false
@@ -2007,162 +875,786 @@ fun SyncPortalScreen(
                     onToggleFavoriteBuilding = onToggleFavoriteBuilding,
                     onToggleFavoriteClassroom = onToggleFavoriteClassroom,
                     onOpenOriginalWeb = {
-                        activePortalMode = 0
-                        if (!isLoggedIntoJw) {
-                            onShowMessage("请先登录教务系统")
-                        } else {
-                            evalJwScript(
-                                GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default")
-                            )
-                        }
+                        openFullBrowser("/cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default", "正方空教室查询页")
                     },
                     onShowMessage = onShowMessage
                 )
-            }
-        }
-
-        // Sleek Single-Row Bottom Sync Action Dock (only in Web Sync mode)
-        if (isVisible && activePortalMode == 0) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
-            shadowElevation = 4.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = { startSyncFlow("all") },
-                    enabled = !isSyncing,
-                    colors = if (isLoggedIntoJw) {
-                        ButtonDefaults.buttonColors()
-                    } else {
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    contentPadding = PaddingValues(horizontal = 12.dp),
+            } else {
+                // Mode 0: Clean, Organic Native Sync Hub (ZERO WebView until requested!)
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(42.dp),
-                    shape = RoundedCornerShape(12.dp)
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isLoggedIntoJw) Icons.Rounded.CheckCircle else Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (isLoggedIntoJw) "一键全同步" else "登录后点此一键同步",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // Instant One-Tap Refresh Schedule button right in the dock
-                FilledTonalButton(
-                    onClick = { startQuickRefreshCourses(silent = false) },
-                    enabled = !isSyncing,
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    modifier = Modifier.height(42.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("刷课表", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                Box {
-                    FilledTonalIconButton(
-                        onClick = { showSingleSyncMenu = true },
-                        enabled = !isSyncing,
-                        modifier = Modifier.size(42.dp)
-                    ) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "单项同步与工具")
+                    // Contextual Eval / Academic-Notice Intercept Banner (only shown when actually blocked!)
+                    if (evalInterceptBanner != null) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "教务要求先完成教学评价或确认学业通知，才可同步完整数据",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(
+                                    onClick = {
+                                        evalInterceptBanner = null
+                                        openDynamicModuleInBrowser(listOf("评价", "评教", "问卷"), "教学评价")
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text("去处理", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = "关闭",
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clickable { evalInterceptBanner = null }
+                                )
+                            }
+                        }
                     }
-                    DropdownMenu(
-                        expanded = showSingleSyncMenu,
-                        onDismissRequest = { showSingleSyncMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("指定学期同步课表") },
-                            leadingIcon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
-                            onClick = {
-                                showSingleSyncMenu = false
-                                startSyncFlow("courses")
+
+                    // Contextual Campus-Wi-Fi faster-route tip (only when on off-campus channel while campus Wi-Fi is ready)
+                    if (networkProbe.state == CampusNetworkState.ON_CAMPUS_DIRECT_READY && activeChannel.isOffCampus) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.78f),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    switchChannel(SyncChannel.ON_CAMPUS)
+                                    onShowMessage("已切至「校园网直连」")
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "已检测到校园网，点此切换「校园网直连」更快",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowForward,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("仅同步历史成绩与 GPA") },
-                            leadingIcon = { Icon(Icons.Rounded.Assessment, contentDescription = null) },
-                            onClick = {
-                                showSingleSyncMenu = false
-                                startSyncFlow("grades")
+                        }
+                    } else if (networkProbe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { probeTrigger++ }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "暂未连通学校服务器，请检查流量或校园网认证（点此重测）",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("仅同步考试时间与考场") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.EventNote, contentDescription = null) },
-                            onClick = {
-                                showSingleSyncMenu = false
-                                startSyncFlow("exams")
+                        }
+                    }
+
+                    when (sessionState) {
+                        // ===== STATE 1: UNAUTHENTICATED / NETWORK ERROR (Pure focused welcome card!) =====
+                        PortalSessionUiState.NEEDS_AUTH, PortalSessionUiState.NETWORK_ERROR -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
+                                                    MaterialTheme.colorScheme.errorContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                                                }
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
+                                                Icons.Rounded.WifiOff
+                                            } else {
+                                                Icons.Rounded.School
+                                            },
+                                            contentDescription = null,
+                                            tint = if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
+                                                MaterialTheme.colorScheme.error
+                                            } else {
+                                                MaterialTheme.colorScheme.primary
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
+                                                "暂未连通学校网络"
+                                            } else {
+                                                "连接广海教务"
+                                            },
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "同步本学期课表与调课变动、成绩绩点与考场安排",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+
+                                    // Compact auto-matched channel switcher pill (replaces heavy double-bar!)
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        shape = RoundedCornerShape(999.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .clickable(enabled = !isSyncing) { togglePrimaryChannel() }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary)
+                                            )
+                                            Text(
+                                                text = shortChannelLabel,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Rounded.SwapHoriz,
+                                                contentDescription = "切换网络通道",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (lastWebVpnDenied) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "学校 WebVPN 提示「未在本地用户库注册」，请使用下方「企业微信扫码」或「备用入口(wfw)」登录。",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.padding(12.dp)
+                                            )
+                                        }
+                                    } else if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = sessionStatusHint,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.padding(12.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    // Single prominent primary login CTA
+                                    Button(
+                                        onClick = {
+                                            openAuthSheet(
+                                                channel = activeChannel,
+                                                resumeUrl = lastAuthResumeUrl.ifBlank { activeChannel.authStartUrl() },
+                                                autoActionAfter = "all"
+                                            )
+                                        },
+                                        enabled = !isSyncing,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Rounded.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (activeChannel == SyncChannel.ON_CAMPUS) "校园网统一身份认证登录" else "广海统一身份认证登录",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    // Subtle secondary login links (auto-upgraded to tonal buttons when WebVPN denied)
+                                    if (lastWebVpnDenied) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    openAuthSheet(
+                                                        channel = SyncChannel.WEBVPN,
+                                                        resumeUrl = "https://webvpn.gdou.edu.cn/login",
+                                                        activateWeComTab = true,
+                                                        holdOnWebVpnLogin = true,
+                                                        autoActionAfter = "all"
+                                                    )
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(40.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text("企业微信扫码", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                            }
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    openAuthSheet(
+                                                        channel = SyncChannel.WFW_LEGACY,
+                                                        resumeUrl = GdouSyncScript.URL_WFW_OFF_CAMPUS,
+                                                        autoActionAfter = "all"
+                                                    )
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(40.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text("备用入口(wfw)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                            }
+                                        }
+                                    } else {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    openAuthSheet(
+                                                        channel = SyncChannel.WEBVPN,
+                                                        resumeUrl = "https://webvpn.gdou.edu.cn/login",
+                                                        activateWeComTab = true,
+                                                        holdOnWebVpnLogin = true,
+                                                        autoActionAfter = "all"
+                                                    )
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("企业微信扫码", fontSize = 12.5.sp)
+                                            }
+                                            Text(
+                                                text = "·",
+                                                color = MaterialTheme.colorScheme.outlineVariant,
+                                                modifier = Modifier.padding(horizontal = 2.dp)
+                                            )
+                                            TextButton(
+                                                onClick = {
+                                                    openAuthSheet(
+                                                        channel = SyncChannel.WFW_LEGACY,
+                                                        resumeUrl = GdouSyncScript.URL_WFW_OFF_CAMPUS,
+                                                        autoActionAfter = "all"
+                                                    )
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("备用入口(wfw)", fontSize = 12.5.sp)
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("从当前网页表格直接提取") },
-                            leadingIcon = { Icon(Icons.Rounded.Explore, contentDescription = null) },
-                            onClick = {
-                                showSingleSyncMenu = false
-                                if (!isLoggedIntoJw) {
-                                    onShowMessage("请先登录并进入正方成绩或考试查询表格页")
-                                } else {
-                                    isSyncing = true
-                                    syncStatusText = "正在从当前网页表格直接提取..."
-                                    webViewRef?.evaluateJavascript(
-                                        GdouSyncScript.buildScrapeCurrentPageDomScript(),
-                                        null
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Lock,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "仅在广海官方页面认证，本地不保存学号与密码",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { openDiagnosticDialog() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = "连不上？查看网络诊断",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                        )
+                        }
+
+                        // ===== STATE 2: CHECKING / POST-AUTH SEAMLESS TRANSITION (0-frame login button flicker!) =====
+                        PortalSessionUiState.CHECKING -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 28.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    if (isPostAuthConnecting) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.CheckCircle,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "广海统一身份认证已通过",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Text(
+                                                text = "正在建立教务连接并读取本学期...",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    } else {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(26.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = sessionStatusHint.ifBlank { "正在连接广海教务..." },
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = shortChannelLabel,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ===== STATE 3: CONNECTED (Clean 2-Card Organic Hub: Sync Center + Single Official Website Entry!) =====
+                        PortalSessionUiState.READY -> {
+                            // Card 1: Core Sync Center (borderless 20dp surfaceContainerLowest matching SettingsCard!)
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    // Lightweight channel pill + last sync timestamp
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            shape = RoundedCornerShape(999.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .clickable(enabled = !isSyncing) { togglePrimaryChannel() }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.primary)
+                                                )
+                                                Text(
+                                                    text = shortChannelLabel,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Rounded.SwapHoriz,
+                                                    contentDescription = "切换通道",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Text(
+                                            text = if (settings.lastSyncTime.isNotBlank()) {
+                                                "上次同步 ${settings.lastSyncTime}"
+                                            } else {
+                                                "尚未同步"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    // Current Semester Local Data Overview Strip (tapping jumps straight to target Tab/SubTab!)
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = settings.academicYearLabel.ifBlank { "当前学期数据" },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                SyncOverviewMetricTile(
+                                                    label = "课表",
+                                                    value = "${courses.size} 条",
+                                                    modifier = Modifier.weight(1f),
+                                                    onClick = { onSyncFinishedJumpSchedule() }
+                                                )
+                                                SyncOverviewMetricTile(
+                                                    label = "成绩",
+                                                    value = "${gradesCount} 门",
+                                                    modifier = Modifier.weight(1f),
+                                                    onClick = { onSyncFinishedJumpAcademic(1) }
+                                                )
+                                                SyncOverviewMetricTile(
+                                                    label = "考试",
+                                                    value = "${examsCount} 场",
+                                                    modifier = Modifier.weight(1f),
+                                                    onClick = { onSyncFinishedJumpAcademic(2) }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Smart Primary Action: Quick Refresh (with调课 diff!) once courses exist; Full Sync for brand-new users!
+                                    if (courses.isNotEmpty()) {
+                                        Button(
+                                            onClick = { runQuickRefreshInWorkbench(activeChannel) },
+                                            enabled = !isSyncing,
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("刷新课表 · 检查调课", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            FilledTonalButton(
+                                                onClick = { startSyncFlow("all") },
+                                                enabled = !isSyncing,
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier
+                                                    .weight(1.25f)
+                                                    .height(42.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(17.dp))
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Text("一键全同步", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            }
+
+                                            SingleSyncDropdownButton(
+                                                expanded = showSingleSyncMenu,
+                                                enabled = !isSyncing,
+                                                modifier = Modifier.weight(0.9f),
+                                                onToggle = { showSingleSyncMenu = it },
+                                                onSelectMode = { mode ->
+                                                    showSingleSyncMenu = false
+                                                    startSyncFlow(mode)
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { startSyncFlow("all") },
+                                            enabled = !isSyncing,
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("一键同步（课表 · 成绩 · 考试）", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            FilledTonalButton(
+                                                onClick = { runQuickRefreshInWorkbench(activeChannel) },
+                                                enabled = !isSyncing,
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier
+                                                    .weight(1.2f)
+                                                    .height(42.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(17.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("刷新课表", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            }
+
+                                            SingleSyncDropdownButton(
+                                                expanded = showSingleSyncMenu,
+                                                enabled = !isSyncing,
+                                                modifier = Modifier.weight(0.95f),
+                                                onToggle = { showSingleSyncMenu = it },
+                                                onSelectMode = { mode ->
+                                                    showSingleSyncMenu = false
+                                                    startSyncFlow(mode)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Card 2: THE ONLY Official Website Direct Entry (matches SettingsScreen WorkbenchDirectoryRow DNA!)
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        openFullBrowser("/xtgl/index_initMenu.html?jsdm=xs", "广海正方教务官网")
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.size(38.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Public,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "访问广海正方教务官网",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "教学评价、自主选课、培养方案等官网事务",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Lock,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "仅在广海官方页面认证，本地不保存学号与密码",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
         }
-        } // end if (activePortalMode == 0) bottom sync dock
+
+        // Floating Sync Progress Pill
+        if (isSyncing && syncStatusText != null) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.inverseSurface,
+                tonalElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.inversePrimary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = syncStatusText!!,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
     }
 
-    jsAlertDialog?.let { (msg, res) ->
-        AlertDialog(
-            onDismissRequest = { res.cancel(); jsAlertDialog = null },
-            title = { Text("教务页面提示") },
-            text = { Text(msg) },
-            confirmButton = { Button(onClick = { res.confirm(); jsAlertDialog = null }) { Text("确定") } }
-        )
-    }
-
-    jsConfirmDialog?.let { (msg, res) ->
-        AlertDialog(
-            onDismissRequest = { res.cancel(); jsConfirmDialog = null },
-            title = { Text("教务页面确认") },
-            text = { Text(msg) },
-            confirmButton = { Button(onClick = { res.confirm(); jsConfirmDialog = null }) { Text("确定") } },
-            dismissButton = { TextButton(onClick = { res.cancel(); jsConfirmDialog = null }) { Text("取消") } }
-        )
-    }
-
+    // Diagnostic Dialog
     diagnosticDialogText?.let { info ->
         AlertDialog(
             onDismissRequest = { diagnosticDialogText = null },
-            title = { Text("当前教务页诊断信息") },
+            title = { Text("教务引擎诊断信息") },
             text = { Text(info, style = MaterialTheme.typography.bodySmall) },
             confirmButton = { Button(onClick = { diagnosticDialogText = null }) { Text("知道了") } },
             dismissButton = {
@@ -2170,13 +1662,14 @@ fun SyncPortalScreen(
                     onClick = {
                         val cm = context.getSystemService(android.content.ClipboardManager::class.java)
                         cm?.setPrimaryClip(android.content.ClipData.newPlainText("haiyu_jw_diag", info))
-                        onShowMessage("已复制脱敏教务诊断信息")
+                        onShowMessage("已复制脱敏诊断信息")
                     }
-                ) { Text("复制诊断文本") }
+                ) { Text("复制文本") }
             }
         )
     }
 
+    // Term Picker Dialog
     val termOpts = termOptionsDialog
     if (termOpts != null) {
         var yearIdx by remember(termOpts) {
@@ -2185,7 +1678,6 @@ fun SyncPortalScreen(
         var semIdx by remember(termOpts) {
             mutableIntStateOf(termOpts.defaultSemesterIndex.coerceIn(0, (termOpts.semesterOptions.size - 1).coerceAtLeast(0)))
         }
-
         AlertDialog(
             onDismissRequest = { termOptionsDialog = null },
             title = { Text("确认同步的学年与学期") },
@@ -2257,16 +1749,60 @@ fun SyncPortalScreen(
                         termOptionsDialog = null
                         if (yOpt != null && sOpt != null) {
                             val label = "${yOpt.text} ${sOpt.text}"
-                            isSyncing = true
-                            syncStatusText = "正在抓取 $label 数据..."
-                            evalJwScript(
-                                GdouSyncScript.buildSyncScript(
+                            scope.launch {
+                                isSyncing = true
+                                syncStatusText = "正在同步 $label 数据..."
+                                val outcome = nativeEngine.syncModules(
+                                    channel = activeChannel,
                                     mode = pendingSyncMode,
                                     academicYear = yOpt.value,
                                     semesterCode = sOpt.value,
-                                    termLabel = label
+                                    termLabel = label,
+                                    onProgress = { msg -> syncStatusText = msg }
                                 )
-                            )
+                                isSyncing = false
+                                syncStatusText = null
+
+                                if (outcome.authExpired != null && outcome.summaryText.isBlank()) {
+                                    sessionState = PortalSessionUiState.NEEDS_AUTH
+                                    lastWebVpnDenied = outcome.authExpired.isWebVpnDenied
+                                    openAuthSheet(
+                                        channel = activeChannel,
+                                        resumeUrl = outcome.authExpired.resumeUrl,
+                                        isMfa = outcome.authExpired.isMfa,
+                                        autoActionAfter = pendingSyncMode
+                                    )
+                                    return@launch
+                                }
+
+                                (outcome.coursesResult as? NativeCallResult.Success)?.data?.let { c ->
+                                    onCoursesSynced(
+                                        c.courses,
+                                        c.startDate,
+                                        c.totalWeeks,
+                                        label,
+                                        yOpt.value,
+                                        sOpt.value,
+                                        c.detectedCampusId,
+                                        c.practiceCourses
+                                    )
+                                }
+                                (outcome.gradesResult as? NativeCallResult.Success)?.data?.let { g ->
+                                    onGradesSynced(g.grades, g.levelExams)
+                                }
+                                (outcome.examsResult as? NativeCallResult.Success)?.data?.let { ex ->
+                                    onExamsSynced(ex)
+                                }
+                                if (outcome.evalInterceptMessage != null) {
+                                    evalInterceptBanner = outcome.evalInterceptMessage
+                                }
+                                if (outcome.summaryText.isNotBlank()) {
+                                    extractGradeSkipReason(outcome.summaryText)?.let { onGradeSkipReasonChanged(it) }
+                                    syncSuccessSummary = outcome.summaryText
+                                } else {
+                                    onShowMessage(outcome.errorText ?: "同步未获取到有效数据")
+                                }
+                            }
                         }
                     }
                 ) { Text("开始同步") }
@@ -2277,12 +1813,18 @@ fun SyncPortalScreen(
         )
     }
 
+    // Sync Completion Summary Dialog (ONLY AlertDialog, ZERO overlapping Snackbar!)
     if (syncSuccessSummary != null) {
         val rawBody = syncSuccessSummary!!.removePrefix("同步完成：").trim()
         val bulletLines = rawBody.split(" · ").map { it.trim() }.filter { it.isNotEmpty() }
+        val confirmLabel = when (pendingSyncMode) {
+            "grades" -> "查看成绩"
+            "exams" -> "查看考试"
+            else -> "查看课表"
+        }
         AlertDialog(
             onDismissRequest = { syncSuccessSummary = null },
-            title = { Text("广海数据已离线保存") },
+            title = { Text("数据已离线保存") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     bulletLines.forEach { line ->
@@ -2305,13 +1847,96 @@ fun SyncPortalScreen(
                 Button(
                     onClick = {
                         syncSuccessSummary = null
-                        onSyncFinishedJumpSchedule()
+                        when (pendingSyncMode) {
+                            "grades" -> onSyncFinishedJumpAcademic(1)
+                            "exams" -> onSyncFinishedJumpAcademic(2)
+                            else -> onSyncFinishedJumpSchedule()
+                        }
                     }
-                ) { Text("查看课表") }
+                ) { Text(confirmLabel) }
             },
             dismissButton = {
                 TextButton(onClick = { syncSuccessSummary = null }) { Text("留在此页") }
             }
         )
+    }
+}
+
+@Composable
+private fun SyncOverviewMetricTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun SingleSyncDropdownButton(
+    expanded: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onToggle: (Boolean) -> Unit,
+    onSelectMode: (String) -> Unit
+) {
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { onToggle(true) },
+            enabled = enabled,
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+        ) {
+            Text("单项", fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Spacer(modifier = Modifier.width(2.dp))
+            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onToggle(false) }
+        ) {
+            DropdownMenuItem(
+                text = { Text("指定学期同步课表") },
+                leadingIcon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
+                onClick = { onSelectMode("courses") }
+            )
+            DropdownMenuItem(
+                text = { Text("仅同步成绩与 GPA") },
+                leadingIcon = { Icon(Icons.Rounded.Assessment, contentDescription = null) },
+                onClick = { onSelectMode("grades") }
+            )
+            DropdownMenuItem(
+                text = { Text("仅同步考试时间与考场") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.EventNote, contentDescription = null) },
+                onClick = { onSelectMode("exams") }
+            )
+        }
     }
 }

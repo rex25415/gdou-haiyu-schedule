@@ -2,12 +2,17 @@ package io.github.rex25415.haiyu.schedule.ui
 
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.webkit.CookieManager
 import android.webkit.WebStorage
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -40,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -48,9 +54,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -62,10 +66,17 @@ import io.github.rex25415.haiyu.schedule.data.ScheduleImageExporter
 import io.github.rex25415.haiyu.schedule.reminder.ClassReminderScheduler
 import io.github.rex25415.haiyu.schedule.data.CampusNoticeItem
 import io.github.rex25415.haiyu.schedule.data.CampusOfficialService
+import io.github.rex25415.haiyu.schedule.sync.GdouNativeSyncEngine
+import io.github.rex25415.haiyu.schedule.sync.QuickRefreshNativeOutcome
+import io.github.rex25415.haiyu.schedule.sync.SyncChannel
 import io.github.rex25415.haiyu.schedule.ui.components.AppUpdateDialog
 import io.github.rex25415.haiyu.schedule.ui.components.CampusServicesBottomSheet
+import io.github.rex25415.haiyu.schedule.ui.components.EphemeralGdouWebSheet
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
+import io.github.rex25415.haiyu.schedule.ui.components.WebSheetMode
+import io.github.rex25415.haiyu.schedule.ui.components.WebSheetRequest
 import io.github.rex25415.haiyu.schedule.ui.screens.AcademicScreen
+import io.github.rex25415.haiyu.schedule.ui.screens.ExternalAuthTrigger
 import io.github.rex25415.haiyu.schedule.ui.screens.ScheduleScreen
 import io.github.rex25415.haiyu.schedule.ui.screens.SettingsScreen
 import io.github.rex25415.haiyu.schedule.ui.screens.SyncPortalScreen
@@ -84,6 +95,12 @@ private data class NavTab(
     val icon: ImageVector
 )
 
+private data class ActiveWebSheetSession(
+    val request: WebSheetRequest,
+    val onAuthCompleted: (SyncChannel) -> Unit,
+    val onDismissed: (wasFullBrowser: Boolean) -> Unit
+)
+
 @Composable
 fun HaiyuApp(
     onRequestNotificationPermission: () -> Unit,
@@ -92,20 +109,21 @@ fun HaiyuApp(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val repo = remember { AppRepository.getInstance(context) }
+    val nativeEngine = remember { GdouNativeSyncEngine() }
     val snapshot by repo.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     var currentTab by rememberSaveable { mutableIntStateOf(0) }
-    var hasOpenedSyncTab by rememberSaveable { mutableStateOf(false) }
-    var syncSessionGeneration by rememberSaveable { mutableIntStateOf(0) }
     var isJwLoggedIn by remember { mutableStateOf(false) }
     var isJwSyncing by remember { mutableStateOf(false) }
-    var quickRefreshTrigger by remember { mutableIntStateOf(0) }
+    var externalAuthTrigger by remember { mutableStateOf(ExternalAuthTrigger()) }
     var academicRequestedSubTab by rememberSaveable { mutableIntStateOf(-1) }
     var academicSubTabNonce by rememberSaveable { mutableIntStateOf(0) }
     var syncRequestedMode by rememberSaveable { mutableIntStateOf(0) }
     var syncModeNonce by rememberSaveable { mutableIntStateOf(0) }
+    var pendingAutoSyncOnEnter by rememberSaveable { mutableStateOf(false) }
+    var activeWebSheetSession by remember { mutableStateOf<ActiveWebSheetSession?>(null) }
     var lastGradeSkipReason by rememberSaveable { mutableStateOf<String?>(null) }
 
     // In-App GitHub Releases Updater state
@@ -132,10 +150,6 @@ fun HaiyuApp(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    if (currentTab == 1 && !hasOpenedSyncTab) {
-        hasOpenedSyncTab = true
     }
 
     val tabs = remember {
@@ -205,8 +219,11 @@ fun HaiyuApp(
     }
 
     fun syncWidgetsAndReminders() {
-        WidgetScheduleHelper.refreshAllWidgets(context)
-        ClassReminderScheduler.rescheduleNextReminder(context)
+        val appCtx = context.applicationContext
+        scope.launch(Dispatchers.Default) {
+            WidgetScheduleHelper.refreshAllWidgets(appCtx)
+            ClassReminderScheduler.rescheduleNextReminder(appCtx)
+        }
     }
 
     fun copyShareCode(code: String) {
@@ -338,10 +355,69 @@ fun HaiyuApp(
         }
     }
 
+    // Zero-WebView Native Background Quick Refresh (0ms UI jank, ~0MB extra RAM!)
     fun triggerQuickRefreshSchedule() {
-        hasOpenedSyncTab = true
-        showToast("正在校验教务会话并后台刷新课表...")
-        quickRefreshTrigger++
+        if (isJwSyncing) return
+        isJwSyncing = true
+        showToast("正在快速刷新课表...")
+        val snap = snapshot
+        val preferred = nativeEngine.lastReadyChannel
+            ?: if (snap.settings.preferOffCampusChannel) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+        scope.launch {
+            val outcome = nativeEngine.quickRefreshCourses(
+                context = context,
+                preferredChannel = preferred,
+                savedYear = snap.settings.lastSyncYearCode,
+                savedSem = snap.settings.lastSyncSemesterCode,
+                savedTermLabel = snap.settings.academicYearLabel
+            )
+            isJwSyncing = false
+            when (outcome) {
+                is QuickRefreshNativeOutcome.Success -> {
+                    isJwLoggedIn = true
+                    val diff = GdouNativeSyncEngine.summarizeCourseRefreshDiff(
+                        previousCourses = snap.courses,
+                        nextCourses = outcome.courses,
+                        practiceCount = outcome.practiceCourses.size
+                    )
+                    val detected = repo.replaceSyncedCourses(
+                        courses = outcome.courses,
+                        semesterStartDate = outcome.startDate,
+                        totalWeeks = outcome.totalWeeks,
+                        academicYearLabel = outcome.termLabel,
+                        yearCode = outcome.yearCode,
+                        semesterCode = outcome.semesterCode,
+                        detectedCampusId = outcome.detectedCampusId,
+                        practiceCourses = outcome.practiceCourses
+                    )
+                    syncWidgetsAndReminders()
+                    val campusChanged = detected != null && detected != snap.settings.campus
+                    showToast(
+                        if (campusChanged) "${diff.message} · 已切换「${detected!!.label}」作息"
+                        else diff.message
+                    )
+                }
+                is QuickRefreshNativeOutcome.NeedsLogin -> {
+                    isJwLoggedIn = false
+                    externalAuthTrigger = ExternalAuthTrigger(
+                        nonce = externalAuthTrigger.nonce + 1,
+                        channel = outcome.channel,
+                        resumeUrl = outcome.resumeUrl,
+                        reason = outcome.reason,
+                        isMfa = outcome.isMfa,
+                        isWebVpnDenied = outcome.isWebVpnDenied,
+                        autoQuickRefreshAfterLogin = true
+                    )
+                    syncRequestedMode = 0
+                    syncModeNonce++
+                    currentTab = 1
+                    showToast(outcome.reason)
+                }
+                is QuickRefreshNativeOutcome.Error -> {
+                    showToast(outcome.message)
+                }
+            }
+        }
     }
 
     HaiyuTheme(
@@ -352,140 +428,146 @@ fun HaiyuApp(
             onSystemBarThemeChanged(isDark)
         }
 
-        // Smooth Predictive-Back friendly navigation: Back from Academic/Settings returns to Schedule
-        BackHandler(enabled = currentTab == 2 || currentTab == 3) {
+        // Smooth Predictive-Back friendly navigation: Back from Sync/Academic/Settings returns to Schedule
+        BackHandler(enabled = currentTab != 0 && activeWebSheetSession == null) {
             currentTab = 0
         }
 
-        Scaffold(
-            snackbarHost = {
-                SnackbarHost(snackbarHostState) { data ->
-                    Snackbar(
-                        snackbarData = data,
-                        shape = RoundedCornerShape(14.dp),
-                        containerColor = if (isDark) Color(0xFF1F2D2B) else MaterialTheme.colorScheme.inverseSurface,
-                        contentColor = if (isDark) Color(0xFFE2EEEC) else MaterialTheme.colorScheme.inverseOnSurface,
-                        actionColor = if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
-                    )
-                }
-            },
-            bottomBar = {
-                NavigationBar {
-                    tabs.forEachIndexed { idx, tab ->
-                        NavigationBarItem(
-                            selected = currentTab == idx,
-                            onClick = { currentTab = idx },
-                            icon = {
-                                if (idx == 3 && (availableUpdate != null || legacyInstall != null)) {
-                                    BadgedBox(badge = { Badge() }) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                snackbarHost = {
+                    if (activeWebSheetSession == null) {
+                        SnackbarHost(snackbarHostState) { data ->
+                            Snackbar(
+                                snackbarData = data,
+                                shape = RoundedCornerShape(14.dp),
+                                containerColor = if (isDark) Color(0xFF1F2D2B) else MaterialTheme.colorScheme.inverseSurface,
+                                contentColor = if (isDark) Color(0xFFE2EEEC) else MaterialTheme.colorScheme.inverseOnSurface,
+                                actionColor = if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
+                            )
+                        }
+                    }
+                },
+                bottomBar = {
+                    NavigationBar {
+                        tabs.forEachIndexed { idx, tab ->
+                            NavigationBarItem(
+                                selected = currentTab == idx,
+                                onClick = { currentTab = idx },
+                                icon = {
+                                    if (idx == 3 && (availableUpdate != null || legacyInstall != null)) {
+                                        BadgedBox(badge = { Badge() }) {
+                                            Icon(tab.icon, contentDescription = tab.label)
+                                        }
+                                    } else {
                                         Icon(tab.icon, contentDescription = tab.label)
                                     }
-                                } else {
-                                    Icon(tab.icon, contentDescription = tab.label)
-                                }
-                            },
-                            label = { Text(tab.label) }
-                        )
-                    }
-                }
-            }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                // Keep SyncPortalScreen alive once opened, reset cleanly on logout via generation key
-                if (hasOpenedSyncTab) {
-                    key(syncSessionGeneration) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .zIndex(if (currentTab == 1) 1f else 0f)
-                                .then(if (currentTab != 1) Modifier.clearAndSetSemantics {} else Modifier)
-                        ) {
-                            SyncPortalScreen(
-                                isVisible = currentTab == 1,
-                                settings = snapshot.settings,
-                                courses = snapshot.courses,
-                                quickRefreshTrigger = quickRefreshTrigger,
-                                requestedMode = syncRequestedMode,
-                                modeRequestNonce = syncModeNonce,
-                                onLoginStateChanged = { isJwLoggedIn = it },
-                                onSyncStateChanged = { isJwSyncing = it },
-                                onQuickRefreshNeedsLogin = { reason ->
-                                    currentTab = 1
-                                    showToast(reason)
                                 },
-                                onUpdateChannelPrefs = { offCampus, desktopUa ->
-                                    repo.updateSettings {
-                                        it.copy(
-                                            preferOffCampusChannel = offCampus,
-                                            preferDesktopUa = desktopUa
-                                        )
-                                    }
-                                },
-                                onToggleFavoriteBuilding = { campus, building ->
-                                    val added = repo.toggleFavoriteBuilding(campus, building)
-                                    showToast(if (added) "已置顶常去教学楼「$building」" else "已取消置顶「$building」")
-                                },
-                                onToggleFavoriteClassroom = { campus, building, room, seats, type ->
-                                    val added = repo.toggleFavoriteClassroom(campus, building, room, seats, type)
-                                    showToast(if (added) "已收藏自习教室「$room」" else "已取消收藏「$room」")
-                                },
-                                onCoursesSynced = { courses, startDate, totalWeeks, termLabel, yearCode, semCode, detectedCampusId, practiceCourses ->
-                                    val detected = repo.replaceSyncedCourses(
-                                        courses = courses,
-                                        semesterStartDate = startDate,
-                                        totalWeeks = totalWeeks,
-                                        academicYearLabel = termLabel,
-                                        yearCode = yearCode,
-                                        semesterCode = semCode,
-                                        detectedCampusId = detectedCampusId,
-                                        practiceCourses = practiceCourses
-                                    )
-                                    syncWidgetsAndReminders()
-                                    if (detected != null) {
-                                        showToast("已自动识别「${detected.label}」并匹配对应错峰作息")
-                                    }
-                                },
-                                onGradesSynced = { grades, levelExams ->
-                                    lastGradeSkipReason = null
-                                    repo.replaceSyncedGrades(grades, levelExams)
-                                },
-                                onExamsSynced = { exams ->
-                                    repo.replaceSyncedExams(exams)
-                                    syncWidgetsAndReminders()
-                                },
-                                onShowMessage = { msg ->
-                                    val skipMatch = Regex("成绩跳过\\(([^)]+)\\)").find(msg)
-                                    if (skipMatch != null) {
-                                        lastGradeSkipReason = skipMatch.groupValues[1].trim()
-                                    }
-                                    showToast(msg)
-                                },
-                                onNavigateBackToSchedule = { currentTab = 0 },
-                                onOpenCampusServices = { showCampusServicesSheet = true },
-                                onSyncFinishedJumpSchedule = { currentTab = 0 }
+                                label = { Text(tab.label) }
                             )
                         }
                     }
                 }
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .consumeWindowInsets(innerPadding)
+                ) {
+                    when (currentTab) {
+                        1 -> SyncPortalScreen(
+                            nativeEngine = nativeEngine,
+                            settings = snapshot.settings,
+                            courses = snapshot.courses,
+                            gradesCount = snapshot.grades.size,
+                            examsCount = snapshot.exams.size,
+                            requestedMode = syncRequestedMode,
+                            modeRequestNonce = syncModeNonce,
+                            autoStartSyncOnEnter = pendingAutoSyncOnEnter,
+                            onConsumeAutoStartSync = { pendingAutoSyncOnEnter = false },
+                            externalAuthTrigger = externalAuthTrigger,
+                            onConsumeExternalAuthTrigger = { externalAuthTrigger = ExternalAuthTrigger() },
+                            onOpenWebSheet = { req, onAuthDone, onDismissed ->
+                                activeWebSheetSession = ActiveWebSheetSession(
+                                    request = req,
+                                    onAuthCompleted = onAuthDone,
+                                    onDismissed = onDismissed
+                                )
+                            },
+                            onLoginStateChanged = { isJwLoggedIn = it },
+                            onSyncStateChanged = { isJwSyncing = it },
+                            onUpdateChannelPrefs = { offCampus, desktopUa ->
+                                repo.updateSettings {
+                                    it.copy(
+                                        preferOffCampusChannel = offCampus,
+                                        preferDesktopUa = desktopUa
+                                    )
+                                }
+                            },
+                            onToggleFavoriteBuilding = { campus, building ->
+                                val added = repo.toggleFavoriteBuilding(campus, building)
+                                showToast(if (added) "已置顶常去教学楼「$building」" else "已取消置顶「$building」")
+                            },
+                            onToggleFavoriteClassroom = { campus, building, room, seats, type ->
+                                val added = repo.toggleFavoriteClassroom(campus, building, room, seats, type)
+                                showToast(if (added) "已收藏自习教室「$room」" else "已取消收藏「$room」")
+                            },
+                            onCoursesSynced = { courses, startDate, totalWeeks, termLabel, yearCode, semCode, detectedCampusId, practiceCourses ->
+                                val detected = repo.replaceSyncedCourses(
+                                    courses = courses,
+                                    semesterStartDate = startDate,
+                                    totalWeeks = totalWeeks,
+                                    academicYearLabel = termLabel,
+                                    yearCode = yearCode,
+                                    semesterCode = semCode,
+                                    detectedCampusId = detectedCampusId,
+                                    practiceCourses = practiceCourses
+                                )
+                                syncWidgetsAndReminders()
+                                detected
+                            },
+                            onGradesSynced = { grades, levelExams ->
+                                lastGradeSkipReason = null
+                                repo.replaceSyncedGrades(grades, levelExams)
+                            },
+                            onExamsSynced = { exams ->
+                                repo.replaceSyncedExams(exams)
+                                syncWidgetsAndReminders()
+                            },
+                            onGradeSkipReasonChanged = { reason ->
+                                lastGradeSkipReason = reason
+                            },
+                            onShowMessage = { msg ->
+                                val skipMatch = Regex("成绩跳过\\(([^)]+)\\)").find(msg)
+                                if (skipMatch != null) {
+                                    lastGradeSkipReason = skipMatch.groupValues[1].trim()
+                                }
+                                showToast(msg)
+                            },
+                            onOpenCampusServices = { showCampusServicesSheet = true },
+                            onSyncFinishedJumpSchedule = { currentTab = 0 },
+                            onSyncFinishedJumpAcademic = { subTab ->
+                                academicRequestedSubTab = subTab
+                                academicSubTabNonce++
+                                currentTab = 2
+                            }
+                        )
 
-                if (currentTab != 1) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .zIndex(2f)
-                    ) {
-                        when (currentTab) {
-                            0 -> ScheduleScreen(
-                                snapshot = snapshot,
-                                isDark = isDark,
-                                backgroundBitmap = scheduleBgBitmap,
-                                isRefreshingSchedule = isJwSyncing,
-                                onQuickRefreshSchedule = { triggerQuickRefreshSchedule() },
-                                onJumpToSync = { currentTab = 1 },
+                        0 -> ScheduleScreen(
+                            snapshot = snapshot,
+                            isDark = isDark,
+                            backgroundBitmap = scheduleBgBitmap,
+                            isRefreshingSchedule = isJwSyncing,
+                            onQuickRefreshSchedule = { triggerQuickRefreshSchedule() },
+                            onJumpToSync = {
+                                if (snapshot.courses.isEmpty()) {
+                                    pendingAutoSyncOnEnter = true
+                                }
+                                syncRequestedMode = 0
+                                syncModeNonce++
+                                currentTab = 1
+                            },
                                 onJumpToTasks = {
                                     academicRequestedSubTab = 0
                                     academicSubTabNonce++
@@ -580,7 +662,6 @@ fun HaiyuApp(
                                 onOpenEmptyClassroom = {
                                     syncRequestedMode = 1
                                     syncModeNonce++
-                                    hasOpenedSyncTab = true
                                     currentTab = 1
                                 },
                                 onToggleCompactBanner = {
@@ -601,7 +682,6 @@ fun HaiyuApp(
                                 onJumpToSync = {
                                     syncRequestedMode = 0
                                     syncModeNonce++
-                                    hasOpenedSyncTab = true
                                     currentTab = 1
                                 },
                                 onAddTask = { task ->
@@ -781,14 +861,10 @@ fun HaiyuApp(
                                     showToast("已加载示例数据")
                                 },
                                 onLogoutJwSession = {
-                                    CookieManager.getInstance().removeAllCookies {
-                                        CookieManager.getInstance().flush()
-                                    }
-                                    WebStorage.getInstance().deleteAllData()
-                                    hasOpenedSyncTab = false
+                                    nativeEngine.clearAllCookiesAndCache()
+                                    try { WebStorage.getInstance().deleteAllData() } catch (_: Throwable) {}
                                     isJwLoggedIn = false
                                     isJwSyncing = false
-                                    syncSessionGeneration++
                                     showToast("已彻底退出教务账号并清除浏览器缓存")
                                 },
                                 onClearAllData = {
@@ -798,8 +874,53 @@ fun HaiyuApp(
                                 },
                                 onOpenCampusServices = { showCampusServicesSheet = true }
                             )
-                        }
                     }
+                }
+            }
+
+            // Full-screen top-level Ephemeral Auth / Original Browser overlay (covers bottom NavigationBar completely;
+            // opaque backdrop stays full-bleed behind IME so underlying screens can NEVER bleed through!)
+            activeWebSheetSession?.let { session ->
+                key(session.request) {
+                    EphemeralGdouWebSheet(
+                        request = session.request,
+                        onAuthCompleted = { authedChannel ->
+                            session.onAuthCompleted(authedChannel)
+                            activeWebSheetSession = null
+                        },
+                        onSwitchRequest = { nextReq ->
+                            activeWebSheetSession = session.copy(request = nextReq)
+                        },
+                        onDomGradesScraped = { grades, levels ->
+                            lastGradeSkipReason = null
+                            repo.replaceSyncedGrades(grades, levels)
+                        },
+                        onDomExamsScraped = { exams ->
+                            repo.replaceSyncedExams(exams)
+                            syncWidgetsAndReminders()
+                        },
+                        onShowMessage = { showToast(it) },
+                        onDismiss = {
+                            val wasFullBrowser = session.request.mode == WebSheetMode.FULL_BROWSER
+                            activeWebSheetSession = null
+                            session.onDismissed(wasFullBrowser)
+                        }
+                    )
+                }
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                        .padding(bottom = 12.dp)
+                ) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        shape = RoundedCornerShape(14.dp),
+                        containerColor = if (isDark) Color(0xFF1F2D2B) else MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = if (isDark) Color(0xFFE2EEEC) else MaterialTheme.colorScheme.inverseOnSurface,
+                        actionColor = if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
+                    )
                 }
             }
         }
@@ -830,7 +951,6 @@ fun HaiyuApp(
                 onOpenWebSyncPortal = {
                     syncRequestedMode = 0
                     syncModeNonce++
-                    hasOpenedSyncTab = true
                     currentTab = 1
                 },
                 onAddNoticeAsTask = { notice ->

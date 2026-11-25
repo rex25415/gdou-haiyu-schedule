@@ -33,6 +33,32 @@ data class NetworkProbeResult(
  */
 object NetworkChannelProbe {
 
+    @Volatile
+    private var cachedProbeResult: NetworkProbeResult? = null
+    @Volatile
+    private var cachedProbeAtMs: Long = 0L
+
+    suspend fun probeCached(
+        context: Context,
+        maxAgeMs: Long = 45_000L,
+        forceRefresh: Boolean = false
+    ): NetworkProbeResult {
+        val now = System.currentTimeMillis()
+        val prev = cachedProbeResult
+        if (
+            !forceRefresh &&
+            prev != null &&
+            prev.state != CampusNetworkState.OFFLINE_OR_BLOCKED &&
+            now - cachedProbeAtMs < maxAgeMs
+        ) {
+            return prev
+        }
+        val fresh = probe(context)
+        cachedProbeResult = fresh
+        cachedProbeAtMs = System.currentTimeMillis()
+        return fresh
+    }
+
     fun classifyState(
         jwReachable: Boolean,
         wfwReachable: Boolean,
@@ -109,29 +135,33 @@ object NetworkChannelProbe {
 
     suspend fun probe(context: Context): NetworkProbeResult = withContext(Dispatchers.IO) {
         val isWifi = isWifiConnected(context)
-        val jwFirstDeferred = async { probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1500, 1800) }
-        val authFirstDeferred = async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 1600, 1800) }
-        val wfwFirstDeferred = async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1600, 1800) }
-        val jwFirst = jwFirstDeferred.await()
+        val cellularOnly = isCellularOnly(context)
+        // On pure 4G/5G cellular (no Wi-Fi/Ethernet/VPN), jw.gdou.edu.cn cannot be reached directly:
+        // skip the 1s+ TCP SYN blackhole wait entirely and probe only off-campus WebVPN + authserver!
+        val jwFirstDeferred = if (cellularOnly) null else async { probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1000, 1300) }
+        val authFirstDeferred = async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 1100, 1400) }
+        val wfwFirstDeferred = async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1200, 1500) }
+        val jwFirst = jwFirstDeferred?.await() ?: ProbeOutcome(latencyMs = null, timedOut = true, tcpConnectTimedOut = true)
         val authFirst = authFirstDeferred.await()
         val wfwFirst = wfwFirstDeferred.await()
 
         val wfwRetryDeferred = if (wfwFirst.latencyMs == null) {
-            async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 2200, 2400).latencyMs }
+            async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1800, 2000).latencyMs }
         } else {
             null
         }
         val jwRetryDeferred = if (
+            !cellularOnly &&
             jwFirst.latencyMs == null &&
             shouldRetryJw(jwFirst.timedOut, wfwFirst.latencyMs, jwFirst.tcpConnectTimedOut)
         ) {
             async {
-                val retry1 = probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1800, 1800)
+                val retry1 = probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1100, 1300)
                 if (retry1.latencyMs != null) {
                     retry1.latencyMs
                 } else if (!retry1.tcpConnectTimedOut) {
                     // TCP handshake succeeded (on campus), retry once more with a fresh socket to dodge bad ADC node
-                    probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1500, 1600).latencyMs
+                    probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1200, 1400).latencyMs
                 } else {
                     null
                 }
@@ -143,7 +173,7 @@ object NetworkChannelProbe {
             authFirst.latencyMs == null &&
             (jwFirst.latencyMs != null || wfwFirst.latencyMs != null || !jwFirst.timedOut || !wfwFirst.timedOut)
         ) {
-            async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 2000, 2200).latencyMs }
+            async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 1500, 1800).latencyMs }
         } else {
             null
         }
@@ -163,6 +193,39 @@ object NetworkChannelProbe {
             wfwLatencyMs = wfwMs,
             authLatencyMs = authMs
         )
+    }
+
+    /**
+     * 纯蜂窝移动网络判定（仅蜂窝、无 Wi-Fi / 以太网 / VPN）：
+     * 物理上绝不可能直连校内 jw.gdou.edu.cn，可直接 0 延迟切校外通道，省去 1–10s 无效超时。
+     */
+    fun isCellularOnly(context: Context): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            classifyCellularOnly(
+                hasWifiOrEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                hasCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            )
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun classifyCellularOnly(
+        hasWifiOrEthernet: Boolean,
+        hasCellular: Boolean,
+        hasVpn: Boolean
+    ): Boolean = hasCellular && !hasWifiOrEthernet && !hasVpn
+
+    fun shouldPreferOffCampusImmediately(context: Context): Boolean {
+        if (isCellularOnly(context)) return true
+        val prev = cachedProbeResult
+        return prev != null &&
+            prev.state == CampusNetworkState.OFF_CAMPUS_ONLY &&
+            System.currentTimeMillis() - cachedProbeAtMs < 45_000L
     }
 
     private fun isWifiConnected(context: Context): Boolean {

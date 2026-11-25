@@ -326,7 +326,7 @@ fun EmptyClassroomPane(
         s2: Int = queryEndSec
     ) {
         if (!isLoggedIntoJw) {
-            onShowMessage("请先在「教务登录与同步」完成一次登录，即可免校园网实时查全校自习室")
+            onShowMessage("请先在「教务中心」完成一次登录，即可免校园网实时查全校自习室")
             onGoToWebLogin()
         } else {
             onExecuteQuery(

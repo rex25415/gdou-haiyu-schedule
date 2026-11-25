@@ -2,6 +2,15 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.5.0] - 2026-11-25（纯原生教务同步引擎重构 · 根治登录卡顿与过期误报）
+- **耗时多轮深挖根治「校外登录后误报过期、WebView 加载卡顿、切页掉帧」顽疾**：
+  - 彻底告别常驻内嵌 WebView 同步方案，重写纯 Kotlin 原生 HTTPS 并发同步引擎（[GdouNativeSyncEngine.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouNativeSyncEngine.kt) + [GdouCookieStore.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouCookieStore.kt)），平时零常驻 `WebView`（`WebViews: 0`），彻底绕开广海 WebVPN 374KB 代理重写脚本、3.7MB 无用登录装饰背景图与旧式正方网页渲染阻塞，切页丝滑、校外 5G 全量同步缩短至约 2 秒、刷课表 1 秒内完成；
+  - 针对 WebVPN 服务端托管票据、`/login?cas_login=true` 浮窗复现、纯 4G/5G 流量撞内网超时及跨网切线做了全链路优化：新增纯蜂窝 0ms 秒判校外（[NetworkChannelProbe.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/NetworkChannelProbe.kt)）、空 Cookie `0-RTT` 瞬时判别、`CASTGC → WebVPN` 跨通道无头静默换票、HTTP Keep-Alive 连接池复用、学年学期/空教室上下文 10 分钟内存缓存与后台预热、成绩与等级考试并行拉取；
+  - 一次性全屏官方认证与官网浮层（[EphemeralGdouWebSheet.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/EphemeralGdouWebSheet.kt)）提升至应用根级覆盖底栏，彻底修复软键盘弹出穿透背后页面问题，认证通过拿到票据的瞬间立即销毁 `WebView` 释放内存。
+- **重塑第 2 个大界面「教务中心」& 新增「刷新课表 · 检查调课」**：
+  - [SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt) 全面对齐「课表 / 学业中心 / 设置与工作台」视觉规范（统一顶栏大标题、标准分段控件、`20dp` 无框洁白/深色卡片与宽屏适配），未登录态为专注纯净的连接引导页，认证后原子切换 2 步建连过渡态（0 帧按钮闪现、零弹窗与 Toast 叠层）；
+  - 去除与其他页面重复的入口，下半区精简为唯一不重复的「访问广海正方教务官网」直连卡片（用于教学评价、自主选课、培养方案等官网事务）；新增纯本地调课变动比对，刷完课表直接提示「暂无调课变动」或精准播报变动课程并保留手动调课；打通「查空教室」未登录认证后的自动回跳闭环。
+
 ## [v3.4.3] - 2026-11-25（校外免校园网全链路深修与跨网自动恢复）
 - **根治「校外免校园网（WebVPN）」同步误报与跨网刷课表卡顿**：
   - 修复 [GdouSyncScript.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouSyncScript.kt) 中 WebVPN 分支回退裸根路径触发 `302 /login` 导致成绩/考试同步误判 `登录态已过期` 的故障；补全 WebVPN 登录页 HTML 拦截识别（`WEB VPN` / `wengine-vpn` / `cas_login` / `统一认证`），同步修复 `expectJson=false` 误放行门户页面，并将网络异常 `redirect: "manual"` 探测超时收敛为 `3.5s`；

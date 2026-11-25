@@ -336,5 +336,103 @@ class GdouSyncScriptTest {
 
         // 3. Empty classroom helper must stay free of Array.prototype.find for Zhengfang Prototype.js pages
         assertFalse(roomJs.contains(".find("))
+
+        // 4. WebVPN denied page (/wengine-vpn/denied) must never look logged in and must end background SSO wait cleanly
+        val deniedUrl = "https://webvpn.gdou.edu.cn/wengine-vpn/denied"
+        assertFalse(
+            GdouSyncScript.resolveJwLoginState(
+                url = deniedUrl,
+                pageTitle = "访问被拒绝",
+                pageErrorMsg = null,
+                domConfirmedLoggedIn = true
+            )
+        )
+        assertTrue(GdouSyncScript.mightBeInteractiveLoginUrl(deniedUrl))
+        assertTrue(quickJs.contains("访问被拒绝"))
+    }
+
+    @Test
+    fun syncAuditFixesPreventHttpErrorFalseLoginDoublePrefixAndPrototypeBugs() {
+        val termJs = GdouSyncScript.buildFetchTermOptionsScript()
+        val syncJs = GdouSyncScript.buildSyncScript("all", "2026", "3", "2026-2027 第一学期")
+        val quickJs = GdouSyncScript.buildQuickRefreshCoursesScript("2026", "3", "2026-2027 第一学期")
+
+        // 1. 502/503/504 gateway error titles must NEVER impersonate logged-in JW state
+        val webvpnJwHome = "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}/xtgl/index_initMenu.html"
+        assertFalse(GdouSyncScript.resolveJwLoginState(webvpnJwHome, "502 Bad Gateway", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webvpnJwHome, "503 Service Temporarily Unavailable", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webvpnJwHome, "504 Gateway Time-out", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webvpnJwHome, "访问出错", null, true))
+
+        // 2. Proxy prefix stripping, weekday/punctuation parsing, and no Prototype-unsafe .findIndex(
+        assertTrue(syncJs.contains("stripProxyPrefix"))
+        assertTrue(syncJs.contains("isStrongAuthExpiredHtml"))
+        assertTrue(syncJs.contains("scheduleDataEps"))
+        assertTrue(syncJs.contains("parseDayOfWeek"))
+        assertTrue(syncJs.contains("okModules === 0"))
+        assertTrue(quickJs.contains("cache = \"no-store\""))
+        assertFalse(termJs.contains(".findIndex("))
+        assertFalse(syncJs.contains(".findIndex("))
+        assertFalse(quickJs.contains(".find("))
+
+        // 3. Authenticated WebVPN portal root URL classifier (auto-skip portal list straight to JW)
+        assertTrue(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/"))
+        assertTrue(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/?cas_login=true"))
+        assertTrue(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/portal/#/index"))
+        assertTrue(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/en"))
+        assertFalse(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/login"))
+        assertFalse(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/login?cas_login=true&ticket=ST-1"))
+        assertFalse(GdouSyncScript.isAuthenticatedWebVpnPortalUrl("https://webvpn.gdou.edu.cn/wengine-vpn/denied"))
+        assertFalse(
+            GdouSyncScript.isAuthenticatedWebVpnPortalUrl(
+                "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/login"
+            )
+        )
+        assertFalse(GdouSyncScript.isAuthenticatedWebVpnPortalUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY))
+
+        // 4. WebVPN-injected <head> scripts must NEVER trigger false auth-expiry on valid Zhengfang HTML
+        assertTrue(termJs.contains("extractHtmlParts"))
+        assertTrue(termJs.contains("hasJwModuleDom"))
+        assertTrue(syncJs.contains("extractHtmlParts"))
+
+        // 5. Fast off-campus WebVPN /login -> ?cas_login=true skip & concurrent full sync optimizations
+        assertTrue(
+            GdouSyncScript.shouldFastRedirectWebVpnLoginToCas(
+                url = "https://webvpn.gdou.edu.cn/login",
+                useOffCampus = true,
+                preferLegacyWfw = false,
+                pendingWeComTab = false,
+                hasAutoTriggeredCas = false
+            )
+        )
+        assertFalse(
+            GdouSyncScript.shouldFastRedirectWebVpnLoginToCas(
+                url = "https://webvpn.gdou.edu.cn/login?error=1",
+                useOffCampus = true,
+                preferLegacyWfw = false,
+                pendingWeComTab = false,
+                hasAutoTriggeredCas = false
+            )
+        )
+        assertFalse(
+            GdouSyncScript.shouldFastRedirectWebVpnLoginToCas(
+                url = "https://webvpn.gdou.edu.cn/login",
+                useOffCampus = true,
+                preferLegacyWfw = false,
+                pendingWeComTab = true,
+                hasAutoTriggeredCas = false
+            )
+        )
+        assertFalse(
+            GdouSyncScript.shouldFastRedirectWebVpnLoginToCas(
+                url = "https://webvpn.gdou.edu.cn/login",
+                useOffCampus = true,
+                preferLegacyWfw = false,
+                pendingWeComTab = false,
+                hasAutoTriggeredCas = true
+            )
+        )
+        assertTrue(syncJs.contains("confirmedZeroTotal"))
+        assertTrue(syncJs.contains("document.body.textContent"))
     }
 }
