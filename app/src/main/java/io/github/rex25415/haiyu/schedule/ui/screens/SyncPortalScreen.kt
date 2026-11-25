@@ -195,6 +195,9 @@ fun SyncPortalScreen(
     var pendingSsoAwaitingPageStart by remember { mutableStateOf(false) }
     var ssoRecoveryUsedForRefresh by remember { mutableStateOf(false) }
     var pendingSsoTimeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
+    var pendingQuickProbeActive by remember { mutableStateOf(false) }
+    var pendingQuickProbeNonce by remember { mutableIntStateOf(0) }
+    var pendingQuickProbeTimeoutReason by remember { mutableStateOf("请先在教务页完成登录，即可随时一键刷新课表") }
     var pendingSyncMode by remember { mutableStateOf("all") }
     var termOptionsDialog by remember { mutableStateOf<TermOptionsPayload?>(null) }
     var showQuickNavMenu by remember { mutableStateOf(false) }
@@ -234,6 +237,27 @@ fun SyncPortalScreen(
         pendingSsoTimeoutRunnable = null
         pendingQuickRefreshAfterSso = false
         pendingSsoAwaitingPageStart = false
+        pendingQuickProbeActive = false
+    }
+
+    fun notifyQuickRefreshNeedsLogin(reason: String) {
+        clearPendingSsoRecovery()
+        isSyncing = false
+        isSilentQuickRefresh = false
+        syncStatusText = null
+        activePortalMode = 0
+        onQuickRefreshNeedsLogin(reason)
+    }
+
+    fun isLikelyNetworkFailureMessage(msg: String): Boolean {
+        val m = msg.lowercase()
+        return m.contains("网络") ||
+            m.contains("未连通") ||
+            m.contains("failed to fetch") ||
+            m.contains("load failed") ||
+            m.contains("timeout") ||
+            m.contains("timed out") ||
+            m.contains("abort")
     }
 
     fun evalJwScript(script: String) {
@@ -246,8 +270,10 @@ fun SyncPortalScreen(
         wv: WebView,
         statusText: String,
         timeoutReason: String,
-        forceReloadEntry: Boolean
+        forceReloadEntry: Boolean,
+        targetOffCampus: Boolean = useOffCampus
     ) {
+        pendingQuickProbeActive = false
         ssoRecoveryUsedForRefresh = true
         pendingQuickRefreshAfterSso = true
         isSyncing = true
@@ -255,24 +281,27 @@ fun SyncPortalScreen(
         pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         val timeoutTask = Runnable {
             if (pendingQuickRefreshAfterSso) {
-                clearPendingSsoRecovery()
-                isSyncing = false
-                isSilentQuickRefresh = false
-                syncStatusText = null
-                onQuickRefreshNeedsLogin(timeoutReason)
+                notifyQuickRefreshNeedsLogin(timeoutReason)
             }
         }
         pendingSsoTimeoutRunnable = timeoutTask
         mainHandler.postDelayed(timeoutTask, 18_000L)
-        if (forceReloadEntry) {
+        val channelChanged = targetOffCampus != useOffCampus
+        if (channelChanged) {
+            useOffCampus = targetOffCampus
+            if (targetOffCampus) hasAutoFallbackOffCampus = true
+        }
+        if (forceReloadEntry || channelChanged) {
             cancelPendingTransitions()
+            pageErrorMsg = null
             domConfirmedLoggedIn = false
             isPageSettled = false
             loadProgress = 0
             hasAutoEnteredWfw = false
             hasAutoTriggeredWebVpnCas = false
+            hasAutoSwitchedForMfa = false
             pendingSsoAwaitingPageStart = true
-            val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
+            val entry = if (targetOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
             currentUrl = entry
             trustedUrlRef.set(entry)
             wv.onResume()
@@ -441,6 +470,20 @@ fun SyncPortalScreen(
 
             override fun onError(errorMessage: String) {
                 mainHandler.post {
+                    val wasSilent = isSilentQuickRefresh
+                    val wv = webViewRef
+                    if (wasSilent && !useOffCampus && !ssoRecoveryUsedForRefresh && wv != null && isLikelyNetworkFailureMessage(errorMessage)) {
+                        ssoRecoveryUsedForRefresh = true
+                        isSyncing = true
+                        syncStatusText = "直连受限，正在探测校外通道..."
+                        pendingQuickProbeActive = true
+                        pendingQuickProbeTimeoutReason = "当前校园网直连不可达，请在「校外免校园网」登录后刷新课表"
+                        pendingQuickProbeNonce++
+                        return@post
+                    }
+                    if (!useOffCampus && isLikelyNetworkFailureMessage(errorMessage)) {
+                        probeTrigger++
+                    }
                     clearPendingSsoRecovery()
                     isSyncing = false
                     isInspectingRoom = false
@@ -456,19 +499,24 @@ fun SyncPortalScreen(
             override fun onQuickRefreshNeedsLogin(reason: String) {
                 mainHandler.post {
                     val wv = webViewRef
-                    if (!ssoRecoveryUsedForRefresh && wv != null && pageErrorMsg == null) {
-                        beginQuickRefreshSsoRecovery(
-                            wv = wv,
-                            statusText = "教务会话正在自动续期...",
-                            timeoutReason = reason,
-                            forceReloadEntry = true
-                        )
+                    if (!ssoRecoveryUsedForRefresh && wv != null) {
+                        if (!useOffCampus) {
+                            ssoRecoveryUsedForRefresh = true
+                            isSyncing = true
+                            syncStatusText = "正在探测校内外可用通道..."
+                            pendingQuickProbeActive = true
+                            pendingQuickProbeTimeoutReason = reason
+                            pendingQuickProbeNonce++
+                        } else {
+                            beginQuickRefreshSsoRecovery(
+                                wv = wv,
+                                statusText = "教务会话正在自动续期...",
+                                timeoutReason = reason,
+                                forceReloadEntry = true
+                            )
+                        }
                     } else {
-                        clearPendingSsoRecovery()
-                        isSyncing = false
-                        isSilentQuickRefresh = false
-                        syncStatusText = null
-                        onQuickRefreshNeedsLogin(reason)
+                        notifyQuickRefreshNeedsLogin(reason)
                     }
                 }
             }
@@ -494,8 +542,7 @@ fun SyncPortalScreen(
     fun startQuickRefreshCourses(silent: Boolean, allowSsoRecovery: Boolean = true) {
         val wv = webViewRef
         if (wv == null) {
-            clearPendingSsoRecovery()
-            onQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
+            notifyQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
             return
         }
         if (allowSsoRecovery) {
@@ -517,12 +564,20 @@ fun SyncPortalScreen(
         val loadingActive = loadProgress in 1..99 && pageErrorMsg == null
 
         if (!loggedInNow && allowSsoRecovery && !ssoRecoveryUsedForRefresh && (silent || !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl) || loadingActive)) {
+            if (!useOffCampus) {
+                ssoRecoveryUsedForRefresh = true
+                syncStatusText = "正在探测校内外可用通道..."
+                pendingQuickProbeActive = true
+                pendingQuickProbeTimeoutReason = "请先在教务页完成登录，即可随时一键刷新课表"
+                pendingQuickProbeNonce++
+                return
+            }
             val loadingRedirect = loadingActive && !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl)
             beginQuickRefreshSsoRecovery(
                 wv = wv,
                 statusText = "正在校验教务会话并刷新课表...",
                 timeoutReason = "请先在教务页完成登录，即可随时一键刷新课表",
-                forceReloadEntry = !loadingRedirect && pageErrorMsg == null
+                forceReloadEntry = !loadingRedirect
             )
             return
         }
@@ -548,6 +603,40 @@ fun SyncPortalScreen(
                 termLabel = latestSettings.academicYearLabel
             )
         )
+    }
+
+    // Off-campus fast channel probe for cold-start / walked-off-campus quick refresh so it NEVER stalls 18s on blocked jw.gdou.edu.cn
+    LaunchedEffect(pendingQuickProbeNonce) {
+        if (pendingQuickProbeNonce == 0 || !pendingQuickProbeActive) return@LaunchedEffect
+        val wv = webViewRef
+        if (wv == null) {
+            notifyQuickRefreshNeedsLogin(pendingQuickProbeTimeoutReason)
+            return@LaunchedEffect
+        }
+        val result = NetworkChannelProbe.probe(context)
+        networkProbe = result
+        if (!pendingQuickProbeActive) return@LaunchedEffect
+        pendingQuickProbeActive = false
+        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(useOffCampus, result.state)) {
+            beginQuickRefreshSsoRecovery(
+                wv = wv,
+                statusText = "当前为校外网络，已自动切校外通道校验会话...",
+                timeoutReason = pendingQuickProbeTimeoutReason,
+                forceReloadEntry = true,
+                targetOffCampus = true
+            )
+            onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
+        } else if (result.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
+            notifyQuickRefreshNeedsLogin("当前网络暂未连通学校服务器，请检查网络或切换通道后重试")
+        } else {
+            beginQuickRefreshSsoRecovery(
+                wv = wv,
+                statusText = "正在校验教务会话并刷新课表...",
+                timeoutReason = pendingQuickProbeTimeoutReason,
+                forceReloadEntry = true,
+                targetOffCampus = useOffCampus
+            )
+        }
     }
 
     // Listen to one-tap quick refresh requests from ScheduleScreen (waits cleanly if WebView is still initializing)
@@ -987,7 +1076,13 @@ fun SyncPortalScreen(
                                     .weight(1.18f)
                                     .height(30.dp)
                                     .clip(RoundedCornerShape(9.dp))
-                                    .clickable { if (!useOffCampus) switchChannel(true) }
+                                    .clickable {
+                                        val mismatch = useOffCampus && (
+                                            pageErrorMsg != null ||
+                                                (currentUrl.contains("jw.gdou.edu.cn", ignoreCase = true) && !currentUrl.contains("webvpn", ignoreCase = true))
+                                            )
+                                        if (!useOffCampus || mismatch) switchChannel(true)
+                                    }
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1023,7 +1118,14 @@ fun SyncPortalScreen(
                                     .weight(1f)
                                     .height(30.dp)
                                     .clip(RoundedCornerShape(9.dp))
-                                    .clickable { if (useOffCampus) switchChannel(false) }
+                                    .clickable {
+                                        val mismatch = !useOffCampus && (
+                                            pageErrorMsg != null ||
+                                                currentUrl.contains("webvpn.gdou.edu.cn", ignoreCase = true) ||
+                                                currentUrl.contains("wfw.gdou.edu.cn", ignoreCase = true)
+                                            )
+                                        if (useOffCampus || mismatch) switchChannel(false)
+                                    }
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1663,11 +1765,7 @@ fun SyncPortalScreen(
                                             """.trimIndent()
                                         ) { res ->
                                             if (res != null && res.contains("NEED_LOGIN") && pendingQuickRefreshAfterSso) {
-                                                clearPendingSsoRecovery()
-                                                isSyncing = false
-                                                isSilentQuickRefresh = false
-                                                syncStatusText = null
-                                                onQuickRefreshNeedsLogin("教务登录已失效，请重新登录后即可刷新课表")
+                                                notifyQuickRefreshNeedsLogin("教务登录已失效，请重新登录后即可刷新课表")
                                             }
                                         }
                                     }
@@ -1733,11 +1831,7 @@ fun SyncPortalScreen(
                                     pageErrorMsg = "页面加载失败（${desc.ifBlank { "网络超时或无法连接" }}）"
                                     if (pendingQuickRefreshAfterSso) {
                                         mainHandler.post {
-                                            clearPendingSsoRecovery()
-                                            isSyncing = false
-                                            isSilentQuickRefresh = false
-                                            syncStatusText = null
-                                            onQuickRefreshNeedsLogin("暂无法连接教务页，请检查网络或切换通道后重试")
+                                            notifyQuickRefreshNeedsLogin("暂无法连接教务页，请检查网络或切换通道后重试")
                                         }
                                     }
                                 }

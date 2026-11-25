@@ -395,8 +395,17 @@ object GdouSyncScript {
                     const xqSelect = doc.querySelector("#xqh_id, select[name='xqh_id']");
                     if (xqSelect) {
                         const opts = Array.from(xqSelect.querySelectorAll("option"));
-                        const matched = opts.find(o => o.value && String(o.textContent || "").includes(safeCampus));
-                        const firstValid = opts.find(o => o.value && String(o.value).trim().length > 0);
+                        let matched = null;
+                        let firstValid = null;
+                        for (const o of opts) {
+                            const val = o && o.value ? String(o.value).trim() : "";
+                            if (!val) continue;
+                            if (!firstValid) firstValid = o;
+                            if (safeCampus && String(o.textContent || "").includes(safeCampus)) {
+                                matched = o;
+                                break;
+                            }
+                        }
                         if (matched) xqhId = String(matched.value).trim();
                         else if (!xqhId && firstValid) xqhId = String(firstValid.value).trim();
                     }
@@ -737,7 +746,7 @@ object GdouSyncScript {
             return s === 401 || s === 403 || s === 901;
         }
         function isAuthExpiredHtml(rawText) {
-            return /统一身份认证|cas\/login|请先登录|登录超时|会话超时|会话已过期|用户登录/.test(String(rawText || ""));
+            return /统一身份认证|cas\/login|请先登录|登录超时|会话超时|会话已过期|用户登录|web\s*vpn|wengine-vpn|cas_login|统一认证/i.test(String(rawText || ""));
         }
         function isAuthRedirectUrl(rawUrl) {
             const u = String(rawUrl || "").toLowerCase();
@@ -808,8 +817,7 @@ object GdouSyncScript {
                 candidates.push(webvpnDirect);
                 const p = buildJwUrl(clean);
                 if (!candidates.includes(p)) candidates.push(p);
-                const naked = window.location.origin + clean;
-                if (!candidates.includes(naked)) candidates.push(naked);
+                // NEVER fall back to naked window.location.origin + clean on WebVPN: any naked path 302 -> /login and falsely triggers sawAuthExpired!
             } else {
                 candidates.push(buildJwUrl(clean));
             }
@@ -849,7 +857,7 @@ object GdouSyncScript {
                             break;
                         }
                     } else {
-                        if (trimmed.length > 0 && !trimmed.includes("统一身份认证") && !trimmed.includes("loginFromId")) {
+                        if (trimmed.length > 0 && !isAuthExpiredHtml(txt) && !trimmed.includes("loginFromId")) {
                             return { ok: true, status: resp.status, text: txt, authExpired: false, networkError: false };
                         }
                         if (isAuthExpiredHtml(txt) && !isEvalInterceptHtml(txt)) {
@@ -863,7 +871,7 @@ object GdouSyncScript {
                         const manualResp = await fetchWithTimeout(
                             url,
                             Object.assign({}, init || {}, { redirect: "manual" }),
-                            8000
+                            3500
                         );
                         if (manualResp && (manualResp.type === "opaqueredirect" || (manualResp.status >= 300 && manualResp.status < 400))) {
                             sawAuthExpired = true;
@@ -1279,7 +1287,13 @@ object GdouSyncScript {
             if (val == null) return null;
             if (typeof val !== "object") return normalizeDate(val);
             if (Array.isArray(val)) {
-                const w1 = val.find(x => x && typeof x === "object" && (String(x.zs) === "1" || String(x.zsmc) === "1")) || val[0];
+                let w1 = val[0];
+                for (const x of val) {
+                    if (x && typeof x === "object" && (String(x.zs) === "1" || String(x.zsmc) === "1")) {
+                        w1 = x;
+                        break;
+                    }
+                }
                 const d = findSemesterStartDate(w1);
                 if (d) return d;
                 for (const item of val) {

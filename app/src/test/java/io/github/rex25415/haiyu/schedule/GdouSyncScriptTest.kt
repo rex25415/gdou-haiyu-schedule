@@ -313,4 +313,28 @@ class GdouSyncScriptTest {
             )
         )
     }
+
+    @Test
+    fun webVpnOffCampusGuardsAvoidFalseExpiryAndPrototypeBugs() {
+        val quickJs = GdouSyncScript.buildQuickRefreshCoursesScript("2026", "3", "2026-2027 第一学期")
+        val gradesJs = GdouSyncScript.buildSyncScript("grades", "2026", "3", "2026-2027 第一学期")
+        val roomJs = GdouSyncScript.buildQueryEmptyClassroomsScript("海滨", 13, 3, 5, 6, "")
+
+        // 1. WebVPN fetchJwTextWithFallback must never append naked root paths (which always 302 -> /login)
+        val webvpnBranch = Regex("""else if \(host\.includes\("webvpn\.gdou\.edu\.cn"\)\)\s*\{([^}]*)\}""")
+            .find(gradesJs)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+        assertTrue(webvpnBranch.contains(GdouSyncScript.WEBVPN_JW_HEX))
+        assertFalse(webvpnBranch.contains("const naked"))
+
+        // 2. isAuthExpiredHtml must detect WebVPN login gate HTML & guard non-JSON fetches too
+        assertTrue(quickJs.contains("wengine-vpn"))
+        assertTrue(quickJs.contains("cas_login"))
+        assertTrue(quickJs.contains("!isAuthExpiredHtml(txt) && !trimmed.includes(\"loginFromId\")"))
+
+        // 3. Empty classroom helper must stay free of Array.prototype.find for Zhengfang Prototype.js pages
+        assertFalse(roomJs.contains(".find("))
+    }
 }

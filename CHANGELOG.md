@@ -2,6 +2,14 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.4.3] - 2026-11-25（校外免校园网全链路深修与跨网自动恢复）
+- **根治「校外免校园网（WebVPN）」同步误报与跨网刷课表卡顿**：
+  - 修复 [GdouSyncScript.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouSyncScript.kt) 中 WebVPN 分支回退裸根路径触发 `302 /login` 导致成绩/考试同步误判 `登录态已过期` 的故障；补全 WebVPN 登录页 HTML 拦截识别（`WEB VPN` / `wengine-vpn` / `cas_login` / `统一认证`），同步修复 `expectJson=false` 误放行门户页面，并将网络异常 `redirect: "manual"` 探测超时收敛为 `3.5s`；
+  - 新增课表页后台刷新与网络故障前的快速双通道探测（[SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt) `pendingQuickProbeNonce`），校外或离校断直连后 ≤ 2.8s 自动切换「校外免校园网」，不再在不可达的 `jw.gdou.edu.cn` 上干等 18 秒，且清零残留报错以保证重刷生效；
+- **修复切页/回退体验细节与旧版教务 JS 兼容**：
+  - 从「查空教室」切回课表再触发需要登录时，自动切回 `教务登录与同步` 面板不再卡在空教室子页；历史后退造成当前网址与通道芯片不一致时支持再次点击当前通道纠偏重进；
+  - 消除 `EMPTY_ROOM_CONTEXT_HELPER` 与 `findSemesterStartDate` 中残留的 `Array.prototype.find()` 调用，彻底兼容正方旧版 Prototype.js 注入页面。
+
 ## [v3.4.2] - 2026-11-25（切页竞态与学校节点抖动热修复）
 - **修复「课表切教务 / 点刷新后白屏重刷、误报已过期又自动进入」竞态**：
   - 修复 [SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt) 中已在教务已登录域时因 `!isPageSettled` 仍强行 `stopLoading + loadUrl` 重刷的逻辑，并在确实需要重置入口时先同步重置完成态并等待新导航真实 `onPageStarted -> onPageFinished`，杜绝提前 150ms 向空白帧注入脚本导致 `教务尚未登录或登录态已过期` 的误报；
