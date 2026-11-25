@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.4.1",
-  "versionName": "3.4.1",
-  "title": "海屿空间 v3.4.1",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.4.1.apk",
-  "apkSizeBytes": 2109717,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.1/HaiyuSchedule-GDOU-v3.4.1.apk",
-  "expectedSha256": "db503b76a68416b4387b023bdd61656cea47b38f98adc7f322762ac1e3f10ac1",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.1",
+  "tagName": "v3.4.2",
+  "versionName": "3.4.2",
+  "title": "海屿空间 v3.4.2",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.4.2.apk",
+  "apkSizeBytes": 2114925,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.2/HaiyuSchedule-GDOU-v3.4.2.apk",
+  "expectedSha256": "8373b4ebf970c82b58ed89044d83021f7b1cf4f148372f2dab04b2583a8c107c",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.2",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "🚨 紧急修复更新：由于学校近期调整校外教务网关，v3.4.0 及更早版本在手机流量下会出现「校外输入密码循环登不进」，且直连校园网遇到网络波动或冷启动刷新时易误报「登录态已过期」或转圈卡住。强烈建议全部海大同学立即升级 v3.4.1，覆盖安装自动保留原有课表、成绩、壁纸与调课记录！\n\n- 🔐 紧急切通校外免校园网登录：告别已异常的旧 `wfw` 代理死循环，校外通用通道全面升级为海大官方新版 **WebVPN（`webvpn.gdou.edu.cn`）**，支持手机流量下扫码/统一认证一次直达教务系统\n- 📡 消除误报「登录态已过期」：重构请求容错逻辑，将网络波动（如宿舍到教学楼切换网络）与真实会话过期彻底隔离，断网或抖动只温和提示检查网络，不再误踢用户去重登\n- ⚡ 首页冷启动刷课表与后台续期：在课表页点刷新时自动利用未过期的统一认证进行后台静默续期，严格等待页面稳定再抓取并增加超时兜底看门狗，彻底解决卡在转圈状态的问题\n- 🏫 智能通道记忆与恢复：临时切线不再覆写原本选择的「校园网直连」偏好，重新连回校园网后自动恢复直连通道"
+  "releaseNotes": "🔥 热修复更新（建议全部同学升级）：v3.4.2 重点修复从「课表」点刷新或切换进「教务」时偶发白屏重载、误报「登录态已过期」随后又自动进去的竞态问题，并针对学校教务负载均衡节点抖动与 `HTTP 901` 状态做了专项适配（覆盖安装自动保留全部本地课表、成绩与设置）。\n\n- ⚡ 根治「课表 → 刷新/教务」白屏重刷与过期误判：已处于教务或 WebVPN 教务域下时直接刷新，不再强行整页重载；若确需后台续期，将同步重置完成态并等待新页面真实加载完毕后再执行脚本（续期超时放宽至 18 秒）\n- 🔐 修复 WebVPN 登录门户误报：兼容 `webvpn.gdou.edu.cn/login` 隐藏表单结构，不再抢在统一认证自动跳转前误弹过期提示，并自动复位二次过期后的过门引导状态\n- 🌐 适配 `jw.gdou.edu.cn` 负载均衡故障节点：探测与切线改为区分「TCP 建连超时」与「建连后读超时/断连」，撞上学校单节点故障时携带 `Connection: close` 自动换连接复测，防止校园网下被误判切线\n- 📌 精准识别正方 `HTTP 901`：支持正方系统专用 `901` 会话过期状态码与空白过渡根路径识别"
 }
