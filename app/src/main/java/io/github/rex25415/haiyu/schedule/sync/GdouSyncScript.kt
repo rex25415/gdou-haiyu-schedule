@@ -3,14 +3,19 @@ package io.github.rex25415.haiyu.schedule.sync
 /**
  * 广东海洋大学新版正方教务系统 (v9) 全能同步脚本生成器
  * 适配：
- *  1. 校外通用通道（免校园网 / 免 VPN）: https://wfw.gdou.edu.cn/ -> https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn/
+ *  1. 校外通用通道（免校园网 / 免 VPN，海大官方 WebVPN）: https://webvpn.gdou.edu.cn/login?cas_login=true -> https://webvpn.gdou.edu.cn/https/<encrypted_jw>/
  *  2. 校园网直连通道: https://jw.gdou.edu.cn/
  * 支持同步：个人课表 + 校历开学日期/总周数 + 历史成绩/绩点 + 考试时间与考场安排
  */
 object GdouSyncScript {
 
-    const val URL_OFF_CAMPUS = "https://wfw.gdou.edu.cn/"
+    const val WEBVPN_JW_HEX = "77726476706e69737468656265737421fae00f9b233f7d1e7b0c9ce29b5b"
+    const val WEBVPN_AUTH_HEX = "77726476706e69737468656265737421f1e2559434357a467b1ac7ab9c5a367b4be103167901"
+    const val URL_WEBVPN_CAS_LOGIN = "https://webvpn.gdou.edu.cn/login?cas_login=true"
+    const val URL_WEBVPN_JW_ENTRY = "https://webvpn.gdou.edu.cn/https/$WEBVPN_JW_HEX/"
+    const val URL_WFW_OFF_CAMPUS = "https://wfw.gdou.edu.cn/"
     const val URL_WFW_JW_ENTRY = "https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn/"
+    const val URL_OFF_CAMPUS = URL_WEBVPN_JW_ENTRY
     const val URL_ON_CAMPUS = "https://jw.gdou.edu.cn/"
     const val URL_AUTH_SERVER = "https://authserver.gdou.edu.cn/authserver/login"
 
@@ -206,10 +211,10 @@ object GdouSyncScript {
                     HaiyuBridge.onSyncComplete("课表已刷新：最新 " + courseResult.courses.length + " 条课程（已自动保留手动调课）");
                 } else {
                     const errText = String(courseResult.error || "");
-                    if (errText.includes("过期") || errText.includes("登录") || errText.includes("HTTP 401") || errText.includes("HTTP 403") || errText.includes("HTTP 500")) {
-                        HaiyuBridge.onQuickRefreshNeedsLogin("教务登录态可能已过期，请在教务页重新登录后刷新");
+                    if (courseResult.authExpired === true || courseResult.status === 401) {
+                        HaiyuBridge.onQuickRefreshNeedsLogin("教务登录态已过期，请在教务页重新登录后刷新");
                     } else {
-                        HaiyuBridge.onSyncError(errText || "刷新课表失败");
+                        HaiyuBridge.onSyncError(errText || "刷新课表失败，请稍后重试");
                     }
                 }
             } catch (err) {
@@ -710,8 +715,9 @@ object GdouSyncScript {
             const path = (window.location && window.location.pathname) || "";
             const proxyPrefix = path.match(/^\/(?:https?:\/\/[^/]+|(?:http|https|https-443)\/[^/]+)/i);
             if (proxyPrefix) return proxyPrefix[0];
-            // On wfw.gdou.edu.cn, NEVER fall back to naked "" even when redirected to /xtgl/dl_loginForward.html!
+            // On wfw.gdou.edu.cn or webvpn.gdou.edu.cn, NEVER fall back to naked "" even when redirected to /xtgl/dl_loginForward.html!
             if (host.includes("wfw.gdou.edu.cn")) return "/https://jw.gdou.edu.cn";
+            if (host.includes("webvpn.gdou.edu.cn")) return "/https/$WEBVPN_JW_HEX";
             const anchors = ["/kbcx/", "/cjcx/", "/kwgl/", "/xtgl/", "/xsxk/", "/xspjgl/", "/cdjy/"];
             for (const anchor of anchors) {
                 const idx = path.indexOf(anchor);
@@ -723,15 +729,52 @@ object GdouSyncScript {
             const clean = relativePath.startsWith("/") ? relativePath : ("/" + relativePath);
             return window.location.origin + getJwBasePrefix() + clean;
         }
+        function isEvalInterceptHtml(rawText) {
+            return /未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(String(rawText || ""));
+        }
+        function isAuthExpiredHtml(rawText) {
+            return /统一身份认证|cas\/login|请先登录|登录超时|会话超时|用户登录/.test(String(rawText || ""));
+        }
+        function isAuthRedirectUrl(rawUrl) {
+            const u = String(rawUrl || "").toLowerCase();
+            return u.includes("/authserver/") ||
+                u.includes("/cas/login") ||
+                u.includes("login_slogin") ||
+                u.includes("login_tickit") ||
+                u.includes("jziotlogin") ||
+                /\/login(?:$|[?#])/.test(u);
+        }
+        async function fetchWithTimeout(url, init, timeoutMs) {
+            const reqInit = Object.assign({}, init || {});
+            let timerId = null;
+            if (typeof AbortController !== "undefined" && !reqInit.signal && timeoutMs > 0) {
+                const ctrl = new AbortController();
+                reqInit.signal = ctrl.signal;
+                timerId = setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, timeoutMs);
+            }
+            try {
+                return await fetch(url, reqInit);
+            } finally {
+                if (timerId !== null) clearTimeout(timerId);
+            }
+        }
         async function fetchWithRetry(url, init) {
             let lastResp = null;
-            for (let attempt = 0; attempt < 2; attempt++) {
-                const resp = await fetch(url, init);
-                lastResp = resp;
-                if (resp.status !== 503) return resp;
-                await new Promise(r => setTimeout(r, 400));
+            let lastErr = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    const resp = await fetchWithTimeout(url, init, 12000);
+                    lastResp = resp;
+                    if (resp.status !== 502 && resp.status !== 503 && resp.status !== 504) return resp;
+                } catch (err) {
+                    lastErr = err;
+                }
+                if (attempt < 2) {
+                    await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+                }
             }
-            return lastResp;
+            if (lastResp) return lastResp;
+            throw lastErr || new Error("Network request failed");
         }
         let _wfwSessionWarmed = false;
         async function ensureWfwJwSessionIfNeeded() {
@@ -756,38 +799,92 @@ object GdouSyncScript {
                 if (!candidates.includes(p)) candidates.push(p);
                 const naked = window.location.origin + clean;
                 if (!candidates.includes(naked)) candidates.push(naked);
+            } else if (host.includes("webvpn.gdou.edu.cn")) {
+                const webvpnDirect = window.location.origin + "/https/$WEBVPN_JW_HEX" + clean;
+                candidates.push(webvpnDirect);
+                const p = buildJwUrl(clean);
+                if (!candidates.includes(p)) candidates.push(p);
+                const naked = window.location.origin + clean;
+                if (!candidates.includes(naked)) candidates.push(naked);
             } else {
                 candidates.push(buildJwUrl(clean));
             }
             let lastStatus = 0;
             let lastText = "";
+            let sawAuthExpired = false;
+            let sawNetworkError = false;
             for (const url of candidates) {
                 try {
                     const resp = await fetchWithRetry(url, init);
                     lastStatus = resp.status;
-                    if (!resp.ok) continue;
+                    if (resp.redirected && isAuthRedirectUrl(resp.url)) {
+                        sawAuthExpired = true;
+                        try { lastText = await resp.text(); } catch (_) {}
+                        break;
+                    }
+                    if (!resp.ok) {
+                        try {
+                            const errTxt = await resp.text();
+                            if (errTxt) lastText = errTxt;
+                            if ((resp.status === 401 || resp.status === 403 || isAuthExpiredHtml(errTxt)) && !isEvalInterceptHtml(errTxt)) {
+                                sawAuthExpired = true;
+                            }
+                        } catch (_) {}
+                        if (sawAuthExpired) break;
+                        continue;
+                    }
                     const txt = await resp.text();
                     lastText = txt;
                     const trimmed = txt.trim();
                     if (expectJson) {
                         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                            return { ok: true, status: resp.status, text: txt };
+                            return { ok: true, status: resp.status, text: txt, authExpired: false, networkError: false };
+                        }
+                        if (isAuthExpiredHtml(txt) && !isEvalInterceptHtml(txt)) {
+                            sawAuthExpired = true;
+                            break;
                         }
                     } else {
                         if (trimmed.length > 0 && !trimmed.includes("统一身份认证") && !trimmed.includes("loginFromId")) {
-                            return { ok: true, status: resp.status, text: txt };
+                            return { ok: true, status: resp.status, text: txt, authExpired: false, networkError: false };
+                        }
+                        if (isAuthExpiredHtml(txt) && !isEvalInterceptHtml(txt)) {
+                            sawAuthExpired = true;
+                            break;
                         }
                     }
-                } catch (_) {}
+                } catch (_) {
+                    // Distinguish genuine offline/timeout errors from cleartext/cross-origin 302 auth redirects
+                    try {
+                        const manualResp = await fetchWithTimeout(
+                            url,
+                            Object.assign({}, init || {}, { redirect: "manual" }),
+                            8000
+                        );
+                        if (manualResp && (manualResp.type === "opaqueredirect" || (manualResp.status >= 300 && manualResp.status < 400))) {
+                            sawAuthExpired = true;
+                            break;
+                        }
+                        sawNetworkError = true;
+                    } catch (__) {
+                        sawNetworkError = true;
+                    }
+                }
             }
-            return { ok: false, status: lastStatus, text: lastText };
+            return {
+                ok: false,
+                status: lastStatus,
+                text: lastText,
+                authExpired: sawAuthExpired,
+                networkError: sawNetworkError && !sawAuthExpired
+            };
         }
         function classifyNonJsonHtml(rawText, fallbackMsg) {
             const t = String(rawText || "");
-            if (/未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(t)) {
+            if (isEvalInterceptHtml(t)) {
                 return "需先在上方教务页确认通知或完成评教（也可切「校外免校园网」同步）";
             }
-            if (/统一身份认证|cas\/login|请先登录|登录超时|会话超时|用户登录/.test(t)) {
+            if (isAuthExpiredHtml(t)) {
                 return "登录状态已过期，请刷新教务页重新登录";
             }
             if (/无操作权限|无权限|未开放|非查询时间/.test(t)) {
@@ -799,7 +896,9 @@ object GdouSyncScript {
             const res = await fetchJwTextWithFallback(relativePath, init, false);
             return {
                 ok: res.ok,
-                status: res.status || 500,
+                status: res.status || 0,
+                authExpired: !!res.authExpired,
+                networkError: !!res.networkError,
                 text: async () => res.text,
                 json: async () => JSON.parse(res.text)
             };
@@ -808,7 +907,9 @@ object GdouSyncScript {
             const res = await fetchJwTextWithFallback(relativePath, init, true);
             return {
                 ok: res.ok,
-                status: res.status || 500,
+                status: res.status || 0,
+                authExpired: !!res.authExpired,
+                networkError: !!res.networkError,
                 text: async () => res.text,
                 json: async () => JSON.parse(res.text)
             };
@@ -877,6 +978,8 @@ object GdouSyncScript {
                 const title = String(document.title || "").toLowerCase();
                 if (
                     title.includes("统一身份认证") ||
+                    title.includes("web vpn") ||
+                    title.includes("webvpn") ||
                     title.includes("多因子") ||
                     title.includes("正在跳转") ||
                     title.includes("无法打开") ||
@@ -916,10 +1019,14 @@ object GdouSyncScript {
                 host.startsWith("authserver.") ||
                 href.includes("/authserver/") ||
                 href.includes("/cas/login") ||
+                href.includes("/wengine-vpn/") ||
                 href.includes("reauthcheck") ||
                 href.includes("reauthloginview") ||
                 href.includes("ismultifactor") ||
+                (host.includes("webvpn.gdou.edu.cn") && !href.includes("$WEBVPN_JW_HEX")) ||
                 title.includes("统一身份认证") ||
+                title.includes("web vpn") ||
+                title.includes("webvpn") ||
                 title.includes("多因子") ||
                 title.includes("正在跳转") ||
                 title.includes("登录")
@@ -1265,15 +1372,53 @@ object GdouSyncScript {
             const trimmedRaw = String(rawText || "").trim();
             if (!kbResp.ok) {
                 if (trimmedRaw && !trimmedRaw.startsWith("{") && !trimmedRaw.startsWith("[")) {
-                    return { ok: false, error: classifyNonJsonHtml(rawText, "教务当前未返回课表数据，请确认已完成登录或评教后重试") };
+                    const expiredByHtml = !!kbResp.authExpired || (isAuthExpiredHtml(rawText) && !isEvalInterceptHtml(rawText));
+                    return {
+                        ok: false,
+                        status: kbResp.status || 0,
+                        authExpired: expiredByHtml,
+                        networkError: false,
+                        error: classifyNonJsonHtml(rawText, "教务当前未返回课表数据，请确认已完成登录或评教后重试")
+                    };
                 }
-                return { ok: false, error: "HTTP " + kbResp.status + "，请确认已成功登录教务系统" };
+                if (kbResp.authExpired || kbResp.status === 401 || kbResp.status === 403) {
+                    return {
+                        ok: false,
+                        status: kbResp.status || 0,
+                        authExpired: true,
+                        networkError: false,
+                        error: "教务登录态已失效，请重新验证会话"
+                    };
+                }
+                if (kbResp.networkError || (kbResp.status || 0) === 0) {
+                    return {
+                        ok: false,
+                        status: 0,
+                        authExpired: false,
+                        networkError: true,
+                        error: "网络波动或暂未连通教务，请检查网络后重试"
+                    };
+                }
+                return {
+                    ok: false,
+                    status: kbResp.status,
+                    authExpired: false,
+                    networkError: false,
+                    error: "教务服务暂时异常（HTTP " + kbResp.status + "），请稍后重试"
+                };
             }
             let data;
             try {
                 data = JSON.parse(rawText);
             } catch (e) {
-                return { ok: false, error: classifyNonJsonHtml(rawText, "登录态可能已过期，请刷新教务页面重新登录后再点同步") };
+                const expiredByHtml = !!kbResp.authExpired || (isAuthExpiredHtml(rawText) && !isEvalInterceptHtml(rawText));
+                return {
+                    ok: false,
+                    status: kbResp.status || 0,
+                    authExpired: expiredByHtml,
+                    networkError: false,
+                    error: classifyNonJsonHtml(rawText, "教务返回格式异常，请稍后重试")
+                };
             }
             const kbList = Array.isArray(data && data.kbList) ? data.kbList : [];
             const sjkList = Array.isArray(data && data.sjkList) ? data.sjkList : [];
@@ -1841,6 +1986,17 @@ object GdouSyncScript {
             lower.contains("/sso/")
     }
 
+    /** 判断 URL 是否可能是等待用户输入账号密码或验证码的交互式登录页。 */
+    fun mightBeInteractiveLoginUrl(url: String?): Boolean {
+        val lower = url.orEmpty().lowercase(java.util.Locale.US)
+        if (lower.isBlank()) return false
+        return isMfaUrl(lower) ||
+            lower.contains("/authserver/") ||
+            lower.contains("/cas/login") ||
+            lower.contains("auth_error") ||
+            isUrlOnPortalLoginPath(lower)
+    }
+
     /** 安全提取请求 URL 的小写主机名，供纯 JVM 单元测试与 WebView 错误拦截复用。 */
     fun extractHostLower(url: String?): String {
         val raw = url?.trim().orEmpty()
@@ -1864,7 +2020,7 @@ object GdouSyncScript {
         return if (useOffCampus) {
             host == "jw.gdou.edu.cn"
         } else {
-            host == "wfw.gdou.edu.cn"
+            host == "wfw.gdou.edu.cn" || host == "webvpn.gdou.edu.cn"
         }
     }
 
@@ -1878,15 +2034,18 @@ object GdouSyncScript {
         if (!pageErrorMsg.isNullOrBlank()) return false
         val lower = url.orEmpty().lowercase(java.util.Locale.US)
         val titleLower = pageTitle.orEmpty().lowercase(java.util.Locale.US)
-        val onJwOrWfw = lower.contains("jw.gdou.edu.cn") || lower.contains("wfw.gdou.edu.cn")
-        if (!onJwOrWfw) return false
+        val onJwProxy = lower.contains("jw.gdou.edu.cn") ||
+            lower.contains("wfw.gdou.edu.cn") ||
+            lower.contains(WEBVPN_JW_HEX)
+        if (!onJwProxy) return false
         if (
             isMfaUrl(lower) ||
             lower.contains("auth_error") ||
             lower.contains("authserver.") ||
             lower.contains("/authserver/") ||
             lower.contains("sso.") ||
-            lower.contains("/cas/login")
+            lower.contains("/cas/login") ||
+            lower.contains("/wengine-vpn/")
         ) {
             return false
         }
@@ -1895,6 +2054,8 @@ object GdouSyncScript {
             titleLower.contains("出错") ||
             titleLower.contains("error") ||
             titleLower.contains("统一身份认证") ||
+            titleLower.contains("web vpn") ||
+            titleLower.contains("webvpn") ||
             titleLower.contains("多因子") ||
             titleLower.contains("正在跳转") ||
             titleLower.contains("登录") ||

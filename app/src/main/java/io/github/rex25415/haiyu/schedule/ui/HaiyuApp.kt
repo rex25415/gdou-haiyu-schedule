@@ -339,14 +339,9 @@ fun HaiyuApp(
     }
 
     fun triggerQuickRefreshSchedule() {
-        if (hasOpenedSyncTab && isJwLoggedIn) {
-            showToast("正在后台刷新最新课表与调课变化...")
-            quickRefreshTrigger++
-        } else {
-            hasOpenedSyncTab = true
-            currentTab = 1
-            showToast("请先确认已登录教务，登录后可点「刷课表」或回课表页一键刷新")
-        }
+        hasOpenedSyncTab = true
+        showToast("正在校验教务会话并后台刷新课表...")
+        quickRefreshTrigger++
     }
 
     HaiyuTheme(

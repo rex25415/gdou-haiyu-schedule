@@ -28,7 +28,7 @@ data class NetworkProbeResult(
 /**
  * 轻量级只读网络通道探测：
  * 并发发送轻量级 GET（仅读状态码与 Location 头、不拉正文、不自动重定向）检测
- * jw.gdou.edu.cn（教务入口）、authserver.gdou.edu.cn（统一认证）与 wfw.gdou.edu.cn（校外免校园网）
+ * jw.gdou.edu.cn（教务入口）、authserver.gdou.edu.cn（统一认证）与 webvpn.gdou.edu.cn（校外免校园网 WebVPN）
  * 真实可达性，避开部分教务网关对 HEAD 的 403/断连限制，并过滤未认证校园 Wi-Fi 劫持跳转。
  */
 object NetworkChannelProbe {
@@ -69,6 +69,22 @@ object NetworkChannelProbe {
         state: CampusNetworkState
     ): Boolean {
         return !currentlyOffCampus && state == CampusNetworkState.OFF_CAMPUS_ONLY
+    }
+
+    /**
+     * 当用户原本偏好「校园网直连」且此前仅做过临时降级时，一旦检测到当前已回到校园网且尚未登录，
+     * 应自动恢复「校园网直连」。
+     */
+    fun shouldAutoRestoreOnCampus(
+        userPrefersOffCampus: Boolean,
+        currentlyOffCampus: Boolean,
+        state: CampusNetworkState,
+        isLoggedIntoJw: Boolean
+    ): Boolean {
+        return !userPrefersOffCampus &&
+            currentlyOffCampus &&
+            !isLoggedIntoJw &&
+            state == CampusNetworkState.ON_CAMPUS_DIRECT_READY
     }
 
     private data class ProbeOutcome(

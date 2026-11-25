@@ -163,6 +163,7 @@ class AppUpdateManagerTest {
     fun jsBridgeOriginGuardBlocksSpoofedAndCleartextUrls() {
         assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://jw.gdou.edu.cn/kbcx/xskbcx_cxXskbcxIndex.html"))
         assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn/"))
+        assertTrue(GdouJsBridge.isTrustedGdouOrigin(GdouSyncScript.URL_WEBVPN_JW_ENTRY))
         assertTrue(GdouJsBridge.isTrustedGdouOrigin("https://gdou.edu.cn/"))
 
         assertFalse(GdouJsBridge.isTrustedGdouOrigin("http://jw.gdou.edu.cn/"))
@@ -267,6 +268,7 @@ class AppUpdateManagerTest {
     fun offCampusSyncScriptKeepsWfwProxyPrefixAndPrewarmsExamsAndGrades() {
         val syncJs = GdouSyncScript.buildSyncScript("all", "2026", "3", "2026-2027 第一学期")
         assertTrue(syncJs.contains("if (host.includes(\"wfw.gdou.edu.cn\")) return \"/https://jw.gdou.edu.cn\";"))
+        assertTrue(syncJs.contains("if (host.includes(\"webvpn.gdou.edu.cn\")) return \"/https/${GdouSyncScript.WEBVPN_JW_HEX}\";"))
         assertTrue(syncJs.contains("/kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default"))
         assertTrue(syncJs.contains("/cjcx/cjcx_cxDgXscj.html?gnmkdm=N305005&layout=default"))
         assertTrue(syncJs.contains("/cjcx/cjcx_cxDcListByXs.html?doType=query&gnmkdm=N305005"))
@@ -275,6 +277,7 @@ class AppUpdateManagerTest {
 
         val navJs = GdouSyncScript.buildQuickNavigateScript("kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default")
         assertTrue(navJs.contains("if (host.includes(\"wfw.gdou.edu.cn\")) return \"/https://jw.gdou.edu.cn\";"))
+        assertTrue(navJs.contains("if (host.includes(\"webvpn.gdou.edu.cn\")) return \"/https/${GdouSyncScript.WEBVPN_JW_HEX}\";"))
     }
 
     @Test

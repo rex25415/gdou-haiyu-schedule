@@ -161,9 +161,11 @@ fun SyncPortalScreen(
     var loadProgress by remember { mutableIntStateOf(0) }
     var pageErrorMsg by remember { mutableStateOf<String?>(null) }
     var domConfirmedLoggedIn by remember { mutableStateOf(false) }
+    var isPageSettled by remember { mutableStateOf(false) }
 
     // Calm state guards to completely prevent jumping / redirect thrashing
     var hasAutoEnteredWfw by remember { mutableStateOf(false) }
+    var hasAutoTriggeredWebVpnCas by remember { mutableStateOf(false) }
     var hasAutoSwitchedForMfa by remember { mutableStateOf(false) }
     var hasAutoRecoveredRedirectLoop by remember { mutableStateOf(false) }
     var hasAutoFallbackOffCampus by remember { mutableStateOf(false) }
@@ -188,6 +190,10 @@ fun SyncPortalScreen(
     var isSyncing by remember { mutableStateOf(false) }
     var isSilentQuickRefresh by remember { mutableStateOf(false) }
     var syncStatusText by remember { mutableStateOf<String?>(null) }
+    var handledQuickRefreshTrigger by remember { mutableIntStateOf(0) }
+    var pendingQuickRefreshAfterSso by remember { mutableStateOf(false) }
+    var ssoRecoveryUsedForRefresh by remember { mutableStateOf(false) }
+    var pendingSsoTimeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
     var pendingSyncMode by remember { mutableStateOf("all") }
     var termOptionsDialog by remember { mutableStateOf<TermOptionsPayload?>(null) }
     var showQuickNavMenu by remember { mutableStateOf(false) }
@@ -222,6 +228,18 @@ fun SyncPortalScreen(
         pendingDomProbeRunnable = null
     }
 
+    fun clearPendingSsoRecovery() {
+        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSsoTimeoutRunnable = null
+        pendingQuickRefreshAfterSso = false
+    }
+
+    fun evalJwScript(script: String) {
+        val wv = webViewRef ?: return
+        wv.onResume()
+        wv.evaluateJavascript(script, null)
+    }
+
     fun isMfaUrl(url: String?): Boolean = GdouSyncScript.isMfaUrl(url)
 
     val isLoggedIntoJw = remember(currentUrl, pageTitle, pageErrorMsg, domConfirmedLoggedIn) {
@@ -233,12 +251,35 @@ fun SyncPortalScreen(
         )
     }
 
-    val isSittingOnWfwRoot = remember(currentUrl, isLoggedIntoJw) {
-        if (!isLoggedIntoJw) return@remember false
+    val isSittingOnWfwRoot = remember(currentUrl, pageTitle, pageErrorMsg, isLoggedIntoJw) {
+        if (!pageErrorMsg.isNullOrBlank()) return@remember false
         val uri = try { Uri.parse(currentUrl) } catch (_: Exception) { null }
         val host = uri?.host.orEmpty().lowercase()
         val path = uri?.path.orEmpty()
-        host == "wfw.gdou.edu.cn" && (path.isEmpty() || path == "/" || path == "/index.html")
+        val query = uri?.query.orEmpty()
+        val lowerUrl = currentUrl.lowercase()
+        val title = pageTitle
+        if (
+            query.contains("ticket=") ||
+            query.contains("cas_login=") ||
+            lowerUrl.contains("/authserver/") ||
+            isMfaUrl(lowerUrl) ||
+            title.contains("统一身份认证") ||
+            title.contains("多因子") ||
+            title.contains("跳转") ||
+            title.contains("登录")
+        ) {
+            return@remember false
+        }
+        val onWfwRoot = isLoggedIntoJw &&
+            host == "wfw.gdou.edu.cn" &&
+            (path.isEmpty() || path == "/" || path == "/index.html")
+        val onWebVpnRoot = host == "webvpn.gdou.edu.cn" &&
+            !lowerUrl.contains(GdouSyncScript.WEBVPN_JW_HEX) &&
+            !lowerUrl.contains("/wengine-vpn/") &&
+            path.trimEnd('/') != "/login" &&
+            (path.isEmpty() || path == "/" || path == "/index.html" || path.startsWith("/portal"))
+        onWfwRoot || onWebVpnRoot
     }
 
     LaunchedEffect(isLoggedIntoJw) {
@@ -332,6 +373,7 @@ fun SyncPortalScreen(
 
             override fun onComplete(summary: String) {
                 mainHandler.post {
+                    clearPendingSsoRecovery()
                     val wasSilent = isSilentQuickRefresh || !latestVisible
                     isSyncing = false
                     isSilentQuickRefresh = false
@@ -348,6 +390,7 @@ fun SyncPortalScreen(
 
             override fun onError(errorMessage: String) {
                 mainHandler.post {
+                    clearPendingSsoRecovery()
                     isSyncing = false
                     isInspectingRoom = false
                     isSilentQuickRefresh = false
@@ -361,68 +404,162 @@ fun SyncPortalScreen(
 
             override fun onQuickRefreshNeedsLogin(reason: String) {
                 mainHandler.post {
-                    isSyncing = false
-                    isSilentQuickRefresh = false
-                    syncStatusText = null
-                    onQuickRefreshNeedsLogin(reason)
+                    val wv = webViewRef
+                    if (!ssoRecoveryUsedForRefresh && wv != null && pageErrorMsg == null) {
+                        ssoRecoveryUsedForRefresh = true
+                        pendingQuickRefreshAfterSso = true
+                        isSyncing = true
+                        syncStatusText = "教务会话正在自动续期..."
+                        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+                        val timeoutTask = Runnable {
+                            if (pendingQuickRefreshAfterSso) {
+                                clearPendingSsoRecovery()
+                                isSyncing = false
+                                isSilentQuickRefresh = false
+                                syncStatusText = null
+                                onQuickRefreshNeedsLogin(reason)
+                            }
+                        }
+                        pendingSsoTimeoutRunnable = timeoutTask
+                        mainHandler.postDelayed(timeoutTask, 9000L)
+                        hasAutoEnteredWfw = false
+                        hasAutoTriggeredWebVpnCas = false
+                        wv.onResume()
+                        val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
+                        wv.stopLoading()
+                        wv.loadUrl(entry)
+                    } else {
+                        clearPendingSsoRecovery()
+                        isSyncing = false
+                        isSilentQuickRefresh = false
+                        syncStatusText = null
+                        onQuickRefreshNeedsLogin(reason)
+                    }
                 }
             }
         }
     }
 
     fun startSyncFlow(mode: String) {
-        val wv = webViewRef ?: return
+        if (webViewRef == null) return
+        clearPendingSsoRecovery()
         isSilentQuickRefresh = false
         pendingSyncMode = mode
         if (mode == "grades") {
             isSyncing = true
             syncStatusText = "正在拉取全部历史成绩与绩点..."
-            wv.evaluateJavascript(
-                GdouSyncScript.buildSyncScript("grades", "", "", ""),
-                null
-            )
+            evalJwScript(GdouSyncScript.buildSyncScript("grades", "", "", ""))
             return
         }
         isSyncing = true
         syncStatusText = "正在读取教务学年学期..."
-        wv.evaluateJavascript(GdouSyncScript.buildFetchTermOptionsScript(), null)
+        evalJwScript(GdouSyncScript.buildFetchTermOptionsScript())
     }
 
-    fun startQuickRefreshCourses(silent: Boolean) {
+    fun startQuickRefreshCourses(silent: Boolean, allowSsoRecovery: Boolean = true) {
         val wv = webViewRef
         if (wv == null) {
+            clearPendingSsoRecovery()
             onQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
             return
         }
+        if (allowSsoRecovery) {
+            ssoRecoveryUsedForRefresh = false
+            clearPendingSsoRecovery()
+        }
         isSilentQuickRefresh = silent
         isSyncing = true
-        syncStatusText = "正在刷新最新课表与调课变化..."
-        wv.evaluateJavascript(
+        syncStatusText = "正在校验教务会话并刷新课表..."
+        wv.onResume()
+
+        if ((!isLoggedIntoJw || !isPageSettled) && allowSsoRecovery && !ssoRecoveryUsedForRefresh && (silent || !GdouSyncScript.mightBeInteractiveLoginUrl(currentUrl) || loadProgress in 1..99)) {
+            ssoRecoveryUsedForRefresh = true
+            pendingQuickRefreshAfterSso = true
+            pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            val timeoutTask = Runnable {
+                if (pendingQuickRefreshAfterSso) {
+                    clearPendingSsoRecovery()
+                    isSyncing = false
+                    isSilentQuickRefresh = false
+                    syncStatusText = null
+                    onQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
+                }
+            }
+            pendingSsoTimeoutRunnable = timeoutTask
+            mainHandler.postDelayed(timeoutTask, 9000L)
+            val loadingRedirect = loadProgress in 1..99 && !GdouSyncScript.mightBeInteractiveLoginUrl(currentUrl)
+            if (!loadingRedirect && pageErrorMsg == null) {
+                hasAutoEnteredWfw = false
+                hasAutoTriggeredWebVpnCas = false
+                val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
+                wv.stopLoading()
+                wv.loadUrl(entry)
+            }
+            return
+        }
+
+        evalJwScript(
             GdouSyncScript.buildQuickRefreshCoursesScript(
                 academicYear = latestSettings.lastSyncYearCode,
                 semesterCode = latestSettings.lastSyncSemesterCode,
                 termLabel = latestSettings.academicYearLabel
-            ),
-            null
+            )
         )
     }
 
-    // Listen to one-tap quick refresh requests from ScheduleScreen
-    LaunchedEffect(quickRefreshTrigger) {
-        if (quickRefreshTrigger > 0) {
-            startQuickRefreshCourses(silent = !latestVisible)
+    // Listen to one-tap quick refresh requests from ScheduleScreen (waits cleanly if WebView is still initializing)
+    LaunchedEffect(quickRefreshTrigger, webViewRef) {
+        if (quickRefreshTrigger > handledQuickRefreshTrigger && webViewRef != null) {
+            handledQuickRefreshTrigger = quickRefreshTrigger
+            startQuickRefreshCourses(silent = !latestVisible, allowSsoRecovery = true)
         }
     }
 
-    fun switchChannel(offCampus: Boolean) {
+    // Continue deferred quick-refresh only AFTER page has actually settled (never inject into an unloading frame!)
+    LaunchedEffect(isLoggedIntoJw, isPageSettled, pendingQuickRefreshAfterSso) {
+        if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso) {
+            delay(150L)
+            if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso) {
+                clearPendingSsoRecovery()
+                startQuickRefreshCourses(
+                    silent = isSilentQuickRefresh || !latestVisible,
+                    allowSsoRecovery = false
+                )
+            }
+        }
+    }
+
+    // Safety watchdog so a disrupted JS fetch/navigation can NEVER leave the UI spinner locked forever
+    LaunchedEffect(isSyncing, pendingQuickRefreshAfterSso) {
+        if (isSyncing && !pendingQuickRefreshAfterSso) {
+            delay(35_000L)
+            if (isSyncing && !pendingQuickRefreshAfterSso) {
+                isSyncing = false
+                isInspectingRoom = false
+                isSilentQuickRefresh = false
+                syncStatusText = null
+                onShowMessage("教务同步请求超时，请检查网络或刷新教务页后重试")
+            }
+        }
+    }
+
+    fun switchChannel(offCampus: Boolean, persistChoice: Boolean = true) {
         cancelPendingTransitions()
+        if (persistChoice) {
+            clearPendingSsoRecovery()
+            ssoRecoveryUsedForRefresh = false
+        }
         useOffCampus = offCampus
         domConfirmedLoggedIn = false
+        isPageSettled = false
         hasAutoEnteredWfw = false
+        hasAutoTriggeredWebVpnCas = false
         hasAutoSwitchedForMfa = false
         hasAutoRecoveredRedirectLoop = false
         pageErrorMsg = null
-        onUpdateChannelPrefs(offCampus, desktopMode)
+        if (persistChoice) {
+            onUpdateChannelPrefs(offCampus, desktopMode)
+        }
         val url = if (offCampus) GdouSyncScript.URL_OFF_CAMPUS else GdouSyncScript.URL_ON_CAMPUS
         currentUrl = url
         trustedUrlRef.set(url)
@@ -430,7 +567,7 @@ fun SyncPortalScreen(
         webViewRef?.loadUrl(url)
     }
 
-    // Smart On-Campus / Off-Campus probe when Sync tab is visible (lightweight single HEAD)
+    // Smart On-Campus / Off-Campus probe when Sync tab is visible (temporary fallback never clobbers saved preference)
     LaunchedEffect(isVisible, probeTrigger) {
         if (!isVisible) return@LaunchedEffect
         val result = NetworkChannelProbe.probe(context)
@@ -440,8 +577,18 @@ fun SyncPortalScreen(
             !isLoggedIntoJw
         ) {
             hasAutoFallbackOffCampus = true
-            switchChannel(true)
+            switchChannel(offCampus = true, persistChoice = false)
             onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
+        } else if (NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                userPrefersOffCampus = latestSettings.preferOffCampusChannel,
+                currentlyOffCampus = useOffCampus,
+                state = result.state,
+                isLoggedIntoJw = isLoggedIntoJw
+            )
+        ) {
+            hasAutoFallbackOffCampus = false
+            switchChannel(offCampus = false, persistChoice = false)
+            onShowMessage("已连回校园网，已自动恢复「校园网直连」")
         }
     }
 
@@ -475,9 +622,15 @@ fun SyncPortalScreen(
         onShowMessage(if (next) "已切换电脑排版" else "已切换手机排版（登录页推荐）")
     }
 
-    LaunchedEffect(isVisible, webViewRef) {
+    val shouldKeepWebViewActive = (isVisible && activePortalMode == 0) ||
+        activePortalMode == 1 ||
+        isSyncing ||
+        isInspectingRoom ||
+        pendingQuickRefreshAfterSso
+
+    LaunchedEffect(shouldKeepWebViewActive, webViewRef) {
         val wv = webViewRef ?: return@LaunchedEffect
-        if (isVisible) {
+        if (shouldKeepWebViewActive) {
             wv.onResume()
         } else {
             wv.onPause()
@@ -487,6 +640,7 @@ fun SyncPortalScreen(
     DisposableEffect(Unit) {
         onDispose {
             cancelPendingTransitions()
+            clearPendingSsoRecovery()
             CookieManager.getInstance().flush()
         }
     }
@@ -638,15 +792,12 @@ fun SyncPortalScreen(
                                     onClick = {
                                         showQuickNavMenu = false
                                         if (path == "__WFW_JW__") {
-                                            val entry = if (useOffCampus) GdouSyncScript.URL_WFW_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
+                                            val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
                                             webViewRef?.loadUrl(entry)
                                         } else if (!isLoggedIntoJw) {
                                             onShowMessage("请先完成广海教务登录，再打开「$label」")
                                         } else {
-                                            webViewRef?.evaluateJavascript(
-                                                GdouSyncScript.buildQuickNavigateScript(path),
-                                                null
-                                            )
+                                            evalJwScript(GdouSyncScript.buildQuickNavigateScript(path))
                                         }
                                     }
                                 )
@@ -666,10 +817,7 @@ fun SyncPortalScreen(
                                         if (!isLoggedIntoJw) {
                                             onShowMessage("请先完成广海教务登录，再打开「$label」")
                                         } else {
-                                            webViewRef?.evaluateJavascript(
-                                                GdouSyncScript.buildDynamicMenuNavigateScript(kws, label),
-                                                null
-                                            )
+                                            evalJwScript(GdouSyncScript.buildDynamicMenuNavigateScript(kws, label))
                                         }
                                     }
                                 )
@@ -700,7 +848,7 @@ fun SyncPortalScreen(
                                             "网络探测：" + when (networkProbe.state) {
                                                 CampusNetworkState.PROBING -> "探测中"
                                                 CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "校园网直连可用（教务 ${networkProbe.jwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
-                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外或直连受限（wfw ${networkProbe.wfwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
+                                                CampusNetworkState.OFF_CAMPUS_ONLY -> "校外或直连受限（校外通道 ${networkProbe.wfwLatencyMs ?: "-"}ms · 认证 ${networkProbe.authLatencyMs ?: "-"}ms）"
                                                 CampusNetworkState.OFFLINE_OR_BLOCKED -> "网络未连通或校园网未认证"
                                             }
                                         )
@@ -729,6 +877,7 @@ fun SyncPortalScreen(
                                     cancelPendingTransitions()
                                     hasAutoSwitchedForMfa = false
                                     hasAutoEnteredWfw = false
+                                    hasAutoTriggeredWebVpnCas = false
                                     CookieManager.getInstance().removeAllCookies {
                                         CookieManager.getInstance().flush()
                                         mainHandler.post {
@@ -1030,7 +1179,12 @@ fun SyncPortalScreen(
                     .clickable {
                         cancelPendingTransitions()
                         hasAutoEnteredWfw = true
-                        webViewRef?.loadUrl(GdouSyncScript.URL_WFW_JW_ENTRY)
+                        val targetEntry = if (currentUrl.contains("wfw.gdou.edu.cn", ignoreCase = true)) {
+                            GdouSyncScript.URL_WFW_JW_ENTRY
+                        } else {
+                            GdouSyncScript.URL_WEBVPN_JW_ENTRY
+                        }
+                        webViewRef?.loadUrl(targetEntry)
                     }
             ) {
                 Row(
@@ -1120,12 +1274,10 @@ fun SyncPortalScreen(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
-                    view.visibility = if (isVisible && activePortalMode == 0) View.VISIBLE else View.GONE
-                    // Pause background WebView JS/rendering timers when hidden (saves battery & RAM!)
-                    if ((isVisible && activePortalMode == 0) || isSyncing) {
-                        view.onResume()
-                    } else {
-                        view.onPause()
+                    view.visibility = when {
+                        isVisible && activePortalMode == 0 -> View.VISIBLE
+                        shouldKeepWebViewActive -> View.INVISIBLE
+                        else -> View.GONE
                     }
                 },
                 factory = { ctx ->
@@ -1208,6 +1360,7 @@ fun SyncPortalScreen(
                             ): Boolean {
                                 val u = request?.url?.toString() ?: return false
                                 if (u.startsWith("https://", ignoreCase = true)) return false
+                                if (request?.isForMainFrame == false) return true
                                 // Transparently upgrade GDOU internal http:// redirects (e.g. jziotlogin -> http://authserver) to HTTPS!
                                 val upgraded = GdouJsBridge.upgradeGdouHttpToHttps(u)
                                 if (upgraded != null) {
@@ -1246,6 +1399,7 @@ fun SyncPortalScreen(
                                 // eliminating race conditions and unexpected jumping!
                                 cancelPendingTransitions()
                                 domConfirmedLoggedIn = false
+                                isPageSettled = false
                                 if (!url.isNullOrBlank()) {
                                     currentUrl = url
                                     trustedUrlRef.set(url)
@@ -1258,6 +1412,7 @@ fun SyncPortalScreen(
                                     currentUrl = url
                                     trustedUrlRef.set(url)
                                 }
+                                isPageSettled = true
                                 CookieManager.getInstance().flush()
                                 val wv = view ?: return
                                 val finishedUrl = url.orEmpty()
@@ -1309,15 +1464,85 @@ fun SyncPortalScreen(
                                     }
                                 }
 
-                                // 2. Debounced, verified one-shot entry from WFW root into JW portal
-                                // Waits 1100ms so any server-side JS redirect to CAS/MFA finishes first without fighting!
-                                if (useOffCampus && !hasAutoEnteredWfw && finishedUrl.isNotBlank()) {
+                                // 2. Debounced, verified one-shot entry from official WebVPN (/login -> CAS -> portal root -> JW) & legacy WFW root
+                                if (useOffCampus && finishedUrl.isNotBlank()) {
                                     val uri = try { Uri.parse(finishedUrl) } catch (_: Exception) { null }
                                     val host = uri?.host.orEmpty().lowercase()
                                     val path = uri?.path.orEmpty()
+                                    val trimmedPath = path.trimEnd('/')
                                     val query = uri?.query.orEmpty()
+                                    val lowerFinished = finishedUrl.lowercase()
                                     val title = wv.title.orEmpty()
-                                    val isStrictWfwRoot = host == "wfw.gdou.edu.cn" &&
+
+                                    // A) WebVPN /login gate -> auto-trigger CAS SSO once (preserves error display if CAS returned an error)
+                                    val isWebVpnLoginGate = host == "webvpn.gdou.edu.cn" &&
+                                        trimmedPath == "/login" &&
+                                        !query.contains("cas_login=true") &&
+                                        !query.contains("ticket=") &&
+                                        !hasAutoTriggeredWebVpnCas
+                                    if (isWebVpnLoginGate) {
+                                        val casTask = Runnable {
+                                            wv.evaluateJavascript(
+                                                """
+                                                (function(){
+                                                    var h = (location.hostname || '').toLowerCase();
+                                                    var p = (location.pathname || '').replace(/\/+$/, '');
+                                                    var errEl = document.getElementById('error-message');
+                                                    var hasErr = errEl && getComputedStyle(errEl).display !== 'none' && (errEl.innerText || '').trim().length > 0;
+                                                    var hasCas = !!document.querySelector('a#cas-login, a[href*="cas_login=true"]');
+                                                    return (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCas && !hasErr) ? 'GO_CAS' : 'SKIP';
+                                                })();
+                                                """.trimIndent()
+                                            ) { res ->
+                                                if (res != null && res.contains("GO_CAS") && !hasAutoTriggeredWebVpnCas) {
+                                                    hasAutoTriggeredWebVpnCas = true
+                                                    wv.loadUrl(GdouSyncScript.URL_WEBVPN_CAS_LOGIN)
+                                                }
+                                            }
+                                        }
+                                        pendingWfwEnterRunnable = casTask
+                                        mainHandler.postDelayed(casTask, 120L)
+                                    }
+
+                                    // B) Authenticated WebVPN portal root -> jump directly into proxied JW portal (single SSO!)
+                                    val isWebVpnPortalRoot = !hasAutoEnteredWfw &&
+                                        host == "webvpn.gdou.edu.cn" &&
+                                        trimmedPath != "/login" &&
+                                        !lowerFinished.contains(GdouSyncScript.WEBVPN_JW_HEX) &&
+                                        !lowerFinished.contains("/authserver/") &&
+                                        !lowerFinished.contains("/wengine-vpn/") &&
+                                        (path.isEmpty() || path == "/" || path == "/index.html" || path.startsWith("/portal") || path.startsWith("/en")) &&
+                                        !query.contains("ticket=") &&
+                                        !query.contains("cas_login=") &&
+                                        !title.contains("跳转") &&
+                                        !title.contains("统一身份认证") &&
+                                        !title.contains("多因子")
+                                    if (isWebVpnPortalRoot) {
+                                        val enterWebVpnTask = Runnable {
+                                            wv.evaluateJavascript(
+                                                """
+                                                (function(){
+                                                    var h = (location.hostname || '').toLowerCase();
+                                                    var p = (location.pathname || '');
+                                                    var txt = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 400) : '';
+                                                    var looksAuth = txt.includes('统一身份认证') || txt.includes('多因子') || !!document.querySelector('a#cas-login, input[type=password]');
+                                                    return (h === 'webvpn.gdou.edu.cn' && p !== '/login' && !looksAuth) ? 'READY' : 'WAIT';
+                                                })();
+                                                """.trimIndent()
+                                            ) { res ->
+                                                if (res != null && res.contains("READY") && !hasAutoEnteredWfw) {
+                                                    hasAutoEnteredWfw = true
+                                                    wv.loadUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
+                                                }
+                                            }
+                                        }
+                                        pendingWfwEnterRunnable = enterWebVpnTask
+                                        mainHandler.postDelayed(enterWebVpnTask, 200L)
+                                    }
+
+                                    // C) Legacy WFW root fallback if user opened wfw.gdou.edu.cn manually
+                                    val isStrictWfwRoot = !hasAutoEnteredWfw &&
+                                        host == "wfw.gdou.edu.cn" &&
                                         (path.isEmpty() || path == "/" || path == "/index.html") &&
                                         !query.contains("ticket=") &&
                                         !title.contains("跳转") &&
@@ -1346,6 +1571,42 @@ fun SyncPortalScreen(
                                         }
                                         pendingWfwEnterRunnable = enterTask
                                         mainHandler.postDelayed(enterTask, 300L)
+                                    }
+                                }
+
+                                // 3. During background quick-refresh SSO validation: if landed cleanly on an interactive login screen, stop recovery and bring user to Tab 1
+                                if (pendingQuickRefreshAfterSso) {
+                                    val stillResolved = GdouSyncScript.resolveJwLoginState(
+                                        url = finishedUrl,
+                                        pageTitle = wv.title ?: pageTitle,
+                                        pageErrorMsg = pageErrorMsg,
+                                        domConfirmedLoggedIn = domConfirmedLoggedIn
+                                    )
+                                    if (!stillResolved && GdouSyncScript.mightBeInteractiveLoginUrl(finishedUrl)) {
+                                        wv.evaluateJavascript(
+                                            """
+                                            (function(){
+                                                var errEl = document.getElementById('error-message');
+                                                var hasVpnErr = !!(errEl && getComputedStyle(errEl).display !== 'none' && (errEl.innerText || '').trim().length > 0);
+                                                var hasLoginForm = !!document.querySelector('input[type="password"], #captchaImg, #dynamicCode, #sliderCaptchaDiv');
+                                                var hasCasAutoLink = !!document.querySelector('a#cas-login, a[href*="cas_login=true"]');
+                                                var h = (location.hostname || '').toLowerCase();
+                                                var p = (location.pathname || '').replace(/\/+$/, '');
+                                                if (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCasAutoLink && !hasVpnErr && !hasLoginForm) {
+                                                    return 'AUTO_ADVANCE';
+                                                }
+                                                return (hasLoginForm || hasVpnErr) ? 'NEED_LOGIN' : 'WAIT';
+                                            })();
+                                            """.trimIndent()
+                                        ) { res ->
+                                            if (res != null && res.contains("NEED_LOGIN") && pendingQuickRefreshAfterSso) {
+                                                clearPendingSsoRecovery()
+                                                isSyncing = false
+                                                isSilentQuickRefresh = false
+                                                syncStatusText = null
+                                                onQuickRefreshNeedsLogin("教务登录已失效，请重新登录后即可刷新课表")
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1377,6 +1638,7 @@ fun SyncPortalScreen(
                                     if (isRedirectLoop && !hasAutoRecoveredRedirectLoop) {
                                         hasAutoRecoveredRedirectLoop = true
                                         hasAutoEnteredWfw = false
+                                        hasAutoTriggeredWebVpnCas = false
                                         hasAutoSwitchedForMfa = false
                                         CookieManager.getInstance().removeAllCookies {
                                             CookieManager.getInstance().flush()
@@ -1400,12 +1662,21 @@ fun SyncPortalScreen(
                                     if (isUnreachableOnCampus) {
                                         hasAutoFallbackOffCampus = true
                                         mainHandler.post {
-                                            switchChannel(true)
+                                            switchChannel(offCampus = true, persistChoice = false)
                                             onShowMessage("校园网直连暂不可达，已自动切至「校外通用(免校园网)」")
                                         }
                                         return
                                     }
                                     pageErrorMsg = "页面加载失败（${desc.ifBlank { "网络超时或无法连接" }}）"
+                                    if (pendingQuickRefreshAfterSso) {
+                                        mainHandler.post {
+                                            clearPendingSsoRecovery()
+                                            isSyncing = false
+                                            isSilentQuickRefresh = false
+                                            syncStatusText = null
+                                            onQuickRefreshNeedsLogin("暂无法连接教务页，请检查网络或切换通道后重试")
+                                        }
+                                    }
                                 }
                             }
 
@@ -1467,6 +1738,7 @@ fun SyncPortalScreen(
                                     onClick = {
                                         cancelPendingTransitions()
                                         hasAutoEnteredWfw = false
+                                        hasAutoTriggeredWebVpnCas = false
                                         hasAutoSwitchedForMfa = false
                                         hasAutoRecoveredRedirectLoop = false
                                         CookieManager.getInstance().removeAllCookies {
@@ -1533,7 +1805,7 @@ fun SyncPortalScreen(
                     onExecuteQuery = { campusKeyword, weekNumber, dayOfWeek, startSection, endSection, buildingKeyword ->
                         isSyncing = true
                         syncStatusText = "正在查询「${campusKeyword}校区」空闲教室..."
-                        webViewRef?.evaluateJavascript(
+                        evalJwScript(
                             GdouSyncScript.buildQueryEmptyClassroomsScript(
                                 campusKeyword = campusKeyword,
                                 weekNumber = weekNumber,
@@ -1543,8 +1815,7 @@ fun SyncPortalScreen(
                                 buildingKeyword = buildingKeyword,
                                 fallbackAcademicYear = settings.lastSyncYearCode,
                                 fallbackSemesterCode = settings.lastSyncSemesterCode
-                            ),
-                            null
+                            )
                         )
                     },
                     onInspectRoomDay = { campus, weekNumber, dayOfWeek, buildingName, roomName, seats, roomType ->
@@ -1560,7 +1831,7 @@ fun SyncPortalScreen(
                             roomType = roomType,
                             slots = emptyList()
                         )
-                        webViewRef?.evaluateJavascript(
+                        evalJwScript(
                             GdouSyncScript.buildInspectRoomDayScheduleScript(
                                 campusKeyword = campus.label.removeSuffix("校区"),
                                 weekNumber = weekNumber,
@@ -1569,8 +1840,7 @@ fun SyncPortalScreen(
                                 roomName = roomName,
                                 fallbackAcademicYear = settings.lastSyncYearCode,
                                 fallbackSemesterCode = settings.lastSyncSemesterCode
-                            ),
-                            null
+                            )
                         )
                     },
                     onDismissInspectedRoom = {
@@ -1584,9 +1854,8 @@ fun SyncPortalScreen(
                         if (!isLoggedIntoJw) {
                             onShowMessage("请先登录教务系统")
                         } else {
-                            webViewRef?.evaluateJavascript(
-                                GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default"),
-                                null
+                            evalJwScript(
+                                GdouSyncScript.buildQuickNavigateScript("cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155&layout=default")
                             )
                         }
                     },
@@ -1833,14 +2102,13 @@ fun SyncPortalScreen(
                             val label = "${yOpt.text} ${sOpt.text}"
                             isSyncing = true
                             syncStatusText = "正在抓取 $label 数据..."
-                            webViewRef?.evaluateJavascript(
+                            evalJwScript(
                                 GdouSyncScript.buildSyncScript(
                                     mode = pendingSyncMode,
                                     academicYear = yOpt.value,
                                     semesterCode = sOpt.value,
                                     termLabel = label
-                                ),
-                                null
+                                )
                             )
                         }
                     }

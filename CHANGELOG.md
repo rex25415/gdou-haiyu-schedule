@@ -2,6 +2,14 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.4.1] - 2026-11-25（🚨 紧急热修复）
+- **紧急修复校外无法登录教务问题（切至海大官方新版 WebVPN）**：
+  - 针对近期学校旧校外入口 `wfw.gdou.edu.cn` 在移动端流量下统一认证参数与会话校验异常导致反复弹回密码页无法进入的紧急故障，全面将校外通用通道升级为官方新版 **WebVPN（`webvpn.gdou.edu.cn`）**，支持 `/login → CAS 认证 → 教务` 全链路自动直达与 `/https/<hex>` 路径解析，校外流量即可顺畅登录与同步；
+- **修复直连校园网 / 切换网络误报「登录态已过期」与冷启动刷新卡死**：
+  - 在 [GdouSyncScript.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouSyncScript.kt) 中重构请求容错与过期判定：去除把断连 `status = 0` 转为假 `HTTP 500` 的逻辑，引入 `redirect: "manual"` 探测区分真实 `302` 认证失效与网络波动，并加入 `12s` 单次请求 `AbortController` 超时；
+  - 首页冷启动点击一键刷新新增 **后台静默 SSO 校验与无感续期**，严格等待 `onPageFinished`（`isPageSettled`）后注入同步脚本、保持后台刷新期间 WebView 活跃并增设 `35s` 同步看门狗，根治冷启动转圈卡死问题；
+  - 临时自动降级不再永久覆写「校园网直连」偏好，重新连回校园网且未登录时自动恢复直连，并为 `shouldOverrideUrlLoading` 增加 `isForMainFrame` 主框架拦截校验。
+
 ## [v3.4.0] - 2026-11-24
 - **广海官方服务枢纽、校内官网直达与深色/竖屏全量精修**：
   - 新增「广海官方服务与教务公告」（`CampusOfficialService` + `CampusServicesBottomSheet`）：直连 `jwc.gdou.edu.cn` 拉取教务公告分类流与最新官方校历原表，支持公告一键转入作业/考试 DDL 并联动「课表百宝箱」与「设置 → 官网校历与公告」；

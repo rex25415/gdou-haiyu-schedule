@@ -99,7 +99,29 @@ class GdouSyncScriptTest {
             )
         )
         assertTrue(GdouSyncScript.isStaleChannelError(useOffCampus = false, requestUrl = "https://wfw.gdou.edu.cn/"))
+        assertTrue(GdouSyncScript.isStaleChannelError(useOffCampus = false, requestUrl = "https://webvpn.gdou.edu.cn/"))
         assertFalse(GdouSyncScript.isStaleChannelError(useOffCampus = false, requestUrl = "https://jw.gdou.edu.cn/"))
+    }
+
+    @Test
+    fun resolveJwLoginState_supportsOfficialWebVpnAndRejectsGateOrPortalRoot() {
+        val webVpnLoginUrl = "https://webvpn.gdou.edu.cn/login"
+        val webVpnCasUrl = GdouSyncScript.URL_WEBVPN_CAS_LOGIN
+        val webVpnRootUrl = "https://webvpn.gdou.edu.cn/"
+        val webVpnAuthProxyUrl =
+            "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/login?service=https%3A%2F%2Fwebvpn.gdou.edu.cn%2Flogin%3Fcas_login%3Dtrue"
+        val webVpnJwSloginUrl =
+            "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}/xtgl/login_slogin.html"
+        val webVpnJwHomeUrl =
+            "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}/xtgl/index_initMenu.html"
+
+        assertFalse(GdouSyncScript.resolveJwLoginState(webVpnLoginUrl, "WEB VPN", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webVpnCasUrl, "WEB VPN", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webVpnRootUrl, "WebVPN资源门户", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webVpnAuthProxyUrl, "统一身份认证平台", null, true))
+        assertFalse(GdouSyncScript.resolveJwLoginState(webVpnJwSloginUrl, "教学管理信息服务平台", null, false))
+        assertTrue(GdouSyncScript.resolveJwLoginState(webVpnJwSloginUrl, "教学管理信息服务平台", null, true))
+        assertTrue(GdouSyncScript.resolveJwLoginState(webVpnJwHomeUrl, "教学管理信息服务平台", null, false))
     }
 
     @Test
@@ -208,5 +230,63 @@ class GdouSyncScriptTest {
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 700L))
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = false, wfwLatencyMs = 45L))
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = null))
+
+        // On-campus auto-restore only kicks in when user explicitly prefers campus direct and isn't logged in yet
+        assertTrue(
+            NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                userPrefersOffCampus = false,
+                currentlyOffCampus = true,
+                state = CampusNetworkState.ON_CAMPUS_DIRECT_READY,
+                isLoggedIntoJw = false
+            )
+        )
+        assertFalse(
+            NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                userPrefersOffCampus = true,
+                currentlyOffCampus = true,
+                state = CampusNetworkState.ON_CAMPUS_DIRECT_READY,
+                isLoggedIntoJw = false
+            )
+        )
+        assertFalse(
+            NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                userPrefersOffCampus = false,
+                currentlyOffCampus = true,
+                state = CampusNetworkState.ON_CAMPUS_DIRECT_READY,
+                isLoggedIntoJw = true
+            )
+        )
+        assertFalse(
+            NetworkChannelProbe.shouldAutoRestoreOnCampus(
+                userPrefersOffCampus = false,
+                currentlyOffCampus = true,
+                state = CampusNetworkState.OFF_CAMPUS_ONLY,
+                isLoggedIntoJw = false
+            )
+        )
+    }
+
+    @Test
+    fun quickRefreshScriptDistinguishesNetworkErrorsFromAuthExpiryAndInteractiveUrls() {
+        val quickJs = GdouSyncScript.buildQuickRefreshCoursesScript(
+            academicYear = "2026",
+            semesterCode = "3",
+            termLabel = "2026-2027 第一学期"
+        )
+        assertTrue(quickJs.contains("courseResult.authExpired === true"))
+        assertTrue(quickJs.contains("redirect: \"manual\""))
+        assertTrue(quickJs.contains("fetchWithTimeout"))
+        assertTrue(quickJs.contains("isAuthExpiredHtml"))
+        assertTrue(quickJs.contains("isAuthRedirectUrl"))
+        assertTrue(quickJs.contains("networkError: true"))
+        // Must NEVER turn status=0 network failures into fake HTTP 500
+        assertFalse(quickJs.contains("res.status || 500"))
+        assertFalse(quickJs.contains("\$COMMON"))
+
+        assertTrue(GdouSyncScript.mightBeInteractiveLoginUrl("https://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fjw.gdou.edu.cn%2Fsso%2Fjziotlogin"))
+        assertTrue(GdouSyncScript.mightBeInteractiveLoginUrl("https://webvpn.gdou.edu.cn/login"))
+        assertTrue(GdouSyncScript.mightBeInteractiveLoginUrl("https://jw.gdou.edu.cn/xtgl/login_slogin.html"))
+        assertFalse(GdouSyncScript.mightBeInteractiveLoginUrl("https://jw.gdou.edu.cn/xtgl/index_initMenu.html?jsdm=xs"))
+        assertFalse(GdouSyncScript.mightBeInteractiveLoginUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY))
     }
 }
