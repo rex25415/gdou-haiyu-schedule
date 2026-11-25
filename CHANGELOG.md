@@ -2,6 +2,14 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.4.2] - 2026-11-25（切页竞态与学校节点抖动热修复）
+- **修复「课表切教务 / 点刷新后白屏重刷、误报已过期又自动进入」竞态**：
+  - 修复 [SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt) 中已在教务已登录域时因 `!isPageSettled` 仍强行 `stopLoading + loadUrl` 重刷的逻辑，并在确实需要重置入口时先同步重置完成态并等待新导航真实 `onPageStarted -> onPageFinished`，杜绝提前 150ms 向空白帧注入脚本导致 `教务尚未登录或登录态已过期` 的误报；
+  - 紧缩 [GdouSyncScript.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouSyncScript.kt) 根入口 URL 过渡帧的登录态识别（`isBareJwEntryUrl`），修复 WebVPN `/login` 隐藏密码框引发的过门误判，放宽无感续期超时至 `18s` 并自动复位二次进门引导标志；
+- **适配 `jw.gdou.edu.cn` 负载均衡故障节点与正方 `HTTP 901`**：
+  - 在 [NetworkChannelProbe.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/NetworkChannelProbe.kt) 中区分 TCP 建连超时（真校外）与建连后读超时/断连（校内撞中故障节点），携带 `Connection: close` 自动换连接复测并保护加载中的 SSO 跳转流不被打断；
+  - 补充识别正方接口返回自定义状态码 **`HTTP 901`** 为会话过期状态。
+
 ## [v3.4.1] - 2026-11-25（🚨 紧急热修复）
 - **紧急修复校外无法登录教务问题（切至海大官方新版 WebVPN）**：
   - 针对近期学校旧校外入口 `wfw.gdou.edu.cn` 在移动端流量下统一认证参数与会话校验异常导致反复弹回密码页无法进入的紧急故障，全面将校外通用通道升级为官方新版 **WebVPN（`webvpn.gdou.edu.cn`）**，支持 `/login → CAS 认证 → 教务` 全链路自动直达与 `/https/<hex>` 路径解析，校外流量即可顺畅登录与同步；

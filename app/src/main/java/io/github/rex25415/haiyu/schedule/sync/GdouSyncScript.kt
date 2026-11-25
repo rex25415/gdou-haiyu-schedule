@@ -211,7 +211,7 @@ object GdouSyncScript {
                     HaiyuBridge.onSyncComplete("课表已刷新：最新 " + courseResult.courses.length + " 条课程（已自动保留手动调课）");
                 } else {
                     const errText = String(courseResult.error || "");
-                    if (courseResult.authExpired === true || courseResult.status === 401) {
+                    if (courseResult.authExpired === true || isAuthExpiredStatus(courseResult.status)) {
                         HaiyuBridge.onQuickRefreshNeedsLogin("教务登录态已过期，请在教务页重新登录后刷新");
                     } else {
                         HaiyuBridge.onSyncError(errText || "刷新课表失败，请稍后重试");
@@ -732,8 +732,12 @@ object GdouSyncScript {
         function isEvalInterceptHtml(rawText) {
             return /未通过|确认后方可|已阅读|教学评价|评教|问卷/.test(String(rawText || ""));
         }
+        function isAuthExpiredStatus(status) {
+            const s = Number(status) || 0;
+            return s === 401 || s === 403 || s === 901;
+        }
         function isAuthExpiredHtml(rawText) {
-            return /统一身份认证|cas\/login|请先登录|登录超时|会话超时|用户登录/.test(String(rawText || ""));
+            return /统一身份认证|cas\/login|请先登录|登录超时|会话超时|会话已过期|用户登录/.test(String(rawText || ""));
         }
         function isAuthRedirectUrl(rawUrl) {
             const u = String(rawUrl || "").toLowerCase();
@@ -826,7 +830,7 @@ object GdouSyncScript {
                         try {
                             const errTxt = await resp.text();
                             if (errTxt) lastText = errTxt;
-                            if ((resp.status === 401 || resp.status === 403 || isAuthExpiredHtml(errTxt)) && !isEvalInterceptHtml(errTxt)) {
+                            if ((isAuthExpiredStatus(resp.status) || isAuthExpiredHtml(errTxt)) && !isEvalInterceptHtml(errTxt)) {
                                 sawAuthExpired = true;
                             }
                         } catch (_) {}
@@ -929,10 +933,11 @@ object GdouSyncScript {
             const txt1 = await resp1.text();
             const trimmed1 = String(txt1 || "").trim();
             if (!resp1.ok) {
+                const expired = !!resp1.authExpired || isAuthExpiredStatus(resp1.status);
                 const hint = (trimmed1 && !trimmed1.startsWith("{") && !trimmed1.startsWith("["))
                     ? classifyNonJsonHtml(txt1, fallbackHint)
-                    : "";
-                return { ok: false, status: resp1.status || 0, items: [], htmlHint: hint };
+                    : (expired ? "登录状态已过期，请刷新教务页重新登录" : "");
+                return { ok: false, status: resp1.status || 0, authExpired: expired, items: [], htmlHint: hint };
             }
             let json1;
             try {
@@ -1381,7 +1386,7 @@ object GdouSyncScript {
                         error: classifyNonJsonHtml(rawText, "教务当前未返回课表数据，请确认已完成登录或评教后重试")
                     };
                 }
-                if (kbResp.authExpired || kbResp.status === 401 || kbResp.status === 403) {
+                if (kbResp.authExpired || isAuthExpiredStatus(kbResp.status)) {
                     return {
                         ok: false,
                         status: kbResp.status || 0,
@@ -1986,6 +1991,33 @@ object GdouSyncScript {
             lower.contains("/sso/")
     }
 
+    /** 判断 URL 是否仍停留在仅入口根路径（尚未跳转到具体已登录教务页，防止空白过渡帧被误判为已登录）。 */
+    fun isBareJwEntryUrl(url: String?): Boolean {
+        val raw = url?.trim().orEmpty()
+        if (raw.isEmpty()) return false
+        val noFragment = raw.substringBefore("#")
+        val pathPart = try {
+            java.net.URI(noFragment).path.orEmpty()
+        } catch (_: Exception) {
+            noFragment.substringAfter("://", noFragment).substringBefore("?").substringAfter("/", "")
+                .let { if (it.isEmpty()) "" else "/$it" }
+        }
+        val queryPart = try {
+            java.net.URI(noFragment).query.orEmpty().lowercase(java.util.Locale.US)
+        } catch (_: Exception) {
+            ""
+        }
+        if (queryPart.contains("gnmkdm=") || queryPart.contains("jsdm=")) return false
+        val lowerHost = extractHostLower(raw)
+        val normalizedPath = pathPart.trimEnd('/')
+        return when {
+            lowerHost == "jw.gdou.edu.cn" -> normalizedPath.isEmpty()
+            lowerHost == "webvpn.gdou.edu.cn" -> normalizedPath == "/https/$WEBVPN_JW_HEX"
+            lowerHost == "wfw.gdou.edu.cn" -> normalizedPath == "/https://jw.gdou.edu.cn" || normalizedPath == "/https:/jw.gdou.edu.cn"
+            else -> false
+        }
+    }
+
     /** 判断 URL 是否可能是等待用户输入账号密码或验证码的交互式登录页。 */
     fun mightBeInteractiveLoginUrl(url: String?): Boolean {
         val lower = url.orEmpty().lowercase(java.util.Locale.US)
@@ -2063,7 +2095,7 @@ object GdouSyncScript {
         ) {
             return false
         }
-        if (isUrlOnPortalLoginPath(lower)) {
+        if (isUrlOnPortalLoginPath(lower) || isBareJwEntryUrl(lower)) {
             return domConfirmedLoggedIn
         }
         return true

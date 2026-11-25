@@ -192,6 +192,7 @@ fun SyncPortalScreen(
     var syncStatusText by remember { mutableStateOf<String?>(null) }
     var handledQuickRefreshTrigger by remember { mutableIntStateOf(0) }
     var pendingQuickRefreshAfterSso by remember { mutableStateOf(false) }
+    var pendingSsoAwaitingPageStart by remember { mutableStateOf(false) }
     var ssoRecoveryUsedForRefresh by remember { mutableStateOf(false) }
     var pendingSsoTimeoutRunnable by remember { mutableStateOf<Runnable?>(null) }
     var pendingSyncMode by remember { mutableStateOf("all") }
@@ -232,12 +233,55 @@ fun SyncPortalScreen(
         pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingSsoTimeoutRunnable = null
         pendingQuickRefreshAfterSso = false
+        pendingSsoAwaitingPageStart = false
     }
 
     fun evalJwScript(script: String) {
         val wv = webViewRef ?: return
         wv.onResume()
         wv.evaluateJavascript(script, null)
+    }
+
+    fun beginQuickRefreshSsoRecovery(
+        wv: WebView,
+        statusText: String,
+        timeoutReason: String,
+        forceReloadEntry: Boolean
+    ) {
+        ssoRecoveryUsedForRefresh = true
+        pendingQuickRefreshAfterSso = true
+        isSyncing = true
+        syncStatusText = statusText
+        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        val timeoutTask = Runnable {
+            if (pendingQuickRefreshAfterSso) {
+                clearPendingSsoRecovery()
+                isSyncing = false
+                isSilentQuickRefresh = false
+                syncStatusText = null
+                onQuickRefreshNeedsLogin(timeoutReason)
+            }
+        }
+        pendingSsoTimeoutRunnable = timeoutTask
+        mainHandler.postDelayed(timeoutTask, 18_000L)
+        if (forceReloadEntry) {
+            cancelPendingTransitions()
+            domConfirmedLoggedIn = false
+            isPageSettled = false
+            loadProgress = 0
+            hasAutoEnteredWfw = false
+            hasAutoTriggeredWebVpnCas = false
+            pendingSsoAwaitingPageStart = true
+            val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
+            currentUrl = entry
+            trustedUrlRef.set(entry)
+            wv.onResume()
+            wv.stopLoading()
+            wv.loadUrl(entry)
+        } else {
+            pendingSsoAwaitingPageStart = false
+            wv.onResume()
+        }
     }
 
     fun isMfaUrl(url: String?): Boolean = GdouSyncScript.isMfaUrl(url)
@@ -284,6 +328,13 @@ fun SyncPortalScreen(
 
     LaunchedEffect(isLoggedIntoJw) {
         onLoginStateChanged(isLoggedIntoJw)
+    }
+
+    LaunchedEffect(isLoggedIntoJw, isPageSettled) {
+        if (isLoggedIntoJw && isPageSettled) {
+            hasAutoEnteredWfw = false
+            hasAutoTriggeredWebVpnCas = false
+        }
     }
 
     LaunchedEffect(isSyncing) {
@@ -406,28 +457,12 @@ fun SyncPortalScreen(
                 mainHandler.post {
                     val wv = webViewRef
                     if (!ssoRecoveryUsedForRefresh && wv != null && pageErrorMsg == null) {
-                        ssoRecoveryUsedForRefresh = true
-                        pendingQuickRefreshAfterSso = true
-                        isSyncing = true
-                        syncStatusText = "教务会话正在自动续期..."
-                        pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-                        val timeoutTask = Runnable {
-                            if (pendingQuickRefreshAfterSso) {
-                                clearPendingSsoRecovery()
-                                isSyncing = false
-                                isSilentQuickRefresh = false
-                                syncStatusText = null
-                                onQuickRefreshNeedsLogin(reason)
-                            }
-                        }
-                        pendingSsoTimeoutRunnable = timeoutTask
-                        mainHandler.postDelayed(timeoutTask, 9000L)
-                        hasAutoEnteredWfw = false
-                        hasAutoTriggeredWebVpnCas = false
-                        wv.onResume()
-                        val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
-                        wv.stopLoading()
-                        wv.loadUrl(entry)
+                        beginQuickRefreshSsoRecovery(
+                            wv = wv,
+                            statusText = "教务会话正在自动续期...",
+                            timeoutReason = reason,
+                            forceReloadEntry = true
+                        )
                     } else {
                         clearPendingSsoRecovery()
                         isSyncing = false
@@ -472,30 +507,38 @@ fun SyncPortalScreen(
         syncStatusText = "正在校验教务会话并刷新课表..."
         wv.onResume()
 
-        if ((!isLoggedIntoJw || !isPageSettled) && allowSsoRecovery && !ssoRecoveryUsedForRefresh && (silent || !GdouSyncScript.mightBeInteractiveLoginUrl(currentUrl) || loadProgress in 1..99)) {
-            ssoRecoveryUsedForRefresh = true
-            pendingQuickRefreshAfterSso = true
-            pendingSsoTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-            val timeoutTask = Runnable {
-                if (pendingQuickRefreshAfterSso) {
-                    clearPendingSsoRecovery()
-                    isSyncing = false
-                    isSilentQuickRefresh = false
-                    syncStatusText = null
-                    onQuickRefreshNeedsLogin("请先在教务页完成登录，即可随时一键刷新课表")
-                }
-            }
-            pendingSsoTimeoutRunnable = timeoutTask
-            mainHandler.postDelayed(timeoutTask, 9000L)
-            val loadingRedirect = loadProgress in 1..99 && !GdouSyncScript.mightBeInteractiveLoginUrl(currentUrl)
-            if (!loadingRedirect && pageErrorMsg == null) {
-                hasAutoEnteredWfw = false
-                hasAutoTriggeredWebVpnCas = false
-                val entry = if (useOffCampus) GdouSyncScript.URL_WEBVPN_JW_ENTRY else GdouSyncScript.URL_ON_CAMPUS
-                wv.stopLoading()
-                wv.loadUrl(entry)
-            }
+        val activeWvUrl = wv.url.takeUnless { it.isNullOrBlank() } ?: currentUrl
+        val loggedInNow = isLoggedIntoJw || GdouSyncScript.resolveJwLoginState(
+            url = activeWvUrl,
+            pageTitle = wv.title ?: pageTitle,
+            pageErrorMsg = pageErrorMsg,
+            domConfirmedLoggedIn = domConfirmedLoggedIn
+        )
+        val loadingActive = loadProgress in 1..99 && pageErrorMsg == null
+
+        if (!loggedInNow && allowSsoRecovery && !ssoRecoveryUsedForRefresh && (silent || !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl) || loadingActive)) {
+            val loadingRedirect = loadingActive && !GdouSyncScript.mightBeInteractiveLoginUrl(activeWvUrl)
+            beginQuickRefreshSsoRecovery(
+                wv = wv,
+                statusText = "正在校验教务会话并刷新课表...",
+                timeoutReason = "请先在教务页完成登录，即可随时一键刷新课表",
+                forceReloadEntry = !loadingRedirect && pageErrorMsg == null
+            )
             return
+        }
+
+        if (loggedInNow && !isPageSettled && loadingActive && allowSsoRecovery && !ssoRecoveryUsedForRefresh) {
+            beginQuickRefreshSsoRecovery(
+                wv = wv,
+                statusText = "正在校验教务会话并刷新课表...",
+                timeoutReason = "教务页面响应超时，请稍后重试",
+                forceReloadEntry = false
+            )
+            return
+        }
+
+        if (loggedInNow && !isPageSettled && !loadingActive) {
+            isPageSettled = true
         }
 
         evalJwScript(
@@ -515,11 +558,11 @@ fun SyncPortalScreen(
         }
     }
 
-    // Continue deferred quick-refresh only AFTER page has actually settled (never inject into an unloading frame!)
-    LaunchedEffect(isLoggedIntoJw, isPageSettled, pendingQuickRefreshAfterSso) {
-        if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso) {
-            delay(150L)
-            if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso) {
+    // Continue deferred quick-refresh only AFTER new navigation has started AND settled (never inject into unloading frame!)
+    LaunchedEffect(isLoggedIntoJw, isPageSettled, pendingQuickRefreshAfterSso, pendingSsoAwaitingPageStart) {
+        if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
+            delay(180L)
+            if (isLoggedIntoJw && isPageSettled && pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
                 clearPendingSsoRecovery()
                 startQuickRefreshCourses(
                     silent = isSilentQuickRefresh || !latestVisible,
@@ -548,10 +591,13 @@ fun SyncPortalScreen(
         if (persistChoice) {
             clearPendingSsoRecovery()
             ssoRecoveryUsedForRefresh = false
+        } else if (pendingQuickRefreshAfterSso) {
+            pendingSsoAwaitingPageStart = true
         }
         useOffCampus = offCampus
         domConfirmedLoggedIn = false
         isPageSettled = false
+        loadProgress = 0
         hasAutoEnteredWfw = false
         hasAutoTriggeredWebVpnCas = false
         hasAutoSwitchedForMfa = false
@@ -567,23 +613,35 @@ fun SyncPortalScreen(
         webViewRef?.loadUrl(url)
     }
 
+    val latestUseOffCampus by rememberUpdatedState(useOffCampus)
+    val latestLoggedIntoJw by rememberUpdatedState(isLoggedIntoJw)
+    val latestCurrentUrl by rememberUpdatedState(currentUrl)
+    val latestLoadProgress by rememberUpdatedState(loadProgress)
+    val latestPageErrorMsg by rememberUpdatedState(pageErrorMsg)
+
     // Smart On-Campus / Off-Campus probe when Sync tab is visible (temporary fallback never clobbers saved preference)
     LaunchedEffect(isVisible, probeTrigger) {
         if (!isVisible) return@LaunchedEffect
         val result = NetworkChannelProbe.probe(context)
         networkProbe = result
-        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(useOffCampus, result.state) &&
-            !hasAutoFallbackOffCampus &&
-            !isLoggedIntoJw
+        // Re-read live WebView state AFTER probe() suspends so an active SSO flow is never aborted by stale state
+        val inActiveSsoFlow = latestLoadProgress in 1..99 &&
+            latestPageErrorMsg == null &&
+            !GdouSyncScript.isBareJwEntryUrl(latestCurrentUrl)
+        if (latestLoggedIntoJw || inActiveSsoFlow) {
+            return@LaunchedEffect
+        }
+        if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(latestUseOffCampus, result.state) &&
+            !hasAutoFallbackOffCampus
         ) {
             hasAutoFallbackOffCampus = true
             switchChannel(offCampus = true, persistChoice = false)
             onShowMessage("当前为校外网络，已自动切至「校外通用(免校园网)」")
         } else if (NetworkChannelProbe.shouldAutoRestoreOnCampus(
                 userPrefersOffCampus = latestSettings.preferOffCampusChannel,
-                currentlyOffCampus = useOffCampus,
+                currentlyOffCampus = latestUseOffCampus,
                 state = result.state,
-                isLoggedIntoJw = isLoggedIntoJw
+                isLoggedIntoJw = latestLoggedIntoJw
             )
         ) {
             hasAutoFallbackOffCampus = false
@@ -1398,6 +1456,7 @@ fun SyncPortalScreen(
                                 // Always cancel any delayed auto-transition whenever a real navigation starts,
                                 // eliminating race conditions and unexpected jumping!
                                 cancelPendingTransitions()
+                                pendingSsoAwaitingPageStart = false
                                 domConfirmedLoggedIn = false
                                 isPageSettled = false
                                 if (!url.isNullOrBlank()) {
@@ -1408,6 +1467,9 @@ fun SyncPortalScreen(
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
+                                if (pendingSsoAwaitingPageStart) {
+                                    return
+                                }
                                 if (!url.isNullOrBlank()) {
                                     currentUrl = url
                                     trustedUrlRef.set(url)
@@ -1459,7 +1521,7 @@ fun SyncPortalScreen(
                                     wv.title?.takeIf {
                                         it.isNotBlank() && !it.startsWith("http", ignoreCase = true)
                                     }?.let { pageTitle = it }
-                                    if (GdouSyncScript.isUrlOnPortalLoginPath(finishedUrl)) {
+                                    if (GdouSyncScript.isUrlOnPortalLoginPath(finishedUrl) || GdouSyncScript.isBareJwEntryUrl(finishedUrl)) {
                                         probePortalDomLoginState(wv, finishedUrl, allowRetry = true)
                                     }
                                 }
@@ -1575,7 +1637,7 @@ fun SyncPortalScreen(
                                 }
 
                                 // 3. During background quick-refresh SSO validation: if landed cleanly on an interactive login screen, stop recovery and bring user to Tab 1
-                                if (pendingQuickRefreshAfterSso) {
+                                if (pendingQuickRefreshAfterSso && !pendingSsoAwaitingPageStart) {
                                     val stillResolved = GdouSyncScript.resolveJwLoginState(
                                         url = finishedUrl,
                                         pageTitle = wv.title ?: pageTitle,
@@ -1583,6 +1645,7 @@ fun SyncPortalScreen(
                                         domConfirmedLoggedIn = domConfirmedLoggedIn
                                     )
                                     if (!stillResolved && GdouSyncScript.mightBeInteractiveLoginUrl(finishedUrl)) {
+                                        val canAutoCasFlag = if (useOffCampus && !hasAutoTriggeredWebVpnCas) "true" else "false"
                                         wv.evaluateJavascript(
                                             """
                                             (function(){
@@ -1592,8 +1655,8 @@ fun SyncPortalScreen(
                                                 var hasCasAutoLink = !!document.querySelector('a#cas-login, a[href*="cas_login=true"]');
                                                 var h = (location.hostname || '').toLowerCase();
                                                 var p = (location.pathname || '').replace(/\/+$/, '');
-                                                if (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCasAutoLink && !hasVpnErr && !hasLoginForm) {
-                                                    return 'AUTO_ADVANCE';
+                                                if (h === 'webvpn.gdou.edu.cn' && p === '/login' && hasCasAutoLink && !hasVpnErr) {
+                                                    return $canAutoCasFlag ? 'AUTO_ADVANCE' : 'NEED_LOGIN';
                                                 }
                                                 return (hasLoginForm || hasVpnErr) ? 'NEED_LOGIN' : 'WAIT';
                                             })();

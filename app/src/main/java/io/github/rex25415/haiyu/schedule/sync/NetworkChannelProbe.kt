@@ -89,33 +89,53 @@ object NetworkChannelProbe {
 
     private data class ProbeOutcome(
         val latencyMs: Long?,
-        val timedOut: Boolean
+        val timedOut: Boolean,
+        val tcpConnectTimedOut: Boolean = false
     )
 
     /**
-     * 校外网络 SYN 丢包触发首次超时且校外通道（wfw）快速响应（<600ms）时无需二次等待，直接秒切校外；
-     * 若属于冷握手/连接重置报错，或整体链路偏慢，则允许快速复测 1 次以防校园网抖动误切。
+     * 校外网络 SYN 丢包触发 TCP 建连超时且校外通道（webvpn）快速响应（<600ms）时无需二次等待，直接秒切校外；
+     * 若 TCP 建连成功但读超时/连接重置（典型如学校 jw.gdou.edu.cn 负载均衡单后端节点无响应），或整体链路偏慢，
+     * 必须允许带 Connection: close 复测避开坏节点，防止把校园网误判为仅校外可用。
      */
-    fun shouldRetryJw(jwTimedOut: Boolean, wfwLatencyMs: Long?): Boolean {
+    fun shouldRetryJw(
+        jwTimedOut: Boolean,
+        wfwLatencyMs: Long?,
+        jwTcpConnectTimedOut: Boolean = jwTimedOut
+    ): Boolean {
+        if (!jwTcpConnectTimedOut) return true
         return !jwTimedOut || wfwLatencyMs == null || wfwLatencyMs >= 600L
     }
 
     suspend fun probe(context: Context): NetworkProbeResult = withContext(Dispatchers.IO) {
         val isWifi = isWifiConnected(context)
-        val jwFirstDeferred = async { probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1800, 2000) }
-        val authFirstDeferred = async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 1800, 2000) }
-        val wfwFirstDeferred = async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1800, 2000) }
+        val jwFirstDeferred = async { probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1500, 1800) }
+        val authFirstDeferred = async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 1600, 1800) }
+        val wfwFirstDeferred = async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1600, 1800) }
         val jwFirst = jwFirstDeferred.await()
         val authFirst = authFirstDeferred.await()
         val wfwFirst = wfwFirstDeferred.await()
 
         val wfwRetryDeferred = if (wfwFirst.latencyMs == null) {
-            async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 2400, 2600).latencyMs }
+            async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 2200, 2400).latencyMs }
         } else {
             null
         }
-        val jwRetryDeferred = if (jwFirst.latencyMs == null && shouldRetryJw(jwFirst.timedOut, wfwFirst.latencyMs)) {
-            async { probeReachability(GdouSyncScript.URL_ON_CAMPUS, 2200, 2400).latencyMs }
+        val jwRetryDeferred = if (
+            jwFirst.latencyMs == null &&
+            shouldRetryJw(jwFirst.timedOut, wfwFirst.latencyMs, jwFirst.tcpConnectTimedOut)
+        ) {
+            async {
+                val retry1 = probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1800, 1800)
+                if (retry1.latencyMs != null) {
+                    retry1.latencyMs
+                } else if (!retry1.tcpConnectTimedOut) {
+                    // TCP handshake succeeded (on campus), retry once more with a fresh socket to dodge bad ADC node
+                    probeReachability(GdouSyncScript.URL_ON_CAMPUS, 1500, 1600).latencyMs
+                } else {
+                    null
+                }
+            }
         } else {
             null
         }
@@ -123,7 +143,7 @@ object NetworkChannelProbe {
             authFirst.latencyMs == null &&
             (jwFirst.latencyMs != null || wfwFirst.latencyMs != null || !jwFirst.timedOut || !wfwFirst.timedOut)
         ) {
-            async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 2200, 2400).latencyMs }
+            async { probeReachability(GdouSyncScript.URL_AUTH_SERVER, 2000, 2200).latencyMs }
         } else {
             null
         }
@@ -163,6 +183,7 @@ object NetworkChannelProbe {
     ): ProbeOutcome {
         val start = System.currentTimeMillis()
         var conn: HttpURLConnection? = null
+        var connectCompleted = false
         return try {
             conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -175,23 +196,27 @@ object NetworkChannelProbe {
                 )
                 setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*")
                 setRequestProperty("Accept-Encoding", "identity")
+                setRequestProperty("Connection", "close")
             }
+            conn.connect()
+            connectCompleted = true
             val code = conn.responseCode
             val loc = conn.getHeaderField("Location")
             val elapsed = (System.currentTimeMillis() - start).coerceAtLeast(1L)
             if (isValidProbeResponse(code, loc)) {
                 safeLog(false, "probe ok $urlStr code=$code loc=$loc (${elapsed}ms)")
-                ProbeOutcome(latencyMs = elapsed, timedOut = false)
+                ProbeOutcome(latencyMs = elapsed, timedOut = false, tcpConnectTimedOut = false)
             } else {
                 safeLog(true, "probe rejected $urlStr code=$code loc=$loc (${elapsed}ms)")
-                ProbeOutcome(latencyMs = null, timedOut = false)
+                ProbeOutcome(latencyMs = null, timedOut = false, tcpConnectTimedOut = false)
             }
         } catch (e: SocketTimeoutException) {
-            safeLog(true, "probe timeout $urlStr (${connectTimeoutMs}ms): ${e.message}")
-            ProbeOutcome(latencyMs = null, timedOut = true)
+            val phase = if (connectCompleted) "read" else "connect"
+            safeLog(true, "probe $phase timeout $urlStr (${connectTimeoutMs}/${readTimeoutMs}ms): ${e.message}")
+            ProbeOutcome(latencyMs = null, timedOut = true, tcpConnectTimedOut = !connectCompleted)
         } catch (e: Exception) {
-            safeLog(true, "probe fail $urlStr: ${e.javaClass.simpleName}: ${e.message}")
-            ProbeOutcome(latencyMs = null, timedOut = false)
+            safeLog(true, "probe fail $urlStr (connected=$connectCompleted): ${e.javaClass.simpleName}: ${e.message}")
+            ProbeOutcome(latencyMs = null, timedOut = false, tcpConnectTimedOut = false)
         } finally {
             conn?.disconnect()
         }

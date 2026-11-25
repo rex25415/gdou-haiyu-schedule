@@ -227,6 +227,7 @@ class GdouSyncScriptTest {
             NetworkChannelProbe.classifyState(jwReachable = true, wfwReachable = true, authReachable = false)
         )
         assertFalse(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 45L))
+        assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 45L, jwTcpConnectTimedOut = false))
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = 700L))
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = false, wfwLatencyMs = 45L))
         assertTrue(NetworkChannelProbe.shouldRetryJw(jwTimedOut = true, wfwLatencyMs = null))
@@ -274,6 +275,8 @@ class GdouSyncScriptTest {
             termLabel = "2026-2027 第一学期"
         )
         assertTrue(quickJs.contains("courseResult.authExpired === true"))
+        assertTrue(quickJs.contains("isAuthExpiredStatus"))
+        assertTrue(quickJs.contains("901"))
         assertTrue(quickJs.contains("redirect: \"manual\""))
         assertTrue(quickJs.contains("fetchWithTimeout"))
         assertTrue(quickJs.contains("isAuthExpiredHtml"))
@@ -288,5 +291,26 @@ class GdouSyncScriptTest {
         assertTrue(GdouSyncScript.mightBeInteractiveLoginUrl("https://jw.gdou.edu.cn/xtgl/login_slogin.html"))
         assertFalse(GdouSyncScript.mightBeInteractiveLoginUrl("https://jw.gdou.edu.cn/xtgl/index_initMenu.html?jsdm=xs"))
         assertFalse(GdouSyncScript.mightBeInteractiveLoginUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY))
+
+        // Bare entry URLs without DOM confirmation must NOT impersonate a settled session during transition frames
+        assertTrue(GdouSyncScript.isBareJwEntryUrl(GdouSyncScript.URL_ON_CAMPUS))
+        assertTrue(GdouSyncScript.isBareJwEntryUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY))
+        assertFalse(GdouSyncScript.isBareJwEntryUrl("https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}/xtgl/index_initMenu.html?jsdm=xs"))
+        assertFalse(
+            GdouSyncScript.resolveJwLoginState(
+                url = GdouSyncScript.URL_WEBVPN_JW_ENTRY,
+                pageTitle = "广东海洋大学教务系统",
+                pageErrorMsg = null,
+                domConfirmedLoggedIn = false
+            )
+        )
+        assertTrue(
+            GdouSyncScript.resolveJwLoginState(
+                url = GdouSyncScript.URL_WEBVPN_JW_ENTRY,
+                pageTitle = "教学管理信息服务平台",
+                pageErrorMsg = null,
+                domConfirmedLoggedIn = true
+            )
+        )
     }
 }
