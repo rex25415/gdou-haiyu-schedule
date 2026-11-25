@@ -25,9 +25,9 @@
 
 ## ✨ 界面预览
 
-| 清爽日间课表 | 护眼深色模式 | 广海官方服务与公告 | 7 天高清课表海报 |
-| :---: | :---: | :---: | :---: |
-| <img src="docs/screenshots/light_schedule.png" width="190" alt="日间主课表" /> | <img src="docs/screenshots/dark_ocean.png" width="190" alt="深色主课表" /> | <img src="docs/screenshots/campus_hub.png" width="190" alt="广海官方服务与公告" /> | <img src="docs/screenshots/poster_7day.png" width="190" alt="高清课表长图" /> |
+| 清爽日间课表 | 护眼深色模式 | 全新教务中心 · 查调课 | 广海官方服务与公告 | 7 天高清课表海报 |
+| :---: | :---: | :---: | :---: | :---: |
+| <img src="docs/screenshots/light_schedule.png" width="160" alt="日间主课表" /> | <img src="docs/screenshots/dark_ocean.png" width="160" alt="深色主课表" /> | <img src="docs/screenshots/sync_center.png" width="160" alt="全新教务中心与查调课" /> | <img src="docs/screenshots/campus_hub.png" width="160" alt="广海官方服务与公告" /> | <img src="docs/screenshots/poster_7day.png" width="160" alt="高清课表长图" /> |
 
 ---
 

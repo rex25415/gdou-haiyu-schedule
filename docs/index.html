@@ -184,8 +184,34 @@
     .feat p { font-size: 12.5px; color: var(--muted); }
     .shots {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 10px;
+    }
+    .release-box {
+      background: #f5fbf9;
+      border: 1px solid #d7eae6;
+      border-radius: 14px;
+      padding: 13px 15px;
+      font-size: 12.8px;
+      color: var(--text);
+      line-height: 1.65;
+    }
+    .release-box .rel-lead {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--primary-dark);
+    }
+    .release-box ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .release-box li {
+      color: var(--muted);
+    }
+    .release-box li strong {
+      color: var(--text);
     }
     .shots figure {
       margin: 0;
@@ -338,25 +364,37 @@
       <div class="badges">
         <span class="badge" id="verBadge">v3.5.0 正式版</span>
         <span class="badge" id="sizeBadge">包体 2.02 MB</span>
-        <span class="badge">免校园网一键全同步</span>
+        <span class="badge">纯原生零 WebView 引擎</span>
         <span class="badge">Android 8–17 / 鸿蒙 4.x</span>
         <span class="badge">零广告 · 零后端 · 非商业开源</span>
       </div>
 
-      <a id="dlPrimary" class="dl-primary" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">
+      <a id="dlPrimary" class="dl-primary" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">
         <span>立即下载安卓版</span>
         <span class="dl-sub">国内加速线路 1（ghfast）· 推荐</span>
       </a>
       <div id="dlAssist" class="dl-assist">
-        <strong>正在启动下载（约 1.9 MB）</strong>：若 3 秒内未开始，请点下方「国内加速线路 2」；安装若遇手机常规“未知来源风险提示”，对照下方 SHA-256 一致后选「允许本次安装」即可。
+        <strong>正在启动下载（<span id="dlAssistSize">约 2.02 MB</span>）</strong>：若 3 秒内未开始，请点下方「国内加速线路 2」；安装若遇手机常规“未知来源风险提示”，对照下方 SHA-256 一致后选「允许本次安装」即可。
       </div>
       <div class="dl-meta" id="dlMeta">包名 io.github.rex25415.haiyu.schedule · 海屿开源统一发布签名 · 内置运行时签名验真</div>
 
       <div class="alt-links">
-        <a id="dlMirror2" class="alt-btn" href="https://ghfast.top/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">国内加速线路 2</a>
+        <a id="dlMirror2" class="alt-btn" href="https://gh-proxy.com/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">国内加速线路 2</a>
         <a id="dlMirror3" class="alt-btn" href="https://ghproxy.net/https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">国内加速线路 3</a>
         <a id="dlOfficial" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk">GitHub 官方直链</a>
         <a id="dlRelease" class="alt-btn" href="https://github.com/rex25415/gdou-haiyu-schedule/releases/latest">更新日志与源码</a>
+      </div>
+    </section>
+
+    <section class="card" id="whatsNewCard">
+      <h2 id="whatsNewTitle">🆕 最新版本重点（v3.5.0）</h2>
+      <div class="release-box" id="whatsNewBody">
+        <div class="rel-lead">从底层重写纯 Kotlin 原生教务同步引擎，彻底根治此前折腾已久的「校外登录后误报过期」「教务页加载卡顿」「输入法穿透」与「离校切 5G 超时」顽疾（覆盖安装自动保留全部本地课表、成绩与设置）：</div>
+        <ul>
+          <li>⚡ <strong>零常驻 WebView 原生并发引擎</strong>：绕开 WebVPN 代理脚本与 3.7MB 登录装饰图，校外 5G 全量同步约 2 秒、刷课表 1 秒完成，切页零掉帧</li>
+          <li>🌐 <strong>跨网与登录全链路提速</strong>：4G/5G 蜂窝 0ms 秒判校外通道，支持空 Cookie 0-RTT、校园网到校外无头静默换票、连接复用与学期缓存瞬开</li>
+          <li>🧭 <strong>全新「教务中心」& 自动查调课</strong>：刷新课表自动比对本地变动并保留手动调课；去除重复按键，仅留唯一「访问广海正方教务官网」直连入口</li>
+        </ul>
       </div>
     </section>
 
@@ -364,16 +402,16 @@
       <h2>✨ 为什么选海屿空间？</h2>
       <div class="grid-3">
         <div class="feat">
-          <h3>校园网 / 校外免 VPN 双通道</h3>
-          <p>自动识别校园 Wi-Fi 与 4G/5G 校外访问，免开 VPN 一键同步正方课表、成绩/GPA、考场座位与全校空教室。</p>
+          <h3>纯原生极速引擎 · 零常驻 WebView</h3>
+          <p>4G/5G 校外免 VPN 与校园网自动切换，纯原生并发约 2 秒全同步课表/成绩/考场，1 秒刷课表自动检查调课变动，告别网页卡顿与过期误报。</p>
         </div>
         <div class="feat">
           <h3>广海三校区精准错峰作息</h3>
           <p>自动识别湖光（广学/明德楼）、海滨（实验楼/实+房号/球场）、阳江（慎思/非慎思楼）错峰时间表与 11-12 节晚课。</p>
         </div>
         <div class="feat">
-          <h3>高颜值工具箱 & 四款微件</h3>
-          <p>内置空教室实时查、GPA 补考去重与反推、双人离线空课对比、考试周投影、万能倒计时、零权限壁纸与 4 款桌面小组件。</p>
+          <h3>高颜值学业中心 & 四款微件</h3>
+          <p>内置实时查空教室、GPA 补考去重与反推、双人离线空课对比、考试周投影、万能倒计时、零权限壁纸、按需官网直连与 4 款桌面小组件。</p>
         </div>
       </div>
     </section>
@@ -390,6 +428,10 @@
           <figcaption>护眼深色 · 自动适配</figcaption>
         </figure>
         <figure>
+          <img src="screenshots/sync_center.png" alt="海屿空间全新教务中心与自动查调课" />
+          <figcaption>全新教务中心 · 查调课</figcaption>
+        </figure>
+        <figure>
           <img src="screenshots/campus_hub.png" alt="广海官方服务与教务公告" />
           <figcaption>官方公告 · 校历门户</figcaption>
         </figure>
@@ -404,7 +446,7 @@
     <section class="card">
       <h2>🔒 零后端纯本地架构 · 源码完全可审计</h2>
       <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">
-        与需要自建服务器代登录的第三方小程序截然不同：海屿空间<strong>没有后端服务器、不收集任何学号或密码、无广告统计 SDK、不含选课/抢课或后台爬虫</strong>。教务登录完全在手机系统 WebView 中通过严格 HTTPS 直连 <code>*.gdou.edu.cn</code>，所有数据仅保存在本机并禁止系统云备份；同时内置运行时<strong>签名证书验真</strong>，防止第三方二次打包植入广告冒充原版。
+        与需要自建服务器代登录的第三方小程序截然不同：海屿空间<strong>没有后端服务器、不收集任何学号或密码、无广告统计 SDK、不含选课/抢课或后台爬虫</strong>。仅在身份认证时按需弹出广海官方登录页（严格 HTTPS 直连 <code>*.gdou.edu.cn</code>），拿到有效票据后立即销毁网页释放内存，后续数据同步 100% 走纯原生 HTTPS 通道，所有数据仅保存在本机并禁止系统云备份；同时内置运行时<strong>签名证书验真</strong>，防止第三方二次打包植入广告冒充原版。
       </p>
       <div style="font-size:12.5px;font-weight:700;margin-top:8px;">当前安装包 SHA-256 校验值：</div>
       <div class="hash-box" id="shaBox">41a3b434de701f5288d6632e983fe66d414f5422e9de5ba0a83fc14f6080c30c</div>
@@ -613,17 +655,56 @@
         }
       });
 
-      function applyRelease(tag, official, sizeBytes, htmlUrl, sha256) {
+      function escapeHtml(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function renderReleaseNotes(tag, notes) {
+        var titleEl = document.getElementById("whatsNewTitle");
+        var bodyEl = document.getElementById("whatsNewBody");
+        if (titleEl && tag) titleEl.textContent = "🆕 最新版本重点（" + tag + "）";
+        if (!bodyEl || !notes) return;
+        var lines = String(notes).split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+        var leadParts = [];
+        var bullets = [];
+        lines.forEach(function (line) {
+          if (/^[-*•]\s+/.test(line)) {
+            bullets.push(line.replace(/^[-*•]\s+/, ""));
+          } else if (bullets.length === 0) {
+            leadParts.push(line);
+          }
+        });
+        if (!bullets.length && !leadParts.length) return;
+        var html = "";
+        if (leadParts.length) {
+          html += '<div class="rel-lead">' + escapeHtml(leadParts.join(" ")) + "</div>";
+        }
+        if (bullets.length) {
+          html += "<ul>" + bullets.map(function (b) {
+            var idx = b.indexOf("：");
+            if (idx > 0 && idx <= 26) {
+              return "<li><strong>" + escapeHtml(b.slice(0, idx)) + "</strong>：" + escapeHtml(b.slice(idx + 1)) + "</li>";
+            }
+            return "<li>" + escapeHtml(b) + "</li>";
+          }).join("") + "</ul>";
+        }
+        bodyEl.innerHTML = html;
+      }
+
+      function applyRelease(tag, official, sizeBytes, htmlUrl, sha256, releaseNotes) {
         if (!tag || !official) return;
         var mb = sizeBytes ? (sizeBytes / (1024 * 1024)).toFixed(2) + " MB" : "约 2.02 MB";
         document.getElementById("verBadge").textContent = tag + " 正式版";
         document.getElementById("sizeBadge").textContent = "包体 " + mb;
+        var assistSize = document.getElementById("dlAssistSize");
+        if (assistSize) assistSize.textContent = "约 " + mb.replace(/^约\s*/, "");
         document.getElementById("dlPrimary").href = "https://ghfast.top/" + official;
         document.getElementById("dlMirror2").href = "https://gh-proxy.com/" + official;
         document.getElementById("dlMirror3").href = "https://ghproxy.net/" + official;
         document.getElementById("dlOfficial").href = official;
         if (htmlUrl) document.getElementById("dlRelease").href = htmlUrl;
         if (sha256) document.getElementById("shaBox").textContent = sha256;
+        if (releaseNotes) renderReleaseNotes(tag, releaseNotes);
       }
 
       // 优先读取同源静态 latest.json（国内 5G 秒开、零 API 限流），失败再回落 GitHub API
@@ -631,7 +712,7 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
           if (m && m.tagName && m.apkDownloadUrl) {
-            applyRelease(m.tagName, m.apkDownloadUrl, m.apkSizeBytes, m.htmlUrl, m.expectedSha256);
+            applyRelease(m.tagName, m.apkDownloadUrl, m.apkSizeBytes, m.htmlUrl, m.expectedSha256, m.releaseNotes);
             return;
           }
           return fetch("https://api.github.com/repos/rex25415/gdou-haiyu-schedule/releases/latest", {
@@ -644,7 +725,7 @@
               var apk = assets.find(function (a) { return a && /\.apk$/i.test(a.name || ""); });
               if (!apk || !apk.browser_download_url) return;
               var sha = (apk.digest && apk.digest.indexOf("sha256:") === 0) ? apk.digest.slice(7) : null;
-              applyRelease(data.tag_name, apk.browser_download_url, apk.size, data.html_url, sha);
+              applyRelease(data.tag_name, apk.browser_download_url, apk.size, data.html_url, sha, null);
             });
         })
         .catch(function () {});
