@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.4.0",
-  "versionName": "3.4.0",
-  "title": "海屿空间 v3.4.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.4.0.apk",
-  "apkSizeBytes": 2093333,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.0/HaiyuSchedule-GDOU-v3.4.0.apk",
-  "expectedSha256": "bd56ba13df2d604a0f22c1ae0a1ac6b92cbdcb59c5ca133013d61f4492d527f9",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.0",
+  "tagName": "v3.4.1",
+  "versionName": "3.4.1",
+  "title": "海屿空间 v3.4.1",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.4.1.apk",
+  "apkSizeBytes": 2109717,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.4.1/HaiyuSchedule-GDOU-v3.4.1.apk",
+  "expectedSha256": "db503b76a68416b4387b023bdd61656cea47b38f98adc7f322762ac1e3f10ac1",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.4.1",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "💬 致各位海大同学：v3.4.0 带来「广海官方服务与公告」、校内外双通道智能提速、面对面离线扫码/直传安装包分享，以及十余处真机竖屏与深色模式细节精修，覆盖安装课表数据零丢失！\n\n- 🏛️ 新增广海官方服务与公告：直连官网拉取教务通知与校历原表，支持公告 1 键转为 DDL 提醒\n- ⚡ 校内外双通道探测升级：校外 1.8 秒极速切线、校内冷连接抖动自动容错，新增评教/选课动态子菜单直达\n- 📱 更顺手的面对面分享：新增零权限离线下载二维码与「直接传安装包（.apk）」功能，优化同班分享码、长图页脚与微信拦截防呆指引\n- ✨ 全面竖屏/深色排版与精度打磨：支持全量 .ics 日历导出、消除十余处小屏文案截断并覆盖 65 项核心测试"
+  "releaseNotes": "🚨 紧急修复更新：由于学校近期调整校外教务网关，v3.4.0 及更早版本在手机流量下会出现「校外输入密码循环登不进」，且直连校园网遇到网络波动或冷启动刷新时易误报「登录态已过期」或转圈卡住。强烈建议全部海大同学立即升级 v3.4.1，覆盖安装自动保留原有课表、成绩、壁纸与调课记录！\n\n- 🔐 紧急切通校外免校园网登录：告别已异常的旧 `wfw` 代理死循环，校外通用通道全面升级为海大官方新版 **WebVPN（`webvpn.gdou.edu.cn`）**，支持手机流量下扫码/统一认证一次直达教务系统\n- 📡 消除误报「登录态已过期」：重构请求容错逻辑，将网络波动（如宿舍到教学楼切换网络）与真实会话过期彻底隔离，断网或抖动只温和提示检查网络，不再误踢用户去重登\n- ⚡ 首页冷启动刷课表与后台续期：在课表页点刷新时自动利用未过期的统一认证进行后台静默续期，严格等待页面稳定再抓取并增加超时兜底看门狗，彻底解决卡在转圈状态的问题\n- 🏫 智能通道记忆与恢复：临时切线不再覆写原本选择的「校园网直连」偏好，重新连回校园网后自动恢复直连通道"
 }
