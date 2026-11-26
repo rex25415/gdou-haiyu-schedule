@@ -434,5 +434,13 @@ class GdouSyncScriptTest {
         )
         assertTrue(syncJs.contains("confirmedZeroTotal"))
         assertTrue(syncJs.contains("document.body.textContent"))
+
+        // 6. Direct CAS post-login personal portal fallback classifier
+        assertTrue(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://authserver.gdou.edu.cn/authserver/index.do"))
+        assertTrue(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/index.do"))
+        assertTrue(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://i.gdou.edu.cn/index.html#/"))
+        assertFalse(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://authserver.gdou.edu.cn/authserver/login"))
+        assertFalse(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://authserver.gdou.edu.cn/authserver/reauthCheck.html"))
+        assertFalse(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://i.gdou.edu.cn/login"))
     }
 }

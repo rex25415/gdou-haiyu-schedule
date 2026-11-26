@@ -491,9 +491,196 @@ class GdouNativeSyncEngineTest {
         val start = System.currentTimeMillis()
         val webVpnRes = engine.establishOrVerifySession(SyncChannel.WEBVPN, forceReverify = true)
         val onCampusRes = engine.establishOrVerifySession(SyncChannel.ON_CAMPUS, forceReverify = true)
+        val wfwRes = engine.establishOrVerifySession(SyncChannel.WFW_LEGACY, forceReverify = true)
         val elapsed = System.currentTimeMillis() - start
         assertTrue(webVpnRes is SessionCheckResult.NeedsAuth)
         assertTrue(onCampusRes is SessionCheckResult.NeedsAuth)
+        assertTrue(wfwRes is SessionCheckResult.NeedsAuth)
         assertTrue("Expected 0-RTT empty-cookie NeedsAuth (<200ms), got ${elapsed}ms", elapsed < 200L)
+    }
+
+    @Test
+    fun webVpnDeniedAutoFailsOverToWfwViaDirectCasTicketExchangeWithoutSecondPassword() = runBlocking {
+        val casMintedServices = mutableListOf<String>()
+        val wfwSawPathSsoCookie = AtomicBoolean(false)
+        val wfwSawUrlssCookie = AtomicBoolean(false)
+
+        // Mock direct public authserver.gdou.edu.cn
+        LocalMiniHttpServer { req ->
+            val cookie = req.headers["cookie"].orEmpty()
+            if (req.path == "/authserver/login" && cookie.contains("CASTGC=TGT-STUDENT-OK")) {
+                val rawService = req.query.substringAfter("service=", "").substringBefore("&")
+                val decoded = java.net.URLDecoder.decode(rawService, "UTF-8")
+                casMintedServices.add(decoded)
+                val sep = if (decoded.contains("?")) "&" else "?"
+                MockHttpResp(
+                    302,
+                    headers = listOf("Location" to "${decoded}${sep}ticket=ST-VALID-999")
+                )
+            } else {
+                MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+            }
+        }.use { casServer ->
+            // Mock WebVPN rejecting this student ID with /wengine-vpn/denied ("未在本地用户库注册")
+            LocalMiniHttpServer { req ->
+                when {
+                    req.path == "/login" && req.query.contains("ticket=ST-VALID-999") -> MockHttpResp(
+                        302,
+                        headers = listOf(
+                            "Set-Cookie" to "wengine_vpn_ticket=wrdvpn1-DENIED; Path=/; HttpOnly",
+                            "Location" to "/wengine-vpn/denied"
+                        )
+                    )
+                    req.path == "/wengine-vpn/denied" -> MockHttpResp(
+                        200,
+                        body = "<html><title>访问被拒绝</title><body>未在本地用户库注册，请联系管理员</body></html>"
+                    )
+                    else -> MockHttpResp(302, headers = listOf("Location" to "/login"))
+                }
+            }.use { webVpnServer ->
+                // Mock wfw.gdou.edu.cn raw proxy with exact Path=/sso + Path=/ JSESSIONID and https://jw.gdou.edu.cn redirect!
+                LocalMiniHttpServer { req ->
+                    val cookie = req.headers["cookie"].orEmpty()
+                    when {
+                        req.path == "/" && req.query.contains("ticket=ST-VALID-999") -> MockHttpResp(
+                            302,
+                            headers = listOf(
+                                "Set-Cookie" to "WFWSESSID=WFW-7DAY-OK; Path=/; Max-Age=604800; HttpOnly",
+                                "Location" to "/"
+                            )
+                        )
+                        req.path == "/" -> MockHttpResp(200, body = "<html><title>微门户</title><body>OK</body></html>")
+                        req.path == "/sso/jziotlogin" && req.query.contains("ticket=ST-VALID-999") -> {
+                            if (cookie.contains("urlss=")) wfwSawUrlssCookie.set(true)
+                            MockHttpResp(
+                                302,
+                                headers = listOf(
+                                    "Set-Cookie" to "JSESSIONID=SSO-STEP1; Path=/sso; HttpOnly",
+                                    // Real Zhengfang redirects to absolute https://jw.gdou.edu.cn/sso/jziotlogin!
+                                    "Location" to "https://jw.gdou.edu.cn/sso/jziotlogin"
+                                )
+                            )
+                        }
+                        req.path == "/sso/jziotlogin" -> {
+                            if (cookie.contains("JSESSIONID=SSO-STEP1")) {
+                                wfwSawPathSsoCookie.set(true)
+                                MockHttpResp(
+                                    302,
+                                    headers = listOf(
+                                        "Set-Cookie" to "JSESSIONID=JW-FULL-OK; Path=/; HttpOnly",
+                                        "Location" to "https://jw.gdou.edu.cn/xtgl/index_initMenu.html?jsdm=xs"
+                                    )
+                                )
+                            } else {
+                                MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+                            }
+                        }
+                        req.path == "/xtgl/index_initMenu.html" -> {
+                            if (cookie.contains("JSESSIONID=JW-FULL-OK")) {
+                                MockHttpResp(
+                                    200,
+                                    body = """<html><title>教学管理信息服务平台</title><body><div id="cdNav"></div><a onclick="clickMenu('N2151','/kbcx/xskbcx_cxXskbcxIndex.html','个人课表查询')">课表</a></body></html>"""
+                                )
+                            } else {
+                                MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+                            }
+                        }
+                        req.path == "/kbcx/xskbcx_cxXsgrkb.html" -> MockHttpResp(
+                            200,
+                            body = """{"kbList":[{"kcmc":"高等数学","xm":"李老师","cdmc":"广学楼101","xqj":"1","jcs":"1-2","zcd":"1-16周","xqmc":"湖光校区"}],"sjkList":[]}"""
+                        )
+                        else -> MockHttpResp(404)
+                    }
+                }.use { wfwServer ->
+                    val store = InMemoryGdouCookieStore()
+                    // Student logged in ONCE on direct authserver.gdou.edu.cn -> CASTGC is present
+                    store.saveResponseCookies(
+                        "${casServer.baseUrl}/authserver/login",
+                        listOf("CASTGC=TGT-STUDENT-OK; Path=/authserver; HttpOnly")
+                    )
+                    val engine = GdouNativeSyncEngine(
+                        cookieStore = store,
+                        allowLoopbackForTest = true,
+                        casLoginBaseOverride = "${casServer.baseUrl}/authserver/login",
+                        webVpnHostOverride = webVpnServer.baseUrl,
+                        wfwHostOverride = wfwServer.baseUrl
+                    )
+
+                    // Asking for WEBVPN hits /wengine-vpn/denied -> seamlessly auto-fails over to WFW_LEGACY!
+                    val outcome = engine.quickRefreshCourses(
+                        context = null,
+                        preferredChannel = SyncChannel.WEBVPN,
+                        savedYear = "2026",
+                        savedSem = "3",
+                        savedTermLabel = "2026-2027 第一学期",
+                        preferLegacyWfw = false
+                    )
+                    assertTrue("Expected seamless WFW_LEGACY Success on WebVPN denial, got $outcome", outcome is QuickRefreshNativeOutcome.Success)
+                    val ok = outcome as QuickRefreshNativeOutcome.Success
+                    assertEquals(SyncChannel.WFW_LEGACY, ok.channel)
+                    assertEquals(1, ok.courses.size)
+                    assertEquals("高等数学", ok.courses[0].name)
+                    assertTrue("Expected urlss cookie sent to wfw", wfwSawUrlssCookie.get())
+                    assertTrue("Expected Path=/sso JSESSIONID preserved across wfw redirect", wfwSawPathSsoCookie.get())
+                    assertFalse("Stale denied wengine_vpn_ticket must be cleared", engine.hasWebVpnTicketCookie())
+                    assertTrue("WFW session cookie should be established", engine.hasWfwSessionCookie())
+                    assertTrue(casMintedServices.any { it.contains("webvpn") || it.contains("cas_login=true") })
+                    assertTrue(casMintedServices.any { it == "https://jw.gdou.edu.cn/sso/jziotlogin" })
+
+                    // Cold-restart simulation with preferLegacyWfw = true goes straight to WFW_LEGACY without ever touching WebVPN again!
+                    casMintedServices.clear()
+                    val coldEngine = GdouNativeSyncEngine(
+                        cookieStore = store,
+                        allowLoopbackForTest = true,
+                        casLoginBaseOverride = "${casServer.baseUrl}/authserver/login",
+                        webVpnHostOverride = webVpnServer.baseUrl,
+                        wfwHostOverride = wfwServer.baseUrl
+                    )
+                    val secondOutcome = coldEngine.quickRefreshCourses(
+                        context = null,
+                        preferredChannel = SyncChannel.WEBVPN,
+                        savedYear = "2026",
+                        savedSem = "3",
+                        savedTermLabel = "2026-2027 第一学期",
+                        preferLegacyWfw = true
+                    )
+                    assertTrue(secondOutcome is QuickRefreshNativeOutcome.Success)
+                    assertEquals(SyncChannel.WFW_LEGACY, (secondOutcome as QuickRefreshNativeOutcome.Success).channel)
+                    assertTrue("Should not hit WebVPN again when preferLegacyWfw=true", casMintedServices.none { it.contains("cas_login=true") })
+                }
+            }
+        }
+    }
+
+    @Test
+    fun agedExpiredWebVpnTicketIsClearedBeforeReturningNeedsAuth() = runBlocking {
+        LocalMiniHttpServer { req ->
+            when {
+                req.path.startsWith("/https/") -> MockHttpResp(
+                    302,
+                    headers = listOf(
+                        "Location" to "/login",
+                        "Set-Cookie" to "wengine_vpn_ticket=wrdvpn1-GUEST; Path=/; HttpOnly"
+                    )
+                )
+                else -> MockHttpResp(200, body = "<html><title>WEB VPN</title><form id='form'></form></html>")
+            }
+        }.use { webVpnServer ->
+            val store = InMemoryGdouCookieStore()
+            store.saveResponseCookies(
+                "${webVpnServer.baseUrl}/",
+                listOf("wengine_vpn_ticket=wrdvpn1-AGED-EXPIRED; Path=/; HttpOnly")
+            )
+            val engine = GdouNativeSyncEngine(
+                cookieStore = store,
+                allowLoopbackForTest = true,
+                casLoginBaseOverride = "${webVpnServer.baseUrl}/authserver/login",
+                webVpnHostOverride = webVpnServer.baseUrl
+            )
+            assertTrue(engine.hasWebVpnTicketCookie())
+            val res = engine.establishOrVerifySession(SyncChannel.WEBVPN, forceReverify = true)
+            assertTrue("Expected NeedsAuth for aged expired ticket, got $res", res is SessionCheckResult.NeedsAuth)
+            assertFalse("Stale/guest wengine_vpn_ticket must be cleared before interactive re-auth", engine.hasWebVpnTicketCookie())
+        }
     }
 }

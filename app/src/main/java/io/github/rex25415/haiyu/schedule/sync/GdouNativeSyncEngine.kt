@@ -37,7 +37,7 @@ import java.util.zip.GZIPInputStream
 enum class SyncChannel(val id: String, val label: String) {
     WEBVPN("webvpn", "校外免校园网 (WebVPN)"),
     ON_CAMPUS("campus", "校园网直连"),
-    WFW_LEGACY("wfw", "备用校外微门户 (wfw)");
+    WFW_LEGACY("wfw", "校外兼容通道 (wfw)");
 
     val isOffCampus: Boolean get() = this != ON_CAMPUS
 
@@ -46,20 +46,25 @@ enum class SyncChannel(val id: String, val label: String) {
         return when (this) {
             WEBVPN -> "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}"
             ON_CAMPUS -> "https://jw.gdou.edu.cn"
-            WFW_LEGACY -> "https://wfw.gdou.edu.cn/https://jw.gdou.edu.cn"
+            WFW_LEGACY -> "https://wfw.gdou.edu.cn"
         }
     }
 
     fun authStartUrl(): String = when (this) {
-        WEBVPN -> GdouSyncScript.URL_WEBVPN_CAS_LOGIN
+        WEBVPN -> GdouSyncScript.URL_DIRECT_CAS_WEBVPN
         ON_CAMPUS -> GdouSyncScript.URL_ON_CAMPUS
-        WFW_LEGACY -> GdouSyncScript.URL_WFW_OFF_CAMPUS
+        WFW_LEGACY -> GdouSyncScript.URL_DIRECT_CAS_WFW
     }
 
     fun jwEntryUrl(): String = when (this) {
         WEBVPN -> GdouSyncScript.URL_WEBVPN_JW_ENTRY
         ON_CAMPUS -> GdouSyncScript.URL_ON_CAMPUS
         WFW_LEGACY -> GdouSyncScript.URL_WFW_JW_ENTRY
+    }
+
+    companion object {
+        fun preferredOffCampus(preferLegacyWfw: Boolean): SyncChannel =
+            if (preferLegacyWfw) WFW_LEGACY else WEBVPN
     }
 }
 
@@ -194,8 +199,18 @@ sealed class QuickRefreshNativeOutcome {
 class GdouNativeSyncEngine(
     private val cookieStore: GdouCookieStore = AndroidWebViewCookieStore(),
     private val customBaseUrlOverride: String? = null,
-    private val allowLoopbackForTest: Boolean = false
+    private val allowLoopbackForTest: Boolean = false,
+    private val casLoginBaseOverride: String? = null,
+    private val webVpnHostOverride: String? = null,
+    private val wfwHostOverride: String? = null
 ) {
+
+    private sealed class CasTicketMintResult {
+        data class Ticket(val ticket: String, val redirectLocation: String) : CasTicketMintResult()
+        data class Mfa(val mfaUrl: String) : CasTicketMintResult()
+        object NeedsLogin : CasTicketMintResult()
+        data class NetworkError(val message: String) : CasTicketMintResult()
+    }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val menuCache = ConcurrentHashMap<SyncChannel, DiscoveredMenuEndpoints>()
@@ -257,14 +272,180 @@ class GdouNativeSyncEngine(
         cookieStore.clearAll()
     }
 
+    private fun casLoginEndpoint(): String = casLoginBaseOverride?.trimEnd('/') ?: GdouSyncScript.URL_AUTH_SERVER
+    private fun webVpnRootUrl(): String = webVpnHostOverride?.trimEnd('/') ?: "https://webvpn.gdou.edu.cn"
+    private fun wfwRootUrl(): String = wfwHostOverride?.trimEnd('/') ?: "https://wfw.gdou.edu.cn"
+    private fun casBridgeEnabled(): Boolean = customBaseUrlOverride.isNullOrBlank() || !casLoginBaseOverride.isNullOrBlank()
+
+    fun hasDirectCasTgc(): Boolean =
+        cookieStore.getCookieHeader(casLoginEndpoint()).orEmpty().contains("CASTGC=", ignoreCase = true)
+
+    fun hasWebVpnTicketCookie(): Boolean =
+        cookieStore.getCookieHeader("${webVpnRootUrl()}/").orEmpty().contains("wengine_vpn_ticket=", ignoreCase = true)
+
+    fun hasWfwSessionCookie(): Boolean =
+        cookieStore.getCookieHeader("${wfwRootUrl()}/").orEmpty().contains("WFWSESSID=", ignoreCase = true)
+
+    fun clearStaleWebVpnTicket() {
+        cookieStore.clearCookieByPrefix("${webVpnRootUrl()}/", "wengine_vpn_ticket")
+    }
+
+    private fun ensureWfwJwProxyCookies() {
+        cookieStore.saveResponseCookies(
+            "${wfwRootUrl()}/",
+            listOf(
+                "urlss=\"https://jw.gdou.edu.cn/\"; Path=/; Secure",
+                "urlss_jw=\"https://jw.gdou.edu.cn/\"; Path=/; Secure"
+            )
+        )
+    }
+
+    /**
+     * 直接利用本地第一方 authserver.gdou.edu.cn 的 CASTGC 静默换取单次 CAS Service Ticket（ST-...）：
+     * - 校外 4G/5G 可直连 authserver.gdou.edu.cn，无需经过 WebVPN 或 wfw 代理；
+     * - 彻底绕开 wfw 代理吞掉 302 跳转并改写 service 参数的历史死循环，同时打通校园网 <-> 5G 零密码漫游！
+     */
+    private fun mintCasServiceTicket(serviceUrl: String, timeoutMs: Int = 8_000): CasTicketMintResult {
+        val reqUrl = "${casLoginEndpoint()}?service=${urlEncode(serviceUrl)}"
+        if (!isAllowedRequestUrl(reqUrl)) {
+            return CasTicketMintResult.NetworkError("拦截了非官方统一认证地址")
+        }
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(reqUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = timeoutMs
+                readTimeout = timeoutMs
+                useCaches = false
+                setRequestProperty("User-Agent", MOBILE_CHROME_UA)
+                setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+                setRequestProperty("Accept-Encoding", "gzip")
+                val cookieHeader = cookieStore.getCookieHeader(reqUrl)
+                if (!cookieHeader.isNullOrBlank()) {
+                    setRequestProperty("Cookie", cookieHeader)
+                }
+            }
+            val code = conn.responseCode
+            val setCookies = extractSetCookieHeaders(conn)
+            if (setCookies.isNotEmpty()) {
+                cookieStore.saveResponseCookies(reqUrl, setCookies)
+            }
+            if (code in 300..399) {
+                val locRaw = conn.getHeaderField("Location")?.trim().orEmpty()
+                drainStreamQuietly(conn, code)
+                if (locRaw.isEmpty()) return CasTicketMintResult.NeedsLogin
+                val resolved = normalizeGdouRedirectUrl(resolveRedirectUrl(reqUrl, locRaw), SyncChannel.ON_CAMPUS)
+                if (GdouSyncScript.isMfaUrl(resolved)) {
+                    return CasTicketMintResult.Mfa(resolved)
+                }
+                val ticket = CAS_TICKET_RE.find(resolved)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                if (ticket.isNotEmpty()) {
+                    CasTicketMintResult.Ticket(ticket, resolved)
+                } else {
+                    CasTicketMintResult.NeedsLogin
+                }
+            } else {
+                drainStreamQuietly(conn, code)
+                CasTicketMintResult.NeedsLogin
+            }
+        } catch (e: SocketTimeoutException) {
+            try { conn?.disconnect() } catch (_: Throwable) {}
+            CasTicketMintResult.NetworkError("统一认证连接超时")
+        } catch (e: IOException) {
+            try { conn?.disconnect() } catch (_: Throwable) {}
+            CasTicketMintResult.NetworkError("统一认证网络中断：${e.message ?: e.javaClass.simpleName}")
+        } catch (e: Exception) {
+            try { conn?.disconnect() } catch (_: Throwable) {}
+            CasTicketMintResult.NetworkError(e.message ?: "统一认证异常")
+        }
+    }
+
+    private suspend fun ensureWebVpnTicketFromCas(): HttpOutcome? {
+        val webVpnService = "${webVpnRootUrl()}/login?cas_login=true"
+        return when (val minted = mintCasServiceTicket(webVpnService)) {
+            is CasTicketMintResult.Ticket -> {
+                val redeemUrl = "${webVpnRootUrl()}/login?cas_login=true&ticket=${urlEncode(minted.ticket)}"
+                executeHttp(urlStr = redeemUrl, method = "GET", channel = SyncChannel.WEBVPN, timeoutMs = 8_000)
+            }
+            is CasTicketMintResult.Mfa -> HttpOutcome(302, minted.mfaUrl, "", "", authExpired = true, isMfa = true)
+            else -> null
+        }
+    }
+
+    private suspend fun redeemJwCasTicket(channel: SyncChannel, ticket: String): HttpOutcome {
+        if (channel == SyncChannel.WFW_LEGACY) {
+            ensureWfwJwProxyCookies()
+        }
+        val redeemUrl = when (channel) {
+            SyncChannel.WFW_LEGACY -> "${wfwRootUrl()}/sso/jziotlogin?ticket=${urlEncode(ticket)}"
+            else -> "${buildJwUrl(channel, "/sso/jziotlogin")}?ticket=${urlEncode(ticket)}"
+        }
+        val resp = executeHttp(urlStr = redeemUrl, method = "GET", channel = channel, timeoutMs = 10_000)
+        if (channel == SyncChannel.WFW_LEGACY) {
+            ensureWfwJwProxyCookies()
+        }
+        return resp
+    }
+
+    private suspend fun establishWfwSessionViaCas(): SessionCheckResult.NeedsAuth? {
+        ensureWfwJwProxyCookies()
+        if (!hasWfwSessionCookie()) {
+            when (val wfwTicket = mintCasServiceTicket("${wfwRootUrl()}/")) {
+                is CasTicketMintResult.Ticket -> {
+                    executeHttp(
+                        urlStr = "${wfwRootUrl()}/?ticket=${urlEncode(wfwTicket.ticket)}",
+                        method = "GET",
+                        channel = SyncChannel.WFW_LEGACY,
+                        timeoutMs = 8_000
+                    )
+                    ensureWfwJwProxyCookies()
+                }
+                is CasTicketMintResult.Mfa -> {
+                    return SessionCheckResult.NeedsAuth(
+                        channel = SyncChannel.WFW_LEGACY,
+                        resumeUrl = wfwTicket.mfaUrl,
+                        reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                        isMfa = true
+                    )
+                }
+                else -> {}
+            }
+        }
+        return when (val jwTicket = mintCasServiceTicket(GdouSyncScript.URL_JW_SSO_SERVICE)) {
+            is CasTicketMintResult.Ticket -> {
+                val redeemResp = redeemJwCasTicket(SyncChannel.WFW_LEGACY, jwTicket.ticket)
+                if (redeemResp.isMfa) {
+                    SessionCheckResult.NeedsAuth(
+                        channel = SyncChannel.WFW_LEGACY,
+                        resumeUrl = redeemResp.finalUrl,
+                        reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                        isMfa = true
+                    )
+                } else {
+                    null
+                }
+            }
+            is CasTicketMintResult.Mfa -> SessionCheckResult.NeedsAuth(
+                channel = SyncChannel.WFW_LEGACY,
+                resumeUrl = jwTicket.mfaUrl,
+                reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                isMfa = true
+            )
+            else -> null
+        }
+    }
+
     /**
      * 核心会话建立与无头 CAS 静默换票：
-     * WebView 完成统一认证拿到 WebVPN / CAS Cookie 后即可立刻销毁，本方法在后台 ~150ms 内通过纯 HTTP
-     * 自动跟完 /sso/jziotlogin -> CAS 静默签票 -> /xtgl/index_initMenu.html，完成正方会话建立并解析菜单。
+     * - WebView 完成第一方 authserver.gdou.edu.cn 统一认证拿到 CASTGC 后即可立刻销毁；
+     * - 后台 ~150ms 通过纯 HTTP 直连 authserver 签发单次 ST 票据并核销到正方 / WebVPN / wfw；
+     * - 若学号未同步至新版 WebVPN 本地用户库（/wengine-vpn/denied），自动利用已有 CASTGC 零密码无缝切至兼容通道 (wfw)！
      */
     suspend fun establishOrVerifySession(
         channel: SyncChannel,
-        forceReverify: Boolean = false
+        forceReverify: Boolean = false,
+        allowAutoWfwFailover: Boolean = true
     ): SessionCheckResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
         if (!forceReverify) {
@@ -275,14 +456,12 @@ class GdouNativeSyncEngine(
             }
         }
 
-        // 0-RTT fast-path & silent cross-channel CASTGC -> WebVPN ticket minting (real GDOU only)
-        if (customBaseUrlOverride.isNullOrBlank()) {
-            val authCookies = cookieStore.getCookieHeader("https://authserver.gdou.edu.cn/").orEmpty()
-            val hasCasTgc = authCookies.contains("CASTGC=", ignoreCase = true)
+        // 0-RTT fast-path & silent cross-channel CASTGC -> WebVPN / WFW ticket minting
+        if (casBridgeEnabled()) {
+            val hasCasTgc = hasDirectCasTgc()
             when (channel) {
                 SyncChannel.WEBVPN -> {
-                    val vpnCookies = cookieStore.getCookieHeader("https://webvpn.gdou.edu.cn/").orEmpty()
-                    val hasVpnTicket = vpnCookies.contains("wengine_vpn_ticket=", ignoreCase = true)
+                    val hasVpnTicket = hasWebVpnTicketCookie()
                     if (!hasVpnTicket && !hasCasTgc) {
                         invalidateSessionCache(channel)
                         return@withContext SessionCheckResult.NeedsAuth(
@@ -292,24 +471,28 @@ class GdouNativeSyncEngine(
                         )
                     }
                     if (!hasVpnTicket && hasCasTgc) {
-                        // User already has valid CASTGC (e.g. previously logged in on campus Wi-Fi):
-                        // silently mint wengine_vpn_ticket over pure HTTP without opening WebView!
-                        val ssoResp = executeHttp(
-                            urlStr = GdouSyncScript.URL_WEBVPN_CAS_LOGIN,
-                            method = "GET",
-                            channel = channel,
-                            timeoutMs = 8_000
-                        )
-                        if (ssoResp.isWebVpnDenied) {
+                        val ssoResp = ensureWebVpnTicketFromCas()
+                        if (ssoResp?.isWebVpnDenied == true) {
+                            clearStaleWebVpnTicket()
                             invalidateSessionCache(channel)
+                            if (allowAutoWfwFailover && hasDirectCasTgc()) {
+                                val fallback = establishOrVerifySession(
+                                    channel = SyncChannel.WFW_LEGACY,
+                                    forceReverify = true,
+                                    allowAutoWfwFailover = false
+                                )
+                                if (fallback is SessionCheckResult.Ready) {
+                                    return@withContext fallback
+                                }
+                            }
                             return@withContext SessionCheckResult.NeedsAuth(
                                 channel = channel,
-                                resumeUrl = ssoResp.finalUrl.ifBlank { "https://webvpn.gdou.edu.cn/wengine-vpn/denied" },
-                                reason = "学校 WebVPN 提示「未在本地用户库注册」，可切备用入口(wfw)或用企业微信扫码登录",
+                                resumeUrl = ssoResp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
+                                reason = "学校 WebVPN 提示「未在本地用户库注册」，已为您准备校外兼容通道(wfw)与企业微信扫码",
                                 isWebVpnDenied = true
                             )
                         }
-                        if (ssoResp.isMfa) {
+                        if (ssoResp?.isMfa == true) {
                             invalidateSessionCache(channel)
                             return@withContext SessionCheckResult.NeedsAuth(
                                 channel = channel,
@@ -334,19 +517,129 @@ class GdouNativeSyncEngine(
                     }
                 }
                 SyncChannel.WFW_LEGACY -> {
-                    // Warm legacy WFW gateway before hitting proxied JW
-                    executeHttp(
-                        urlStr = GdouSyncScript.URL_WFW_JW_ENTRY,
-                        method = "GET",
-                        channel = channel,
-                        timeoutMs = 8_000
-                    )
+                    ensureWfwJwProxyCookies()
+                    val wfwCookies = cookieStore.getCookieHeader("${wfwRootUrl()}/").orEmpty()
+                    val hasJwSession = wfwCookies.contains("JSESSIONID=", ignoreCase = true)
+                    val hasWfwSess = wfwCookies.contains("WFWSESSID=", ignoreCase = true)
+                    if (!hasJwSession && !hasWfwSess && !hasCasTgc) {
+                        invalidateSessionCache(channel)
+                        return@withContext SessionCheckResult.NeedsAuth(
+                            channel = channel,
+                            resumeUrl = channel.authStartUrl(),
+                            reason = "请完成广东海洋大学统一身份认证"
+                        )
+                    }
+                    if (!hasJwSession && hasCasTgc) {
+                        val mfaStop = establishWfwSessionViaCas()
+                        if (mfaStop != null) {
+                            invalidateSessionCache(channel)
+                            return@withContext mfaStop
+                        }
+                    }
                 }
             }
         }
 
         val url = buildJwUrl(channel, "/xtgl/index_initMenu.html?jsdm=xs")
-        val resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+        var resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+
+        // Headless CAS ST renewal if JW JSESSIONID (or outer WebVPN ticket) expired while first-party CASTGC is still valid
+        val initialExpired = !resp.networkError && !resp.isMfa && !resp.isWebVpnDenied &&
+            (resp.authExpired || isAuthExpiredStatus(resp.statusCode) || isAuthExpiredHtml(resp.body))
+        if (initialExpired && casBridgeEnabled() && hasDirectCasTgc()) {
+            when (channel) {
+                SyncChannel.WFW_LEGACY -> {
+                    val mfaStop = establishWfwSessionViaCas()
+                    if (mfaStop != null) {
+                        invalidateSessionCache(channel)
+                        return@withContext mfaStop
+                    }
+                    resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+                }
+                SyncChannel.WEBVPN -> {
+                    val bouncedToVpnLogin = GdouSyncScript.extractHostLower(resp.finalUrl) ==
+                        GdouSyncScript.extractHostLower(webVpnRootUrl()) &&
+                        try { URI(resp.finalUrl).path.orEmpty().trimEnd('/') == "/login" } catch (_: Exception) { false }
+                    if (bouncedToVpnLogin || !hasWebVpnTicketCookie()) {
+                        clearStaleWebVpnTicket()
+                        val vpnResp = ensureWebVpnTicketFromCas()
+                        if (vpnResp?.isWebVpnDenied == true) {
+                            clearStaleWebVpnTicket()
+                            invalidateSessionCache(channel)
+                            if (allowAutoWfwFailover && hasDirectCasTgc()) {
+                                val fallback = establishOrVerifySession(
+                                    channel = SyncChannel.WFW_LEGACY,
+                                    forceReverify = true,
+                                    allowAutoWfwFailover = false
+                                )
+                                if (fallback is SessionCheckResult.Ready) {
+                                    return@withContext fallback
+                                }
+                            }
+                            return@withContext SessionCheckResult.NeedsAuth(
+                                channel = channel,
+                                resumeUrl = vpnResp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
+                                reason = "学校 WebVPN 提示「未在本地用户库注册」，已为您准备校外兼容通道(wfw)与企业微信扫码",
+                                isWebVpnDenied = true
+                            )
+                        }
+                        if (vpnResp?.isMfa == true) {
+                            invalidateSessionCache(channel)
+                            return@withContext SessionCheckResult.NeedsAuth(
+                                channel = channel,
+                                resumeUrl = vpnResp.finalUrl,
+                                reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                                isMfa = true
+                            )
+                        }
+                    }
+                    when (val jwTicket = mintCasServiceTicket(GdouSyncScript.URL_JW_SSO_SERVICE)) {
+                        is CasTicketMintResult.Ticket -> {
+                            val redeemResp = redeemJwCasTicket(SyncChannel.WEBVPN, jwTicket.ticket)
+                            if (redeemResp.isMfa) {
+                                invalidateSessionCache(channel)
+                                return@withContext SessionCheckResult.NeedsAuth(
+                                    channel = channel,
+                                    resumeUrl = redeemResp.finalUrl,
+                                    reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                                    isMfa = true
+                                )
+                            }
+                            resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+                        }
+                        is CasTicketMintResult.Mfa -> {
+                            invalidateSessionCache(channel)
+                            return@withContext SessionCheckResult.NeedsAuth(
+                                channel = channel,
+                                resumeUrl = jwTicket.mfaUrl,
+                                reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                                isMfa = true
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+                SyncChannel.ON_CAMPUS -> {
+                    when (val jwTicket = mintCasServiceTicket(GdouSyncScript.URL_JW_SSO_SERVICE)) {
+                        is CasTicketMintResult.Ticket -> {
+                            redeemJwCasTicket(SyncChannel.ON_CAMPUS, jwTicket.ticket)
+                            resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+                        }
+                        is CasTicketMintResult.Mfa -> {
+                            invalidateSessionCache(channel)
+                            return@withContext SessionCheckResult.NeedsAuth(
+                                channel = channel,
+                                resumeUrl = jwTicket.mfaUrl,
+                                reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
+                                isMfa = true
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+
         val elapsed = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
 
         if (resp.networkError) {
@@ -356,11 +649,22 @@ class GdouNativeSyncEngine(
             )
         }
         if (resp.isWebVpnDenied) {
+            clearStaleWebVpnTicket()
             invalidateSessionCache(channel)
+            if (allowAutoWfwFailover && casBridgeEnabled() && hasDirectCasTgc()) {
+                val fallback = establishOrVerifySession(
+                    channel = SyncChannel.WFW_LEGACY,
+                    forceReverify = true,
+                    allowAutoWfwFailover = false
+                )
+                if (fallback is SessionCheckResult.Ready) {
+                    return@withContext fallback
+                }
+            }
             return@withContext SessionCheckResult.NeedsAuth(
                 channel = channel,
-                resumeUrl = resp.finalUrl.ifBlank { "https://webvpn.gdou.edu.cn/wengine-vpn/denied" },
-                reason = "学校 WebVPN 提示「未在本地用户库注册」，可切备用入口(wfw)或用企业微信扫码登录",
+                resumeUrl = resp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
+                reason = "学校 WebVPN 提示「未在本地用户库注册」，可一键切校外兼容通道(wfw)或企业微信扫码",
                 isWebVpnDenied = true
             )
         }
@@ -374,6 +678,10 @@ class GdouNativeSyncEngine(
             )
         }
         if (resp.authExpired || isAuthExpiredStatus(resp.statusCode) || isAuthExpiredHtml(resp.body)) {
+            if (channel == SyncChannel.WEBVPN) {
+                // Always clear expired/split-expired wengine_vpn_ticket before re-auth so aged sessions behave as cleanly as fresh installs!
+                clearStaleWebVpnTicket()
+            }
             invalidateSessionCache(channel)
             val resume = resolveInteractiveResumeUrl(channel, resp.finalUrl)
             return@withContext SessionCheckResult.NeedsAuth(
@@ -686,17 +994,19 @@ class GdouNativeSyncEngine(
         savedYear: String,
         savedSem: String,
         savedTermLabel: String,
+        preferLegacyWfw: Boolean = false,
         onProgress: (String) -> Unit = {}
     ): QuickRefreshNativeOutcome = withContext(Dispatchers.IO) {
-        var activeChannel = if (
+        val offCampusTarget = SyncChannel.preferredOffCampus(
+            preferLegacyWfw || (casBridgeEnabled() && hasWfwSessionCookie() && !hasWebVpnTicketCookie())
+        )
+        var activeChannel = when {
+            preferredChannel == SyncChannel.WEBVPN && preferLegacyWfw -> SyncChannel.WFW_LEGACY
             preferredChannel == SyncChannel.ON_CAMPUS &&
-            context != null &&
-            customBaseUrlOverride.isNullOrBlank() &&
-            NetworkChannelProbe.shouldPreferOffCampusImmediately(context)
-        ) {
-            SyncChannel.WEBVPN
-        } else {
-            preferredChannel
+                context != null &&
+                customBaseUrlOverride.isNullOrBlank() &&
+                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) -> offCampusTarget
+            else -> preferredChannel
         }
         onProgress("正在校验教务连接...")
         var session = establishOrVerifySession(activeChannel, forceReverify = false)
@@ -706,7 +1016,7 @@ class GdouNativeSyncEngine(
             onProgress("直连受限，正在切至校外通道...")
             val probe = NetworkChannelProbe.probe(context)
             if (probe.state == CampusNetworkState.OFF_CAMPUS_ONLY) {
-                activeChannel = SyncChannel.WEBVPN
+                activeChannel = offCampusTarget
                 session = establishOrVerifySession(activeChannel, forceReverify = true)
             } else if (probe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
                 return@withContext QuickRefreshNativeOutcome.Error("当前网络暂未连通学校服务器，请检查流量或先连接校园网")
@@ -716,7 +1026,7 @@ class GdouNativeSyncEngine(
         when (session) {
             is SessionCheckResult.NeedsAuth -> {
                 return@withContext QuickRefreshNativeOutcome.NeedsLogin(
-                    channel = activeChannel,
+                    channel = session.channel,
                     resumeUrl = session.resumeUrl,
                     reason = session.reason,
                     isMfa = session.isMfa,
@@ -727,7 +1037,7 @@ class GdouNativeSyncEngine(
                 return@withContext QuickRefreshNativeOutcome.Error(session.message)
             }
             is SessionCheckResult.Ready -> {
-                // Proceed to fetch courses
+                activeChannel = session.channel
             }
         }
 
@@ -1689,6 +1999,8 @@ class GdouNativeSyncEngine(
             if (attempt < 2) {
                 if (channel == SyncChannel.ON_CAMPUS) {
                     cookieStore.clearCookieByPrefix("https://jw.gdou.edu.cn/", "ADCCookie")
+                } else if (channel == SyncChannel.WFW_LEGACY) {
+                    cookieStore.clearCookieByPrefix("${wfwRootUrl()}/", "ADCCookie")
                 }
                 delay(280L * (attempt + 1))
             }
@@ -1757,7 +2069,7 @@ class GdouNativeSyncEngine(
                         return HttpOutcome(code, currentUrl, "", "", authExpired = true)
                     }
                     var nextUrl = resolveRedirectUrl(currentUrl, loc)
-                    nextUrl = normalizeGdouRedirectUrl(nextUrl)
+                    nextUrl = normalizeGdouRedirectUrl(nextUrl, channel)
 
                     val lowerNext = nextUrl.lowercase(Locale.US)
                     if (lowerNext.contains("/wengine-vpn/denied") || lowerNext.contains("/wengine-vpn/failed")) {
@@ -1789,7 +2101,7 @@ class GdouNativeSyncEngine(
                 }
                 val landedOnAuthGate = (lowerFinal.contains("/authserver/") ||
                     lowerFinal.contains("/cas/login") ||
-                    (GdouSyncScript.extractHostLower(currentUrl) == "webvpn.gdou.edu.cn" &&
+                    (GdouSyncScript.extractHostLower(currentUrl) == GdouSyncScript.extractHostLower(webVpnRootUrl()) &&
                         URI(currentUrl).path.orEmpty().trimEnd('/') == "/login"))
                 if (landedOnAuthGate && (hasAuthFormDom(body) || isStrongAuthExpiredHtml(body))) {
                     return HttpOutcome(code, currentUrl, body, ct, authExpired = true)
@@ -1874,14 +2186,37 @@ class GdouNativeSyncEngine(
         }
     }
 
-    private fun normalizeGdouRedirectUrl(url: String): String {
+    private fun normalizeGdouRedirectUrl(url: String, channel: SyncChannel): String {
         // 1. Upgrade cleartext http://*.gdou.edu.cn -> https://*.gdou.edu.cn
         val upgraded = GdouJsBridge.upgradeGdouHttpToHttps(url) ?: url
-        // 2. Normalize WebVPN /http/<auth_hex>/authserver/ -> /https/<auth_hex>/authserver/ so WebVPN preserves CAS session
-        val authHttpPrefix = "https://webvpn.gdou.edu.cn/http/${GdouSyncScript.WEBVPN_AUTH_HEX}/"
+        // 2. Normalize WebVPN /http/<auth_hex>/authserver/ -> /https/<auth_hex>/authserver/ and keep bare jw redirects inside WebVPN
+        val authHttpPrefix = "${webVpnRootUrl()}/http/${GdouSyncScript.WEBVPN_AUTH_HEX}/"
         if (upgraded.startsWith(authHttpPrefix, ignoreCase = true)) {
-            return "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/" +
+            return "${webVpnRootUrl()}/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/" +
                 upgraded.substring(authHttpPrefix.length)
+        }
+        if (channel == SyncChannel.WEBVPN) {
+            val jwPrefix = "https://jw.gdou.edu.cn"
+            if (upgraded.equals(jwPrefix, ignoreCase = true)) {
+                return "${webVpnRootUrl()}/https/${GdouSyncScript.WEBVPN_JW_HEX}/"
+            }
+            if (upgraded.startsWith("$jwPrefix/", ignoreCase = true)) {
+                return "${webVpnRootUrl()}/https/${GdouSyncScript.WEBVPN_JW_HEX}" + upgraded.substring(jwPrefix.length)
+            }
+        }
+        // 3. On WFW_LEGACY, keep every jw.gdou.edu.cn redirect inside wfw root so Path=/sso & Path=/ JSESSIONID cookies stay valid off-campus!
+        if (channel == SyncChannel.WFW_LEGACY) {
+            val jwPrefix = "https://jw.gdou.edu.cn"
+            if (upgraded.equals(jwPrefix, ignoreCase = true)) {
+                return "${wfwRootUrl()}/"
+            }
+            if (upgraded.startsWith("$jwPrefix/", ignoreCase = true)) {
+                return wfwRootUrl() + upgraded.substring(jwPrefix.length)
+            }
+            val wfwNestedPrefix = "${wfwRootUrl()}/https://jw.gdou.edu.cn"
+            if (upgraded.startsWith("$wfwNestedPrefix/", ignoreCase = true)) {
+                return wfwRootUrl() + upgraded.substring(wfwNestedPrefix.length)
+            }
         }
         return upgraded
     }
@@ -1902,7 +2237,15 @@ class GdouNativeSyncEngine(
 
     private fun buildJwUrl(channel: SyncChannel, relativePath: String): String {
         val clean = stripProxyPrefix(relativePath)
-        return channel.baseJwUrl(customBaseUrlOverride) + clean
+        val base = when {
+            !customBaseUrlOverride.isNullOrBlank() -> customBaseUrlOverride.trimEnd('/')
+            channel == SyncChannel.WEBVPN && !webVpnHostOverride.isNullOrBlank() ->
+                "${webVpnHostOverride.trimEnd('/')}/https/${GdouSyncScript.WEBVPN_JW_HEX}"
+            channel == SyncChannel.WFW_LEGACY && !wfwHostOverride.isNullOrBlank() ->
+                wfwHostOverride.trimEnd('/')
+            else -> channel.baseJwUrl(null)
+        }
+        return base + clean
     }
 
     private fun mapGradeItems(items: List<JsonObject>): List<GradeItem> {
@@ -1991,6 +2334,7 @@ class GdouNativeSyncEngine(
         private const val MOBILE_CHROME_UA =
             "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
 
+        private val CAS_TICKET_RE = Regex("""[?&]ticket=([^&#\s]+)""", RegexOption.IGNORE_CASE)
         private val TITLE_RE = Regex("""<title[^>]*>([\s\S]*?)</title>""", RegexOption.IGNORE_CASE)
         private val HEAD_RE = Regex("""<head\b[^>]*>[\s\S]*?</head>""", RegexOption.IGNORE_CASE)
         private val COMMENT_RE = Regex("""<!--[\s\S]*?-->""")

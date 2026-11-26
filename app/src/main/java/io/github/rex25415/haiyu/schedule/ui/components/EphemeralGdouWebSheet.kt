@@ -190,6 +190,36 @@ fun EphemeralGdouWebSheet(
         )
     }
 
+    fun hasDirectCasTgcCookie(): Boolean = try {
+        CookieManager.getInstance()
+            .getCookie("https://authserver.gdou.edu.cn/")
+            .orEmpty()
+            .contains("CASTGC=", ignoreCase = true)
+    } catch (_: Throwable) {
+        false
+    }
+
+    fun clearStaleWebVpnTicketCookie() {
+        try {
+            val cm = CookieManager.getInstance()
+            val existing = cm.getCookie("https://webvpn.gdou.edu.cn/").orEmpty()
+            existing.split(";").forEach { part ->
+                val cname = part.trim().substringBefore("=").trim()
+                if (cname.startsWith("wengine_vpn_ticket", ignoreCase = true)) {
+                    cm.setCookie("https://webvpn.gdou.edu.cn/", "$cname=; Max-Age=0; Path=/")
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+
+    fun ensureWfwProxyCookiesInWebView() {
+        try {
+            val cm = CookieManager.getInstance()
+            cm.setCookie("https://wfw.gdou.edu.cn/", "urlss=\"https://jw.gdou.edu.cn/\"; Path=/; Secure")
+            cm.setCookie("https://wfw.gdou.edu.cn/", "urlss_jw=\"https://jw.gdou.edu.cn/\"; Path=/; Secure")
+        } catch (_: Throwable) {}
+    }
+
     fun triggerInstantAuthHandoff(wv: WebView?, completedChannel: SyncChannel) {
         if (authHandoffDispatched) return
         authHandoffDispatched = true
@@ -201,6 +231,16 @@ fun EphemeralGdouWebSheet(
             }.start()
             onAuthCompleted(completedChannel)
         }
+    }
+
+    fun tryAutoFailoverWebVpnDenied(wv: WebView?): Boolean {
+        clearStaleWebVpnTicketCookie()
+        if (request.mode == WebSheetMode.AUTH_ONLY && hasDirectCasTgcCookie()) {
+            onShowMessage("统一认证已通过，检测到 WebVPN 未同步该学号，已自动无缝切至校外兼容通道")
+            triggerInstantAuthHandoff(wv, SyncChannel.WFW_LEGACY)
+            return true
+        }
+        return false
     }
 
     val isWebVpnAccessDenied = remember(currentUrl, pageTitle, pageErrorMsg, domWebVpnDenied) {
@@ -436,21 +476,23 @@ fun EphemeralGdouWebSheet(
                         ) {
                             Button(
                                 onClick = {
-                                    onSwitchRequest(
-                                        WebSheetRequest(
-                                            mode = WebSheetMode.AUTH_ONLY,
-                                            channel = SyncChannel.WFW_LEGACY,
-                                            startUrl = GdouSyncScript.URL_WFW_OFF_CAMPUS,
-                                            titleHint = "备用校外微门户登录",
-                                            preferDesktopUa = false
+                                    if (!tryAutoFailoverWebVpnDenied(webViewRef)) {
+                                        onSwitchRequest(
+                                            WebSheetRequest(
+                                                mode = WebSheetMode.AUTH_ONLY,
+                                                channel = SyncChannel.WFW_LEGACY,
+                                                startUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
+                                                titleHint = "校外兼容通道登录",
+                                                preferDesktopUa = false
+                                            )
                                         )
-                                    )
+                                    }
                                 },
                                 shape = RoundedCornerShape(9.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("切备用入口(wfw)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text("切兼容通道(wfw)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                             OutlinedButton(
                                 onClick = {
@@ -513,6 +555,8 @@ fun EphemeralGdouWebSheet(
                                 try {
                                     cm.setCookie("https://webvpn.gdou.edu.cn/", "show_vpn=0; Path=/; Secure")
                                 } catch (_: Exception) {}
+                            } else if (activeChannel == SyncChannel.WFW_LEGACY) {
+                                ensureWfwProxyCookiesInWebView()
                             }
 
                             settings.apply {
@@ -599,6 +643,20 @@ fun EphemeralGdouWebSheet(
                                     if (u.startsWith("https://", ignoreCase = true)) {
                                         if (
                                             req.isForMainFrame &&
+                                            activeChannel == SyncChannel.WFW_LEGACY &&
+                                            u.startsWith("https://jw.gdou.edu.cn/", ignoreCase = true)
+                                        ) {
+                                            ensureWfwProxyCookiesInWebView()
+                                            val rewritten = "https://wfw.gdou.edu.cn" + u.substring("https://jw.gdou.edu.cn".length)
+                                            mainHandler.post {
+                                                currentUrl = rewritten
+                                                trustedUrlRef.set(rewritten)
+                                                view?.loadUrl(rewritten)
+                                            }
+                                            return true
+                                        }
+                                        if (
+                                            req.isForMainFrame &&
                                             GdouSyncScript.shouldFastRedirectWebVpnLoginToCas(
                                                 url = u,
                                                 useOffCampus = activeChannel == SyncChannel.WEBVPN,
@@ -609,9 +667,9 @@ fun EphemeralGdouWebSheet(
                                         ) {
                                             hasAutoTriggeredCas = true
                                             mainHandler.post {
-                                                currentUrl = GdouSyncScript.URL_WEBVPN_CAS_LOGIN
-                                                trustedUrlRef.set(GdouSyncScript.URL_WEBVPN_CAS_LOGIN)
-                                                view?.loadUrl(GdouSyncScript.URL_WEBVPN_CAS_LOGIN)
+                                                currentUrl = GdouSyncScript.URL_DIRECT_CAS_WEBVPN
+                                                trustedUrlRef.set(GdouSyncScript.URL_DIRECT_CAS_WEBVPN)
+                                                view?.loadUrl(GdouSyncScript.URL_DIRECT_CAS_WEBVPN)
                                             }
                                             return true
                                         }
@@ -637,6 +695,15 @@ fun EphemeralGdouWebSheet(
                                     suppressWebVpnFloat(view, url)
 
                                     if (request.mode == WebSheetMode.AUTH_ONLY && !url.isNullOrBlank()) {
+                                        val lowerStarted = url.lowercase()
+                                        // 0) WebVPN local-user-DB denial (/wengine-vpn/denied): if first-party CASTGC is already saved,
+                                        //    silently hand off to WFW_LEGACY with ZERO second password and ZERO red error screen!
+                                        if (
+                                            activeChannel == SyncChannel.WEBVPN &&
+                                            (lowerStarted.contains("/wengine-vpn/denied") || lowerStarted.contains("/wengine-vpn/failed"))
+                                        ) {
+                                            if (tryAutoFailoverWebVpnDenied(view)) return
+                                        }
                                         // 1) WebVPN CAS ticket succeeded and redirected to WebVPN portal or proxied JW -> HANDOFF INSTANTLY!
                                         if (
                                             activeChannel == SyncChannel.WEBVPN &&
@@ -653,6 +720,23 @@ fun EphemeralGdouWebSheet(
                                         ) {
                                             triggerInstantAuthHandoff(view, SyncChannel.ON_CAMPUS)
                                             return
+                                        }
+                                        // 3) CAS service param dropped & landed on authserver personal portal -> CASTGC already valid, hand off!
+                                        if (GdouSyncScript.isAuthenticatedCasFallbackUrl(url) && hasDirectCasTgcCookie()) {
+                                            triggerInstantAuthHandoff(view, activeChannel)
+                                            return
+                                        }
+                                    } else if (
+                                        request.mode == WebSheetMode.FULL_BROWSER &&
+                                        activeChannel == SyncChannel.WEBVPN &&
+                                        !url.isNullOrBlank() &&
+                                        GdouSyncScript.isAuthenticatedWebVpnPortalUrl(url)
+                                    ) {
+                                        // Even in full-browser mode, skip the WebVPN resource list straight into Zhengfang JW
+                                        mainHandler.post {
+                                            currentUrl = GdouSyncScript.URL_WEBVPN_JW_ENTRY
+                                            trustedUrlRef.set(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
+                                            view?.loadUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
                                         }
                                     }
                                 }
@@ -678,7 +762,9 @@ fun EphemeralGdouWebSheet(
                                             """(function(){ var t = (document.body && document.body.textContent) || ''; return (t.indexOf('未在本地用户库注册') !== -1 || t.indexOf('没有权限访问该资源') !== -1) ? 'DENIED' : 'OK'; })();"""
                                         ) { res ->
                                             if (res != null && res.contains("DENIED") && wv.url == finishedUrl) {
-                                                domWebVpnDenied = true
+                                                if (!tryAutoFailoverWebVpnDenied(wv)) {
+                                                    domWebVpnDenied = true
+                                                }
                                             }
                                         }
                                         if (pendingWeComTab && Uri.parse(finishedUrl).path.orEmpty().trimEnd('/') == "/login") {
@@ -728,20 +814,28 @@ fun EphemeralGdouWebSheet(
                                             triggerInstantAuthHandoff(wv, SyncChannel.WEBVPN)
                                             return
                                         }
+                                        if (GdouSyncScript.isAuthenticatedCasFallbackUrl(finishedUrl) && hasDirectCasTgcCookie()) {
+                                            triggerInstantAuthHandoff(wv, activeChannel)
+                                            return
+                                        }
                                         val host = GdouSyncScript.extractHostLower(finishedUrl)
                                         val path = try { Uri.parse(finishedUrl).path.orEmpty() } catch (_: Exception) { "" }
                                         val query = try { Uri.parse(finishedUrl).query.orEmpty() } catch (_: Exception) { "" }
                                         if (
                                             activeChannel == SyncChannel.WFW_LEGACY &&
                                             host == "wfw.gdou.edu.cn" &&
-                                            (path.isEmpty() || path == "/" || path == "/index.html") &&
                                             !query.contains("ticket=") &&
                                             !titleNow.contains("跳转") &&
                                             !titleNow.contains("统一身份认证") &&
                                             !titleNow.contains("登录")
                                         ) {
+                                            ensureWfwProxyCookiesInWebView()
+                                            if (hasDirectCasTgcCookie()) {
+                                                triggerInstantAuthHandoff(wv, SyncChannel.WFW_LEGACY)
+                                                return
+                                            }
                                             wv.evaluateJavascript(
-                                                """(function(){ var txt = (document.body && document.body.textContent) || ''; var hasForm = !!document.querySelector('input[type=password]'); return (!hasForm && txt.indexOf('正在跳转') === -1 && txt.indexOf('统一身份认证') === -1) ? 'READY' : 'WAIT'; })();"""
+                                                """(function(){ var txt = (document.body && document.body.textContent) || ''; var hasForm = !!document.querySelector('input[type=password]'); return (!hasForm && txt.indexOf('正在跳转到统一认证') === -1 && txt.indexOf('正在为您跳转') === -1) ? 'READY' : 'WAIT'; })();"""
                                             ) { res ->
                                                 if (res != null && res.contains("READY")) {
                                                     triggerInstantAuthHandoff(wv, SyncChannel.WFW_LEGACY)

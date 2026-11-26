@@ -18,6 +18,11 @@ object GdouSyncScript {
     const val URL_OFF_CAMPUS = URL_WEBVPN_JW_ENTRY
     const val URL_ON_CAMPUS = "https://jw.gdou.edu.cn/"
     const val URL_AUTH_SERVER = "https://authserver.gdou.edu.cn/authserver/login"
+    const val URL_JW_SSO_SERVICE = "https://jw.gdou.edu.cn/sso/jziotlogin"
+    const val URL_DIRECT_CAS_WEBVPN =
+        "https://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fwebvpn.gdou.edu.cn%2Flogin%3Fcas_login%3Dtrue"
+    const val URL_DIRECT_CAS_WFW =
+        "https://authserver.gdou.edu.cn/authserver/login?service=https%3A%2F%2Fwfw.gdou.edu.cn%2F"
 
     const val DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -2349,6 +2354,26 @@ object GdouSyncScript {
             return false
         }
         return true
+    }
+
+    /** 判断 URL 是否是统一认证因 service 参数丢失而落入的已登录个人中心/融合门户页（此时 CASTGC 已生效，可立即交还原生引擎签票）。 */
+    fun isAuthenticatedCasFallbackUrl(url: String?): Boolean {
+        val raw = url?.trim().orEmpty()
+        if (raw.isEmpty()) return false
+        val lower = raw.lowercase(java.util.Locale.US)
+        if (isMfaUrl(lower) || lower.contains("/authserver/login") || lower.contains("/cas/login") || lower.contains("/logout")) {
+            return false
+        }
+        val host = extractHostLower(raw)
+        if (host == "authserver.gdou.edu.cn" || (host == "webvpn.gdou.edu.cn" && lower.contains("/authserver/"))) {
+            return lower.contains("/authserver/index.do") ||
+                lower.contains("/authserver/personalinfo") ||
+                lower.contains("/authserver/account")
+        }
+        if (host == "i.gdou.edu.cn" || host == "ehall.gdou.edu.cn") {
+            return !lower.contains("/login")
+        }
+        return false
     }
 
     /** 切回目标通道后，忽略上一条被中断通道延迟送达的主框架网络错误。 */

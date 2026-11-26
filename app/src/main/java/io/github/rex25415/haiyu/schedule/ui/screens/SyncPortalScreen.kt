@@ -110,7 +110,7 @@ import kotlinx.coroutines.launch
 data class ExternalAuthTrigger(
     val nonce: Int = 0,
     val channel: SyncChannel = SyncChannel.WEBVPN,
-    val resumeUrl: String = GdouSyncScript.URL_WEBVPN_CAS_LOGIN,
+    val resumeUrl: String = GdouSyncScript.URL_DIRECT_CAS_WEBVPN,
     val reason: String = "",
     val isMfa: Boolean = false,
     val isWebVpnDenied: Boolean = false,
@@ -151,7 +151,7 @@ fun SyncPortalScreen(
     ) -> Unit,
     onLoginStateChanged: (Boolean) -> Unit,
     onSyncStateChanged: (Boolean) -> Unit,
-    onUpdateChannelPrefs: (preferOffCampus: Boolean, preferDesktopUa: Boolean) -> Unit,
+    onUpdateChannelPrefs: (preferOffCampus: Boolean, preferDesktopUa: Boolean, preferLegacyWfw: Boolean) -> Unit,
     onToggleFavoriteBuilding: (GdouCampus, String) -> Unit = { _, _ -> },
     onToggleFavoriteClassroom: (GdouCampus, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
     onCoursesSynced: (List<CourseItem>, String?, Int, String, String, String, String, List<PracticeCourseItem>) -> GdouCampus?,
@@ -166,12 +166,17 @@ fun SyncPortalScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val preferredOffCampusChannel = SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
+
     var activeChannel by remember {
         mutableStateOf(
             when {
                 nativeEngine.lastReadyChannel != null -> nativeEngine.lastReadyChannel!!
-                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) -> SyncChannel.WEBVPN
-                settings.preferOffCampusChannel -> SyncChannel.WEBVPN
+                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) ->
+                    SyncChannel.preferredOffCampus(
+                        settings.preferLegacyWfw || (nativeEngine.hasWfwSessionCookie() && !nativeEngine.hasWebVpnTicketCookie())
+                    )
+                settings.preferOffCampusChannel -> preferredOffCampusChannel
                 else -> SyncChannel.ON_CAMPUS
             }
         )
@@ -258,7 +263,7 @@ fun SyncPortalScreen(
         val title = when {
             isMfa -> "统一认证二次安全验证"
             activateWeComTab -> "WebVPN 企业微信扫码"
-            channel == SyncChannel.WFW_LEGACY -> "备用校外微门户登录"
+            channel == SyncChannel.WFW_LEGACY -> "校外兼容通道登录"
             channel == SyncChannel.ON_CAMPUS -> "校园网统一身份认证"
             else -> "广海统一身份认证"
         }
@@ -296,7 +301,8 @@ fun SyncPortalScreen(
                 channel = activeChannel,
                 startUrl = targetUrl,
                 titleHint = title,
-                preferDesktopUa = settings.preferDesktopUa
+                // wfw proxy redirects Desktop UA to direct jw.gdou.edu.cn, so keep Mobile UA on WFW_LEGACY
+                preferDesktopUa = if (activeChannel == SyncChannel.WFW_LEGACY) false else settings.preferDesktopUa
             ),
             {},
             { wasFullBrowser ->
@@ -331,6 +337,7 @@ fun SyncPortalScreen(
                 savedYear = settings.lastSyncYearCode,
                 savedSem = settings.lastSyncSemesterCode,
                 savedTermLabel = settings.academicYearLabel,
+                preferLegacyWfw = settings.preferLegacyWfw,
                 onProgress = { msg -> syncStatusText = msg }
             )
             isSyncing = false
@@ -338,6 +345,11 @@ fun SyncPortalScreen(
             when (outcome) {
                 is QuickRefreshNativeOutcome.Success -> {
                     activeChannel = outcome.channel
+                    if (outcome.channel == SyncChannel.WFW_LEGACY && !settings.preferLegacyWfw) {
+                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
+                    } else if (outcome.channel == SyncChannel.WEBVPN && settings.preferLegacyWfw) {
+                        onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
+                    }
                     sessionState = PortalSessionUiState.READY
                     evalInterceptBanner = null
                     val diff = GdouNativeSyncEngine.summarizeCourseRefreshDiff(
@@ -455,6 +467,11 @@ fun SyncPortalScreen(
             when (result) {
                 is SessionCheckResult.Ready -> {
                     activeChannel = result.channel
+                    if (result.channel == SyncChannel.WFW_LEGACY && !settings.preferLegacyWfw) {
+                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
+                    } else if (result.channel == SyncChannel.WEBVPN && settings.preferLegacyWfw) {
+                        onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
+                    }
                     sessionState = PortalSessionUiState.READY
                     sessionLatencyMs = result.latencyMs
                     lastWebVpnDenied = false
@@ -478,6 +495,9 @@ fun SyncPortalScreen(
                     sessionState = PortalSessionUiState.NEEDS_AUTH
                     lastAuthResumeUrl = result.resumeUrl
                     lastWebVpnDenied = result.isWebVpnDenied
+                    if (result.isWebVpnDenied && !settings.preferLegacyWfw) {
+                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
+                    }
                     sessionStatusHint = result.reason
                     if (openAuthIfNeeded || (autoTriggerAction && (result.isMfa || result.isWebVpnDenied))) {
                         openAuthSheet(
@@ -543,8 +563,9 @@ fun SyncPortalScreen(
         networkProbe = probe
         if (sessionState != PortalSessionUiState.READY) {
             if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(activeChannel.isOffCampus, probe.state)) {
-                activeChannel = SyncChannel.WEBVPN
-                verifySessionNow(SyncChannel.WEBVPN, true, false, false, "正在连接校外通道...")
+                val offTarget = SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
+                activeChannel = offTarget
+                verifySessionNow(offTarget, true, false, false, "正在连接校外通道...")
             } else if (
                 NetworkChannelProbe.shouldAutoRestoreOnCampus(
                     userPrefersOffCampus = settings.preferOffCampusChannel,
@@ -564,20 +585,29 @@ fun SyncPortalScreen(
         lastWebVpnDenied = false
         evalInterceptBanner = null
         if (persistChoice) {
-            onUpdateChannelPrefs(target.isOffCampus, settings.preferDesktopUa)
+            val nextLegacyWfw = when (target) {
+                SyncChannel.WFW_LEGACY -> true
+                SyncChannel.WEBVPN -> false
+                SyncChannel.ON_CAMPUS -> settings.preferLegacyWfw
+            }
+            onUpdateChannelPrefs(target.isOffCampus, settings.preferDesktopUa, nextLegacyWfw)
         }
         verifySessionNow(target, true, false, false, "正在切换至${target.label}...")
     }
 
     fun togglePrimaryChannel() {
-        val target = if (activeChannel == SyncChannel.ON_CAMPUS) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+        val target = if (activeChannel == SyncChannel.ON_CAMPUS) {
+            SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
+        } else {
+            SyncChannel.ON_CAMPUS
+        }
         switchChannel(target)
     }
 
     val shortChannelLabel = when (activeChannel) {
         SyncChannel.ON_CAMPUS -> "校园网直连"
         SyncChannel.WEBVPN -> "校外免校园网"
-        SyncChannel.WFW_LEGACY -> "校外备用(wfw)"
+        SyncChannel.WFW_LEGACY -> "校外兼容(wfw)"
     }
 
     Box(
@@ -680,6 +710,24 @@ fun SyncPortalScreen(
                                     }
                                 )
                                 DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (activeChannel == SyncChannel.WFW_LEGACY) "校外改用 WebVPN"
+                                            else "校外改用兼容通道(wfw)"
+                                        )
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.Public, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        val nextGateway = if (activeChannel == SyncChannel.WFW_LEGACY) {
+                                            SyncChannel.WEBVPN
+                                        } else {
+                                            SyncChannel.WFW_LEGACY
+                                        }
+                                        switchChannel(nextGateway)
+                                    }
+                                )
+                                DropdownMenuItem(
                                     text = { Text("重新检测连接") },
                                     leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
                                     onClick = {
@@ -696,33 +744,31 @@ fun SyncPortalScreen(
                                         openDiagnosticDialog()
                                     }
                                 )
-                                if (isLoggedIntoJw) {
-                                    HorizontalDivider()
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "退出当前教务账号",
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Rounded.DeleteSweep,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            nativeEngine.clearAllCookiesAndCache()
-                                            sessionState = PortalSessionUiState.NEEDS_AUTH
-                                            lastWebVpnDenied = false
-                                            evalInterceptBanner = null
-                                            sessionStatusHint = "已退出教务登录"
-                                            onShowMessage("已退出教务账号并清除会话缓存")
-                                        }
-                                    )
-                                }
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (isLoggedIntoJw) "退出当前教务账号" else "清除登录缓存",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Rounded.DeleteSweep,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        nativeEngine.clearAllCookiesAndCache()
+                                        sessionState = PortalSessionUiState.NEEDS_AUTH
+                                        lastWebVpnDenied = false
+                                        evalInterceptBanner = null
+                                        sessionStatusHint = "已清除登录缓存，请重新认证"
+                                        onShowMessage("已清除教务会话与登录缓存")
+                                    }
+                                )
                             }
                         }
                     }
@@ -1174,7 +1220,7 @@ fun SyncPortalScreen(
                                                 onClick = {
                                                     openAuthSheet(
                                                         channel = SyncChannel.WFW_LEGACY,
-                                                        resumeUrl = GdouSyncScript.URL_WFW_OFF_CAMPUS,
+                                                        resumeUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
                                                         autoActionAfter = "all"
                                                     )
                                                 },
@@ -1186,7 +1232,7 @@ fun SyncPortalScreen(
                                             ) {
                                                 Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
                                                 Spacer(modifier = Modifier.width(5.dp))
-                                                Text("备用入口(wfw)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                Text("兼容通道(wfw)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                             }
                                         }
                                     } else {
@@ -1219,13 +1265,13 @@ fun SyncPortalScreen(
                                                 onClick = {
                                                     openAuthSheet(
                                                         channel = SyncChannel.WFW_LEGACY,
-                                                        resumeUrl = GdouSyncScript.URL_WFW_OFF_CAMPUS,
+                                                        resumeUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
                                                         autoActionAfter = "all"
                                                     )
                                                 },
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                             ) {
-                                                Text("备用入口(wfw)", fontSize = 12.5.sp)
+                                                Text("兼容通道(wfw)", fontSize = 12.5.sp)
                                             }
                                         }
                                     }

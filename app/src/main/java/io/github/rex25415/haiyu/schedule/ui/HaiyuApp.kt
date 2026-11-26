@@ -361,20 +361,29 @@ fun HaiyuApp(
         isJwSyncing = true
         showToast("正在快速刷新课表...")
         val snap = snapshot
+        val offCampusPreferred = SyncChannel.preferredOffCampus(
+            snap.settings.preferLegacyWfw || (nativeEngine.hasWfwSessionCookie() && !nativeEngine.hasWebVpnTicketCookie())
+        )
         val preferred = nativeEngine.lastReadyChannel
-            ?: if (snap.settings.preferOffCampusChannel) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+            ?: if (snap.settings.preferOffCampusChannel) offCampusPreferred else SyncChannel.ON_CAMPUS
         scope.launch {
             val outcome = nativeEngine.quickRefreshCourses(
                 context = context,
                 preferredChannel = preferred,
                 savedYear = snap.settings.lastSyncYearCode,
                 savedSem = snap.settings.lastSyncSemesterCode,
-                savedTermLabel = snap.settings.academicYearLabel
+                savedTermLabel = snap.settings.academicYearLabel,
+                preferLegacyWfw = snap.settings.preferLegacyWfw
             )
             isJwSyncing = false
             when (outcome) {
                 is QuickRefreshNativeOutcome.Success -> {
                     isJwLoggedIn = true
+                    if (outcome.channel == SyncChannel.WFW_LEGACY && !snap.settings.preferLegacyWfw) {
+                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = true) }
+                    } else if (outcome.channel == SyncChannel.WEBVPN && snap.settings.preferLegacyWfw) {
+                        repo.updateSettings { it.copy(preferLegacyWfw = false) }
+                    }
                     val diff = GdouNativeSyncEngine.summarizeCourseRefreshDiff(
                         previousCourses = snap.courses,
                         nextCourses = outcome.courses,
@@ -399,6 +408,9 @@ fun HaiyuApp(
                 }
                 is QuickRefreshNativeOutcome.NeedsLogin -> {
                     isJwLoggedIn = false
+                    if (outcome.isWebVpnDenied && !snap.settings.preferLegacyWfw) {
+                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = true) }
+                    }
                     externalAuthTrigger = ExternalAuthTrigger(
                         nonce = externalAuthTrigger.nonce + 1,
                         channel = outcome.channel,
@@ -497,11 +509,12 @@ fun HaiyuApp(
                             },
                             onLoginStateChanged = { isJwLoggedIn = it },
                             onSyncStateChanged = { isJwSyncing = it },
-                            onUpdateChannelPrefs = { offCampus, desktopUa ->
+                            onUpdateChannelPrefs = { offCampus, desktopUa, legacyWfw ->
                                 repo.updateSettings {
                                     it.copy(
                                         preferOffCampusChannel = offCampus,
-                                        preferDesktopUa = desktopUa
+                                        preferDesktopUa = desktopUa,
+                                        preferLegacyWfw = legacyWfw
                                     )
                                 }
                             },
@@ -863,6 +876,7 @@ fun HaiyuApp(
                                 onLogoutJwSession = {
                                     nativeEngine.clearAllCookiesAndCache()
                                     try { WebStorage.getInstance().deleteAllData() } catch (_: Throwable) {}
+                                    repo.updateSettings { it.copy(preferLegacyWfw = false) }
                                     isJwLoggedIn = false
                                     isJwSyncing = false
                                     showToast("已彻底退出教务账号并清除浏览器缓存")

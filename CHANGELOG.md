@@ -2,6 +2,15 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.5.1] - 2026-11-27（校外兼容通道协议打通 · 根治 WebVPN 拒登与老会话失效）
+- **从底层彻底解决「校外 WebVPN 提示『未在本地用户库注册』」与「备用通道重启失忆」**：
+  - 校外认证升级为直连广海公网第一方统一身份认证（`authserver.gdou.edu.cn`），免下 WebVPN 374KB 代理脚本、彻底告别“您正在使用VPN”浮窗，且一次登录即可持有全通道通用的第一方 `CASTGC`（支持校园网 ↔ 5G 切网静默续期）；
+  - 重构原生引擎（[GdouNativeSyncEngine.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouNativeSyncEngine.kt) + [EphemeralGdouWebSheet.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/EphemeralGdouWebSheet.kt)）实现直连 `authserver` 静默签票并透传 `wfw` 正方网关（完整保留 `Path=/sso` 会话并自动重写校内重定向），彻底打通以前浏览器下无法登录的 `wfw` 兼容通道；
+  - 账号如遇新版 WebVPN 拒登（`/wengine-vpn/denied`），自动利用已有第一方 `CASTGC` **零密码无缝切至「校外兼容通道 (wfw)」**，并通过持久化配置（`preferLegacyWfw`）永久记忆网关偏好，重启手机或次日再点「刷新课表」绝不再弹回 WebVPN 撞红屏。
+- **加固老会话过期与边缘场景稳定性**：
+  - WebVPN 会话过期重登前自动清理脏/半过期 `wengine_vpn_ticket`，补齐认证页 `service` 丢失落入个人中心及官网全屏浏览跳过 WebVPN 门户列表的自动接管；
+  - 教务中心右上角菜单新增「校外改用兼容通道(wfw) / WebVPN」手动切换，且未登录态常驻「清除登录缓存」，并在网络探活中补齐 `wfw` 回退探测。
+
 ## [v3.5.0] - 2026-11-25（纯原生教务同步引擎重构 · 根治登录卡顿与过期误报）
 - **耗时多轮深挖根治「校外登录后误报过期、WebView 加载卡顿、切页掉帧」顽疾**：
   - 彻底告别常驻内嵌 WebView 同步方案，重写纯 Kotlin 原生 HTTPS 并发同步引擎（[GdouNativeSyncEngine.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouNativeSyncEngine.kt) + [GdouCookieStore.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouCookieStore.kt)），平时零常驻 `WebView`（`WebViews: 0`），彻底绕开广海 WebVPN 374KB 代理重写脚本、3.7MB 无用登录装饰背景图与旧式正方网页渲染阻塞，切页丝滑、校外 5G 全量同步缩短至约 2 秒、刷课表 1 秒内完成；

@@ -146,7 +146,10 @@ object NetworkChannelProbe {
         val wfwFirst = wfwFirstDeferred.await()
 
         val wfwRetryDeferred = if (wfwFirst.latencyMs == null) {
-            async { probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1800, 2000).latencyMs }
+            async {
+                probeReachability(GdouSyncScript.URL_OFF_CAMPUS, 1800, 2000).latencyMs
+                    ?: probeReachability(GdouSyncScript.URL_WFW_OFF_CAMPUS, 1800, 2000).latencyMs
+            }
         } else {
             null
         }
