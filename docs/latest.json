@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.5.0",
-  "versionName": "3.5.0",
-  "title": "海屿空间 v3.5.0",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.5.0.apk",
-  "apkSizeBytes": 2114925,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.0/HaiyuSchedule-GDOU-v3.5.0.apk",
-  "expectedSha256": "41a3b434de701f5288d6632e983fe66d414f5422e9de5ba0a83fc14f6080c30c",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.0",
+  "tagName": "v3.5.1",
+  "versionName": "3.5.1",
+  "title": "海屿空间 v3.5.1",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.5.1.apk",
+  "apkSizeBytes": 2131309,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.1/HaiyuSchedule-GDOU-v3.5.1.apk",
+  "expectedSha256": "93096a8ff1a9e0c021bff2c0e957dc7cad8a8d58c2ac633a6f300b311ca11604",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.1",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "🚀 重磅架构升级（强烈建议全部同学更新，覆盖安装自动保留全部本地课表、成绩与设置）：\n\n为了彻底根治此前反复出现、折腾了好久的几大顽疾——「校外登录后反复误报教务登录态已过期」「打开教务页加载极慢、切页掉帧卡顿」「弹出输入法时界面穿透」「离校切 5G 后卡在直连地址超时」——v3.5.0 花了大量精力从底层彻底重写了整套教务同步引擎，并重塑了「教务中心」界面：\n\n- ⚡ 彻底重写纯 Kotlin 原生 HTTPS 同步引擎（零常驻 WebView）：不再在后台养着上百 MB 的内嵌浏览器，直接绕开广海 WebVPN 374KB 代理重写脚本与 3.7MB 无用登录装饰背景图；切页彻底告别卡顿掉帧，校外 5G 全量同步缩短至约 2 秒、刷课表 1 秒内完成，同时根治登录后误报「登录态已过期」顽疾\n- 🌐 跨网与登录全链路提速：4G/5G 蜂窝流量 0ms 秒判校外通道跳过内网超时；支持空 Cookie 0-RTT 瞬时识别、校园网 CASTGC → 校外 WebVPN 跨通道静默换票、HTTP Keep-Alive 连接复用、学年学期与空教室上下文 10 分钟缓存预热、以及成绩与等级考并发拉取\n- 🔐 全屏官方认证体验彻底修复：认证浮层提升至根级全屏遮盖底栏，根治此前手机软键盘弹出穿透露出背后页面、认证刚通过闪现登录按钮、居中弹窗与底部黑条 Toast 重叠的问题；认证拿到票据的瞬间立刻销毁网页释放内存\n- 🧭 全新「教务中心」界面 & 刷新自动查调课：与课表/学业/设置统一视觉语言，去除所有重复按钮；未登录态清爽专注，已登录态新增本学期数据概览与「刷新课表 · 检查调课」（自动比对本地课表播报是否有换教室/调时间变动，并保留手动调课），下半区仅保留唯一一个「访问广海正方教务官网」直连入口（评教/选课/培养方案），同时打通「查空教室」登录后自动回跳闭环"
+  "releaseNotes": "🛠️ 校外登录底层根治升级（建议全部同学更新，覆盖安装自动保留全部本地课表、成绩与设置）：\n\n- 🔐 校外认证升级为直连广海公网第一方统一身份认证（authserver.gdou.edu.cn）：免下 WebVPN 374KB 代理脚本、彻底告别“您正在使用VPN”浮窗，登录更快，并打通校园网 ↔ 5G 切网静默换票\n- 🚀 彻底打通校外兼容通道（wfw）并实现 WebVPN 拒登零密码自愈：若学号暂未同步至学校新版 WebVPN 本地用户库（提示「未在本地用户库注册」），系统将自动利用已通过的统一认证通行证在后台无缝切换「校外兼容通道 (wfw)」直通正方教务，无需二次输入密码\n- 💾 持久化记忆校外网关偏好：一旦走通兼容通道或触发 WebVPN 拒登即永久记住，手机后台重启或次日再点「刷新课表」绝不再弹回 WebVPN 撞红屏\n- 🧹 加固老会话过期与边缘场景：过期重登自动清理脏票据、补齐个人中心与官网浏览门户自动跳过，教务中心右上角菜单支持手动切换校外网关并常驻「清除登录缓存」"
 }
