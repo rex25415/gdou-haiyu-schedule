@@ -2,6 +2,12 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.5.3] - 2026-11-28（WebVPN 权限说明澄清 · 校园网直连与免登录分享码直达兜底）
+- **针对未订阅校园网的同学走校外 WebVPN 提示「未在本地用户库注册」的专项体验优化**：
+  - **更透明的前置引导**：将登录页与欢迎卡的校外通道文案统一明确为 **「校外 WebVPN（需有校园网权限）」**，直接说明学校官方 WebVPN 通常仅收录已开通校园网套餐的学号，避免未开校园网的同学输完两遍验证码后撞红屏误以为软件故障（[SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt)、[ScheduleViewComponents.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/ScheduleViewComponents.kt)）；
+  - **两条无需开通校园网的即用出路直达第一现场**：在 WebVPN 拒绝弹窗（[EphemeralGdouWebSheet.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/EphemeralGdouWebSheet.kt)）、教务报错横幅与零课表欢迎卡直接提供 **「免登录 · 导入同班分享码」** 入口（导入成功后自动切回课表展示，[HaiyuApp.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/HaiyuApp.kt)），并明确引导同学“在校内临时连一下校园网点「校园网直连」刷新一次，整学期课表即可永久离线保存”；
+  - **清理历史过时提示**：统一清理原生引擎中残留的旧 `wfw` 兼容文案，补上企业微信扫码尝试与广海校园网客服热线 `0759-8203599` 核实指引（[GdouNativeSyncEngine.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouNativeSyncEngine.kt)）。
+
 ## [v3.5.2] - 2026-11-27（双入口精简重构 · 极简交互与校外全场景闭环）
 - **致各位海大同学**：海屿空间坚持完全免费、零广告、不上传学号密码，只是想把顺手好用的工具真诚分享给有需要的海大同学，覆盖安装自动保留全部本地课表、成绩与设置。
 - **登录入口重塑为清晰的「双模式 + 白话引导」**：

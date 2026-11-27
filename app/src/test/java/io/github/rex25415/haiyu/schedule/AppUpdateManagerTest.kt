@@ -684,10 +684,10 @@ class AppUpdateManagerTest {
             densityLabel = "紧凑一屏",
             darkModeLabel = "跟随系统",
             deviceModel = "Xiaomi 15",
-            channelLabel = "校外免校园网"
+            channelLabel = "校外 WebVPN"
         )
         assertTrue(extDiag.contains("机型：Xiaomi 15"))
-        assertTrue(extDiag.contains("通道：校外免校园网"))
+        assertTrue(extDiag.contains("通道：校外 WebVPN"))
     }
 
     @Test

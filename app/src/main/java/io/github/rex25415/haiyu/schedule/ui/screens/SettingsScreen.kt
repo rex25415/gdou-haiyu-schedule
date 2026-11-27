@@ -802,7 +802,7 @@ fun SettingsScreen(
                 densityLabel = settings.gridRowDensity.label,
                 darkModeLabel = settings.darkMode.label,
                 deviceModel = deviceModel,
-                channelLabel = if (settings.preferOffCampusChannel) "校外免校园网" else "校园网直连"
+                channelLabel = if (settings.preferOffCampusChannel) "校外 WebVPN" else "校园网直连"
             )
         }
         FeedbackGuideDialog(

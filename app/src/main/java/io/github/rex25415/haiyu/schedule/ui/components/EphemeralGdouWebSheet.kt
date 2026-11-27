@@ -123,6 +123,7 @@ fun EphemeralGdouWebSheet(
     request: WebSheetRequest,
     onAuthCompleted: (SyncChannel) -> Unit,
     onSwitchRequest: (WebSheetRequest) -> Unit,
+    onOpenShareCode: () -> Unit = {},
     onDomGradesScraped: (List<GradeItem>, List<LevelExamItem>) -> Unit = { _, _ -> },
     onDomExamsScraped: (List<ExamItem>) -> Unit = {},
     onShowMessage: (String) -> Unit,
@@ -526,34 +527,25 @@ fun EphemeralGdouWebSheet(
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
-                            text = "统一认证账号已通过，但学校 WebVPN 本地库暂未同步你的学号权限。可先用「企业微信扫码」打通网关（扫完将自动继续统一认证），或连上校园网后切「校园网直连」：",
+                            text = "你的学号密码没错，但学校 WebVPN 通常仅对已开通校园网的学号放行。\n• 在校内连一下校园网点「切校园网直连」刷新一次，整学期课表即可永久离线保存；\n• 在校外也可直接导入同班同学的分享码免登录看课，或试企微扫码：",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
+                        Button(
+                            onClick = {
+                                onDismiss()
+                                onOpenShareCode()
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("免登录 · 导入同班分享码", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Button(
-                                onClick = {
-                                    onSwitchRequest(
-                                        WebSheetRequest(
-                                            mode = WebSheetMode.AUTH_ONLY,
-                                            channel = SyncChannel.WEBVPN,
-                                            startUrl = "https://webvpn.gdou.edu.cn/login",
-                                            titleHint = "企业微信扫码打通网关",
-                                            preferDesktopUa = true,
-                                            activateWeComTab = true,
-                                            holdOnWebVpnLogin = true
-                                        )
-                                    )
-                                },
-                                shape = RoundedCornerShape(9.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("企业微信扫码过网关", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
                             OutlinedButton(
                                 onClick = {
                                     onSwitchRequest(
@@ -571,6 +563,26 @@ fun EphemeralGdouWebSheet(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("切校园网直连", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    onSwitchRequest(
+                                        WebSheetRequest(
+                                            mode = WebSheetMode.AUTH_ONLY,
+                                            channel = SyncChannel.WEBVPN,
+                                            startUrl = "https://webvpn.gdou.edu.cn/login",
+                                            titleHint = "企业微信扫码打通网关",
+                                            preferDesktopUa = true,
+                                            activateWeComTab = true,
+                                            holdOnWebVpnLogin = true
+                                        )
+                                    )
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("试企微扫码", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                         }
                     }
@@ -1039,12 +1051,12 @@ fun EphemeralGdouWebSheet(
                                                 mode = request.mode,
                                                 channel = nextCh,
                                                 startUrl = nextCh.authStartUrl(),
-                                                titleHint = if (nextCh == SyncChannel.ON_CAMPUS) "校园网直连认证" else "校外免校园网认证",
+                                                titleHint = if (nextCh == SyncChannel.ON_CAMPUS) "校园网直连认证" else "校外 WebVPN 认证",
                                                 preferLegacyWfw = false
                                             )
                                         )
                                     }) {
-                                        Text(if (activeChannel == SyncChannel.ON_CAMPUS) "切校外免校园网" else "切校园网直连")
+                                        Text(if (activeChannel == SyncChannel.ON_CAMPUS) "切校外 WebVPN" else "切校园网直连")
                                     }
                                 }
                             }

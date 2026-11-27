@@ -73,6 +73,7 @@ import io.github.rex25415.haiyu.schedule.ui.components.AppUpdateDialog
 import io.github.rex25415.haiyu.schedule.ui.components.CampusServicesBottomSheet
 import io.github.rex25415.haiyu.schedule.ui.components.EphemeralGdouWebSheet
 import io.github.rex25415.haiyu.schedule.ui.components.QuickAddTaskDialog
+import io.github.rex25415.haiyu.schedule.ui.components.ScheduleShareCodeDialog
 import io.github.rex25415.haiyu.schedule.ui.components.WebSheetMode
 import io.github.rex25415.haiyu.schedule.ui.components.WebSheetRequest
 import io.github.rex25415.haiyu.schedule.ui.screens.AcademicScreen
@@ -132,6 +133,7 @@ fun HaiyuApp(
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateStatusSummary by remember { mutableStateOf<String?>(null) }
     var showCampusServicesSheet by remember { mutableStateOf(false) }
+    var showGlobalShareCodeDialog by remember { mutableStateOf(false) }
     var pendingNoticeForTask by remember { mutableStateOf<CampusNoticeItem?>(null) }
 
     // Zero-permission legacy package (cn.gdou.haiyu.schedule <= v2.7.0) detection, refreshed on every resume!
@@ -231,10 +233,11 @@ fun HaiyuApp(
         showToast("已复制课表分享码，直接粘贴发给同班同学即可")
     }
 
-    fun importShareCode(raw: String) {
+    fun importShareCode(raw: String, jumpToSchedule: Boolean = false) {
         val result = repo.importScheduleShareCode(raw)
         result.onSuccess { count ->
             syncWidgetsAndReminders()
+            if (jumpToSchedule) currentTab = 0
             showToast("导入成功：已导入 $count 条课程并同步校历")
         }.onFailure { err ->
             showToast(err.message ?: "分享码导入失败")
@@ -557,6 +560,7 @@ fun HaiyuApp(
                                 showToast(msg)
                             },
                             onOpenCampusServices = { showCampusServicesSheet = true },
+                            onOpenShareCode = { showGlobalShareCodeDialog = true },
                             onSyncFinishedJumpSchedule = { currentTab = 0 },
                             onSyncFinishedJumpAcademic = { subTab ->
                                 academicRequestedSubTab = subTab
@@ -903,6 +907,10 @@ fun HaiyuApp(
                         onSwitchRequest = { nextReq ->
                             activeWebSheetSession = session.copy(request = nextReq)
                         },
+                        onOpenShareCode = {
+                            activeWebSheetSession = null
+                            showGlobalShareCodeDialog = true
+                        },
                         onDomGradesScraped = { grades, levels ->
                             lastGradeSkipReason = null
                             repo.replaceSyncedGrades(grades, levels)
@@ -969,6 +977,15 @@ fun HaiyuApp(
                     pendingNoticeForTask = notice
                 },
                 onDismiss = { showCampusServicesSheet = false }
+            )
+        }
+
+        if (showGlobalShareCodeDialog) {
+            ScheduleShareCodeDialog(
+                shareCode = repo.exportScheduleShareCode(),
+                onCopyCode = { copyShareCode(it) },
+                onImportCode = { importShareCode(it, jumpToSchedule = true) },
+                onDismiss = { showGlobalShareCodeDialog = false }
             )
         }
 

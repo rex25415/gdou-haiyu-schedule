@@ -456,7 +456,8 @@ fun ScheduleScreen(
                 onManualAdd = {
                     editingCourse = null
                     showAddCourseSheet = true
-                }
+                },
+                onOpenShareCode = { showShareCodeDialog = true }
             )
         } else {
             val cfg = LocalConfiguration.current

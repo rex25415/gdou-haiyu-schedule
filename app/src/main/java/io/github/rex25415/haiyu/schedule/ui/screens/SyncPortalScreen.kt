@@ -160,6 +160,7 @@ fun SyncPortalScreen(
     onGradeSkipReasonChanged: (String?) -> Unit = {},
     onShowMessage: (String) -> Unit,
     @Suppress("UNUSED_PARAMETER") onOpenCampusServices: () -> Unit = {},
+    onOpenShareCode: () -> Unit = {},
     onSyncFinishedJumpSchedule: () -> Unit,
     onSyncFinishedJumpAcademic: (Int) -> Unit = {}
 ) {
@@ -653,7 +654,7 @@ fun SyncPortalScreen(
         switchChannel(target)
     }
 
-    val shortChannelLabel = if (activeChannel == SyncChannel.ON_CAMPUS) "校园网直连" else "校外免校园网"
+    val shortChannelLabel = if (activeChannel == SyncChannel.ON_CAMPUS) "校园网直连" else "校外 WebVPN"
 
     Box(
         modifier = Modifier
@@ -1155,7 +1156,7 @@ fun SyncPortalScreen(
                                             }
                                         ) {
                                             Text(
-                                                text = "校外免校园网",
+                                                text = "校外 WebVPN",
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 maxLines = 1,
@@ -1201,7 +1202,7 @@ fun SyncPortalScreen(
                                                 text = if (activeChannel == SyncChannel.ON_CAMPUS) {
                                                     "校园网直连 · 校内宿舍/教学区推荐"
                                                 } else {
-                                                    "什么是校外 WebVPN？（流量 / 校外 Wi-Fi）"
+                                                    "什么是校外 WebVPN？（需校园网账号）"
                                                 },
                                                 style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.Bold,
@@ -1209,9 +1210,9 @@ fun SyncPortalScreen(
                                             )
                                             Text(
                                                 text = if (activeChannel == SyncChannel.ON_CAMPUS) {
-                                                    "直连校内正方教务服务器，不经校外网关中转，响应最快（离开校园网后会自动切回校外 WebVPN）。"
+                                                    "直连校内正方教务服务器，不经校外网关，响应最快；同步一次后课表即可长期离线查看。"
                                                 } else {
-                                                    "学校官方免费提供的校外安全网关，无需自己开梯子/代理。完成下方一次统一身份认证即可直接穿透网关同步课表与成绩。"
+                                                    "学校官方免费校外网关，无需自备代理；注：学校仅对已开通校园网的学号放行 WebVPN。未办校园网的同学，回校连一次校园网走「校园网直连」刷新即可离线看课，或直接导入同班分享码。"
                                                 },
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1231,29 +1232,56 @@ fun SyncPortalScreen(
                                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 Text(
-                                                    text = "学校 WebVPN 提示「未在本地用户库注册」：你的统一认证有效，但当前网关暂未同步该学号权限。可先用「企业微信扫码」打通网关，扫完将在同弹窗内自动继续统一认证：",
+                                                    text = "学校 WebVPN 提示「未在本地用户库注册」：你的学号密码没错，但学校一般只给开通了校园网的学号开校外权限。\n• 推荐：在校内连一下校园网并点「校园网直连」刷新一次，整学期课表即可永久离线保存；\n• 在校外可找同学发「海屿分享码」免登录导入（需补开 WebVPN 可询海大网管 0759-8203599）：",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                                     lineHeight = 18.sp
                                                 )
                                                 FilledTonalButton(
-                                                    onClick = {
-                                                        openAuthSheet(
-                                                            channel = SyncChannel.WEBVPN,
-                                                            resumeUrl = "https://webvpn.gdou.edu.cn/login",
-                                                            activateWeComTab = true,
-                                                            holdOnWebVpnLogin = true,
-                                                            autoActionAfter = "all"
-                                                        )
-                                                    },
+                                                    onClick = onOpenShareCode,
                                                     shape = RoundedCornerShape(10.dp),
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(40.dp)
                                                 ) {
-                                                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Icon(Icons.Rounded.School, contentDescription = null, modifier = Modifier.size(16.dp))
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("先用企业微信扫码打通 WebVPN 网关", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text("免登录 · 导入同班课表分享码", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    OutlinedButton(
+                                                        onClick = { switchChannel(SyncChannel.ON_CAMPUS) },
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .height(38.dp)
+                                                    ) {
+                                                        Text("切校园网直连", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                    }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            openAuthSheet(
+                                                                channel = SyncChannel.WEBVPN,
+                                                                resumeUrl = "https://webvpn.gdou.edu.cn/login",
+                                                                activateWeComTab = true,
+                                                                holdOnWebVpnLogin = true,
+                                                                autoActionAfter = "all"
+                                                            )
+                                                        },
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .height(38.dp)
+                                                    ) {
+                                                        Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("试企微扫码", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                    }
                                                 }
                                             }
                                         }

@@ -36,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.GZIPInputStream
 
 enum class SyncChannel(val id: String, val label: String) {
-    WEBVPN("webvpn", "校外免校园网 (WebVPN)"),
+    WEBVPN("webvpn", "校外 WebVPN"),
     ON_CAMPUS("campus", "校园网直连"),
     WFW_LEGACY("wfw", "校外兼容通道 (wfw)");
 
@@ -533,7 +533,7 @@ class GdouNativeSyncEngine(
                             return@withContext SessionCheckResult.NeedsAuth(
                                 channel = channel,
                                 resumeUrl = ssoResp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
-                                reason = "学校 WebVPN 提示「未在本地用户库注册」，已为您准备校外兼容通道(wfw)与企业微信扫码",
+                                reason = "学校 WebVPN 提示「未在本地用户库注册」：可在校内连校园网直连刷新一次，或先试企业微信扫码 / 导入同班分享码",
                                 isWebVpnDenied = true
                             )
                         }
@@ -628,7 +628,7 @@ class GdouNativeSyncEngine(
                             return@withContext SessionCheckResult.NeedsAuth(
                                 channel = channel,
                                 resumeUrl = vpnResp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
-                                reason = "学校 WebVPN 提示「未在本地用户库注册」，已为您准备校外兼容通道(wfw)与企业微信扫码",
+                                reason = "学校 WebVPN 提示「未在本地用户库注册」：可在校内连校园网直连刷新一次，或先试企业微信扫码 / 导入同班分享码",
                                 isWebVpnDenied = true
                             )
                         }
@@ -715,7 +715,7 @@ class GdouNativeSyncEngine(
             return@withContext SessionCheckResult.NeedsAuth(
                 channel = channel,
                 resumeUrl = resp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
-                reason = "学校 WebVPN 提示「未在本地用户库注册」，可一键切校外兼容通道(wfw)或企业微信扫码",
+                reason = "学校 WebVPN 提示「未在本地用户库注册」：可在校内连校园网直连刷新一次，或先试企业微信扫码 / 导入同班分享码",
                 isWebVpnDenied = true
             )
         }

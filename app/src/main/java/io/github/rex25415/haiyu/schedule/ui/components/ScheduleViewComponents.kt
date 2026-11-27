@@ -113,7 +113,8 @@ fun EmptyScheduleOnboarding(
     onSelectCampus: (GdouCampus) -> Unit,
     onJumpToSync: () -> Unit,
     onLoadDemoData: () -> Unit,
-    onManualAdd: () -> Unit
+    onManualAdd: () -> Unit,
+    onOpenShareCode: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var detectedProbe by remember { mutableStateOf<CampusNetworkState?>(null) }
@@ -123,12 +124,12 @@ fun EmptyScheduleOnboarding(
     }
     val onboardingNetHint = when (detectedProbe) {
         CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "已接入校园网 · 将直接连接校内教务极速同步"
-        CampusNetworkState.OFF_CAMPUS_ONLY -> "已识别校外网络 · 将经广海官方 WebVPN 免代理登录"
-        CampusNetworkState.OFFLINE_OR_BLOCKED -> "暂未连通学校网络 · 请检查流量或校园网连接"
+        CampusNetworkState.OFF_CAMPUS_ONLY -> "已识别校外网络 · 走官方 WebVPN（需有校园网权限；未开可用分享码）"
+        CampusNetworkState.OFFLINE_OR_BLOCKED -> "暂未连通学校网络 · 请检查流量/校园网或用分享码导入"
         CampusNetworkState.PROBING, null -> if (initialCellularOnly) {
-            "当前为移动网络 · 将经广海官方 WebVPN 免代理同步"
+            "当前为移动网络 · 走官方 WebVPN（未开校园网可用分享码导入）"
         } else {
-            "自动识别校园网与校外 WebVPN，无需额外配置代理"
+            "自动识别校园网直连与校外 WebVPN；未开校园网可用同班分享码"
         }
     }
 
@@ -174,7 +175,7 @@ fun EmptyScheduleOnboarding(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "广东海洋大学全校区纯净开源学业与课表空间：无需校园网，支持校外流量/Wi-Fi 免 VPN 一键同步正方课表、成绩与考场，精准识别分楼错峰作息，零广告离线秒开。",
+                    text = "广东海洋大学全校区纯净开源学业与课表空间：支持校园网直连与校外官方 WebVPN 一键同步正方课表、成绩与考场，也可直接导入同班分享码；精准识别分楼错峰作息，零广告离线秒开。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -238,11 +239,19 @@ fun EmptyScheduleOnboarding(
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(10.dp))
+                FilledTonalButton(
+                    onClick = onOpenShareCode,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("免登录 · 导入同班课表分享码", fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    FilledTonalButton(
+                    OutlinedButton(
                         onClick = onLoadDemoData,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp)
