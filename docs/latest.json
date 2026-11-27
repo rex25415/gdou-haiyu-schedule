@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.5.2",
-  "versionName": "3.5.2",
-  "title": "海屿空间 v3.5.2",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.5.2.apk",
-  "apkSizeBytes": 2131309,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.2/HaiyuSchedule-GDOU-v3.5.2.apk",
-  "expectedSha256": "0998e2437b7079b75db20540684928b2bd9ca8857541a49ab4c56faeb748e2b4",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.2",
+  "tagName": "v3.5.3",
+  "versionName": "3.5.3",
+  "title": "海屿空间 v3.5.3",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.5.3.apk",
+  "apkSizeBytes": 2147693,
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.3/HaiyuSchedule-GDOU-v3.5.3.apk",
+  "expectedSha256": "0503a12e80410e7773178bc6328e4df6711270d2b54c0c03b3de5c09973952f2",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.3",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "💬 致各位海大同学：海屿空间坚持完全免费、零广告、不上传学号密码，单纯希望能把顺手好用的工具真诚分享给更多有需要的同学。本版覆盖安装自动保留全部本地课表、成绩与设置：\n\n- 🧭 极简双入口与白话引导：登录页精简为「校外免校园网（WebVPN）」与「校园网直连」二选一，首页迎新卡与登录引导直白说明校外无需自备梯子或代理；移除失效的兼容通道（wfw）入口与常驻扫码误导，仅在极少数账号提示「未在本地用户库注册」时按需引导企微扫码过网关\n- 🛡️ 防误切与外网防卡死：探活缓存绑定网络指纹，切网或开关 Wi-Fi 即时刷新；纯 5G 或校外普通 Wi-Fi 下误点「校园网直连」或从首页刷新均自动兜底保留 WebVPN，不再掉回未登录或卡在不可达内网\n- 🔁 首页刷新闭环与企微续跳：从课表首页右上角 ↻ 登录并同步完成后自动切回课表页；WebVPN 扫码过网关后若尚未登录统一认证，同弹窗内无感续跳反代认证页一步完成连接\n- 🧹 会话与反代底层加固：修复跳转间 Path Cookie 隔离、保留企微扫码后的 WebVPN 网关票据、精简冗余请求，原生同步后 WebViews: 0 彻底释放内存"
+  "releaseNotes": "💬 致各位海大同学：海屿空间坚持完全免费、零广告、不上传学号密码。针对近期部分未办理校园网套餐的同学反馈校外 WebVPN 提示「未在本地用户库注册」，本版带来更清晰的指引与两条直接可用兜底：\n\n- 🔑 更透明的校外 WebVPN 前置说明：登录页与欢迎卡统一明确「校外 WebVPN（需有校园网权限）」，提前讲清学校网关仅收录已开校园网套餐的学号，避免白输两遍验证码再撞红屏\n- 🏫 同学实测解法直达：在学校任意连一次校园网并点「校园网直连」刷新课表，整学期课程即永久离线保存在手机，后续校外也能直接查看；拒登弹窗与教务报错卡直接提供一键切「校园网直连」引导\n- 🤝 免登录「同班分享码导入」直达现场：无需校园网、不经教务登录！WebVPN 拒登弹窗、教务横幅与零课表欢迎卡全部直接提供「导入同班分享码」入口，导入成功后自动切回课表页展示，并保留企微扫码与海大网管咨询热线 0759-8203599 指引"
 }
