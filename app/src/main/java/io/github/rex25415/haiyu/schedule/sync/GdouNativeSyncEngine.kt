@@ -29,6 +29,7 @@ import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
 import java.time.LocalDate
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -230,7 +231,9 @@ class GdouNativeSyncEngine(
         val isMfa: Boolean = false,
         val isWebVpnDenied: Boolean = false,
         val networkError: Boolean = false,
-        val errorDetail: String = ""
+        val errorDetail: String = "",
+        val tcpConnectTimedOut: Boolean = false,
+        val nonRetriableNetwork: Boolean = false
     )
 
     private data class PaginatedOutcome(
@@ -290,6 +293,46 @@ class GdouNativeSyncEngine(
         cookieStore.clearCookieByPrefix("${webVpnRootUrl()}/", "wengine_vpn_ticket")
     }
 
+    private fun engineLog(warn: Boolean = false, msg: String) {
+        try {
+            if (warn) {
+                android.util.Log.w("GdouNativeSyncEngine", msg)
+            } else {
+                android.util.Log.d("GdouNativeSyncEngine", msg)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun sanitizeUrlForLog(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return ""
+        return try {
+            val u = URI(trimmed)
+            val host = u.host.orEmpty()
+            val path = u.rawPath.orEmpty().ifEmpty { "/" }
+            val queryKeys = u.rawQuery.orEmpty()
+                .split("&")
+                .mapNotNull { it.substringBefore("=").takeIf { k -> k.isNotBlank() } }
+                .distinct()
+                .joinToString(",")
+            if (queryKeys.isEmpty()) "$host$path" else "$host$path?$queryKeys"
+        } catch (_: Exception) {
+            trimmed.substringBefore("?").take(96)
+        }
+    }
+
+    private fun cookieFlagsSummary(): String {
+        val cas = hasDirectCasTgc()
+        val vpn = hasWebVpnTicketCookie()
+        val wfwCookies = cookieStore.getCookieHeader("${wfwRootUrl()}/").orEmpty()
+        val wfwSess = wfwCookies.contains("WFWSESSID=", ignoreCase = true)
+        val wfwJw = wfwCookies.contains("JSESSIONID=", ignoreCase = true)
+        val jwSess = cookieStore.getCookieHeader("https://jw.gdou.edu.cn/").orEmpty()
+            .contains("JSESSIONID=", ignoreCase = true)
+        return "cas=$cas,vpn=$vpn,wfw=$wfwSess,wfwJw=$wfwJw,jw=$jwSess"
+    }
+
     private fun ensureWfwJwProxyCookies() {
         cookieStore.saveResponseCookies(
             "${wfwRootUrl()}/",
@@ -334,29 +377,39 @@ class GdouNativeSyncEngine(
             if (code in 300..399) {
                 val locRaw = conn.getHeaderField("Location")?.trim().orEmpty()
                 drainStreamQuietly(conn, code)
-                if (locRaw.isEmpty()) return CasTicketMintResult.NeedsLogin
+                if (locRaw.isEmpty()) {
+                    engineLog(warn = true, "casMint emptyLoc svc=${sanitizeUrlForLog(serviceUrl)} code=$code")
+                    return CasTicketMintResult.NeedsLogin
+                }
                 val resolved = normalizeGdouRedirectUrl(resolveRedirectUrl(reqUrl, locRaw), SyncChannel.ON_CAMPUS)
                 if (GdouSyncScript.isMfaUrl(resolved)) {
+                    engineLog(msg = "casMint MFA svc=${sanitizeUrlForLog(serviceUrl)}")
                     return CasTicketMintResult.Mfa(resolved)
                 }
                 val ticket = CAS_TICKET_RE.find(resolved)?.groupValues?.getOrNull(1)?.trim().orEmpty()
                 if (ticket.isNotEmpty()) {
+                    engineLog(msg = "casMint OK svc=${sanitizeUrlForLog(serviceUrl)} -> ${sanitizeUrlForLog(resolved)}")
                     CasTicketMintResult.Ticket(ticket, resolved)
                 } else {
+                    engineLog(warn = true, "casMint noTicket svc=${sanitizeUrlForLog(serviceUrl)} loc=${sanitizeUrlForLog(resolved)}")
                     CasTicketMintResult.NeedsLogin
                 }
             } else {
                 drainStreamQuietly(conn, code)
+                engineLog(warn = true, "casMint NeedsLogin svc=${sanitizeUrlForLog(serviceUrl)} code=$code")
                 CasTicketMintResult.NeedsLogin
             }
         } catch (e: SocketTimeoutException) {
             try { conn?.disconnect() } catch (_: Throwable) {}
+            engineLog(warn = true, "casMint timeout svc=${sanitizeUrlForLog(serviceUrl)}: ${e.message}")
             CasTicketMintResult.NetworkError("统一认证连接超时")
         } catch (e: IOException) {
             try { conn?.disconnect() } catch (_: Throwable) {}
+            engineLog(warn = true, "casMint ioErr svc=${sanitizeUrlForLog(serviceUrl)}: ${e.javaClass.simpleName}: ${e.message}")
             CasTicketMintResult.NetworkError("统一认证网络中断：${e.message ?: e.javaClass.simpleName}")
         } catch (e: Exception) {
             try { conn?.disconnect() } catch (_: Throwable) {}
+            engineLog(warn = true, "casMint err svc=${sanitizeUrlForLog(serviceUrl)}: ${e.javaClass.simpleName}: ${e.message}")
             CasTicketMintResult.NetworkError(e.message ?: "统一认证异常")
         }
     }
@@ -375,6 +428,13 @@ class GdouNativeSyncEngine(
 
     private suspend fun redeemJwCasTicket(channel: SyncChannel, ticket: String): HttpOutcome {
         if (channel == SyncChannel.WFW_LEGACY) {
+            // Clear wfw portal CAS cookies (WFWSESSID/db_agent_token/_path/urlss_file) & stale JSESSIONIDs:
+            // authenticated wfw portal cookies cause wfw nginx to intercept and strip `?ticket=` before reaching jw.gdou.edu.cn!
+            for (targetUrl in listOf("${wfwRootUrl()}/sso/jziotlogin", "${wfwRootUrl()}/")) {
+                for (prefix in listOf("JSESSIONID", "WFWSESSID", "db_agent_token", "_path", "urlss_file")) {
+                    cookieStore.clearCookieByPrefix(targetUrl, prefix)
+                }
+            }
             ensureWfwJwProxyCookies()
         }
         val redeemUrl = when (channel) {
@@ -385,33 +445,16 @@ class GdouNativeSyncEngine(
         if (channel == SyncChannel.WFW_LEGACY) {
             ensureWfwJwProxyCookies()
         }
+        val bodyTitle = TITLE_RE.find(resp.body)?.groupValues?.getOrNull(1)?.replace(WS_RE, " ")?.trim().orEmpty().take(40)
+        engineLog(
+            warn = resp.networkError || resp.authExpired || resp.statusCode !in 200..299 || channel == SyncChannel.WFW_LEGACY,
+            msg = "redeemJw ch=${channel.name} code=${resp.statusCode} netErr=${resp.networkError} authExp=${resp.authExpired} final=${sanitizeUrlForLog(resp.finalUrl)} title=[$bodyTitle] len=${resp.body.length}"
+        )
         return resp
     }
 
     private suspend fun establishWfwSessionViaCas(): SessionCheckResult.NeedsAuth? {
         ensureWfwJwProxyCookies()
-        if (!hasWfwSessionCookie()) {
-            when (val wfwTicket = mintCasServiceTicket("${wfwRootUrl()}/")) {
-                is CasTicketMintResult.Ticket -> {
-                    executeHttp(
-                        urlStr = "${wfwRootUrl()}/?ticket=${urlEncode(wfwTicket.ticket)}",
-                        method = "GET",
-                        channel = SyncChannel.WFW_LEGACY,
-                        timeoutMs = 8_000
-                    )
-                    ensureWfwJwProxyCookies()
-                }
-                is CasTicketMintResult.Mfa -> {
-                    return SessionCheckResult.NeedsAuth(
-                        channel = SyncChannel.WFW_LEGACY,
-                        resumeUrl = wfwTicket.mfaUrl,
-                        reason = "学校统一认证需要完成二次安全验证（企业微信/短信）",
-                        isMfa = true
-                    )
-                }
-                else -> {}
-            }
-        }
         return when (val jwTicket = mintCasServiceTicket(GdouSyncScript.URL_JW_SSO_SERVICE)) {
             is CasTicketMintResult.Ticket -> {
                 val redeemResp = redeemJwCasTicket(SyncChannel.WFW_LEGACY, jwTicket.ticket)
@@ -448,10 +491,12 @@ class GdouNativeSyncEngine(
         allowAutoWfwFailover: Boolean = true
     ): SessionCheckResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
+        engineLog(msg = "verifyStart ch=${channel.name} force=$forceReverify failover=$allowAutoWfwFailover ${cookieFlagsSummary()}")
         if (!forceReverify) {
             val cachedMenu = menuCache[channel]
             val verifiedTs = lastVerifiedAt[channel] ?: 0L
             if (cachedMenu != null && startMs - verifiedTs < 90_000L) {
+                engineLog(msg = "verifyCacheHit ch=${channel.name} menu=${cachedMenu.dynamicLinks.size}")
                 return@withContext SessionCheckResult.Ready(channel, cachedMenu, 0L)
             }
         }
@@ -520,8 +565,7 @@ class GdouNativeSyncEngine(
                     ensureWfwJwProxyCookies()
                     val wfwCookies = cookieStore.getCookieHeader("${wfwRootUrl()}/").orEmpty()
                     val hasJwSession = wfwCookies.contains("JSESSIONID=", ignoreCase = true)
-                    val hasWfwSess = wfwCookies.contains("WFWSESSID=", ignoreCase = true)
-                    if (!hasJwSession && !hasWfwSess && !hasCasTgc) {
+                    if (!hasJwSession && !hasCasTgc) {
                         invalidateSessionCache(channel)
                         return@withContext SessionCheckResult.NeedsAuth(
                             channel = channel,
@@ -541,12 +585,17 @@ class GdouNativeSyncEngine(
         }
 
         val url = buildJwUrl(channel, "/xtgl/index_initMenu.html?jsdm=xs")
-        var resp = executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+        var resp = if (channel == SyncChannel.ON_CAMPUS) {
+            executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 4_500, maxAttempts = 2)
+        } else {
+            executeHttp(urlStr = url, method = "GET", channel = channel, timeoutMs = 10_000)
+        }
 
         // Headless CAS ST renewal if JW JSESSIONID (or outer WebVPN ticket) expired while first-party CASTGC is still valid
         val initialExpired = !resp.networkError && !resp.isMfa && !resp.isWebVpnDenied &&
             (resp.authExpired || isAuthExpiredStatus(resp.statusCode) || isAuthExpiredHtml(resp.body))
         if (initialExpired && casBridgeEnabled() && hasDirectCasTgc()) {
+            engineLog(msg = "verifyInitialExpired ch=${channel.name} code=${resp.statusCode} final=${sanitizeUrlForLog(resp.finalUrl)} -> casRenew")
             when (channel) {
                 SyncChannel.WFW_LEGACY -> {
                     val mfaStop = establishWfwSessionViaCas()
@@ -643,6 +692,7 @@ class GdouNativeSyncEngine(
         val elapsed = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
 
         if (resp.networkError) {
+            engineLog(warn = true, msg = "verifyEnd ch=${channel.name} NetworkError(${elapsed}ms): ${resp.errorDetail}")
             return@withContext SessionCheckResult.NetworkError(
                 channel = channel,
                 message = resp.errorDetail.ifBlank { "暂未连通学校教务服务器，请检查网络或切换通道" }
@@ -661,6 +711,7 @@ class GdouNativeSyncEngine(
                     return@withContext fallback
                 }
             }
+            engineLog(warn = true, msg = "verifyEnd ch=${channel.name} NeedsAuth(WebVPN denied, ${elapsed}ms)")
             return@withContext SessionCheckResult.NeedsAuth(
                 channel = channel,
                 resumeUrl = resp.finalUrl.ifBlank { "${webVpnRootUrl()}/wengine-vpn/denied" },
@@ -670,6 +721,7 @@ class GdouNativeSyncEngine(
         }
         if (resp.isMfa) {
             invalidateSessionCache(channel)
+            engineLog(msg = "verifyEnd ch=${channel.name} NeedsAuth(MFA, ${elapsed}ms) final=${sanitizeUrlForLog(resp.finalUrl)}")
             return@withContext SessionCheckResult.NeedsAuth(
                 channel = channel,
                 resumeUrl = resp.finalUrl,
@@ -679,11 +731,28 @@ class GdouNativeSyncEngine(
         }
         if (resp.authExpired || isAuthExpiredStatus(resp.statusCode) || isAuthExpiredHtml(resp.body)) {
             if (channel == SyncChannel.WEBVPN) {
-                // Always clear expired/split-expired wengine_vpn_ticket before re-auth so aged sessions behave as cleanly as fresh installs!
-                clearStaleWebVpnTicket()
+                val vpnHost = GdouSyncScript.extractHostLower(webVpnRootUrl())
+                val finalHost = GdouSyncScript.extractHostLower(resp.finalUrl)
+                val lowerFinal = resp.finalUrl.lowercase(Locale.US)
+                val finalPath = try { URI(resp.finalUrl).path.orEmpty().trimEnd('/') } catch (_: Exception) { "" }
+                val proxiedVpnAuthServer = finalHost == vpnHost && lowerFinal.contains("/authserver/")
+                val bouncedToVpnGate = finalHost == vpnHost && (
+                    finalPath == "/login" ||
+                        lowerFinal.contains("/wengine-vpn/denied") ||
+                        lowerFinal.contains("/wengine-vpn/failed")
+                    )
+                // Keep a valid Enterprise WeChat WebVPN ticket when WebVPN proxies jw's /authserver/ gate;
+                // only clear wengine_vpn_ticket when bounced back to WebVPN /login / denied / failed or non-proxied auth.
+                if (!proxiedVpnAuthServer && (bouncedToVpnGate || !hasDirectCasTgc() || finalHost == vpnHost)) {
+                    clearStaleWebVpnTicket()
+                }
             }
             invalidateSessionCache(channel)
             val resume = resolveInteractiveResumeUrl(channel, resp.finalUrl)
+            engineLog(
+                warn = true,
+                msg = "verifyEnd ch=${channel.name} NeedsAuth(${elapsed}ms) code=${resp.statusCode} final=${sanitizeUrlForLog(resp.finalUrl)} resume=${sanitizeUrlForLog(resume)} ${cookieFlagsSummary()}"
+            )
             return@withContext SessionCheckResult.NeedsAuth(
                 channel = channel,
                 resumeUrl = resume,
@@ -692,16 +761,51 @@ class GdouNativeSyncEngine(
         }
         if (resp.statusCode in 200..299 && resp.body.isNotBlank()) {
             val discovered = parseMenuEndpoints(resp.body)
+            if (discovered.dynamicLinks.isEmpty()) {
+                val hasClick = resp.body.contains("clickMenu", ignoreCase = true)
+                val menuAttrSamples = Regex("""(?:onclick|href|data-[a-z0-9-]+)\s*=\s*["'][^"']*(?:kbcx|cjcx|kwgl|cdjy|gnmkdm|Menu|\.html)[^"']*["']""", RegexOption.IGNORE_CASE)
+                    .findAll(resp.body)
+                    .map { it.value.replace(Regex("[\\u4e00-\\u9fa5]"), "*").take(90) }
+                    .distinct()
+                    .take(4)
+                    .joinToString(" | ")
+                engineLog(
+                    warn = true,
+                    msg = "initMenuZeroLinks ch=${channel.name} len=${resp.body.length} clickMenu=$hasClick attrs=[$menuAttrSamples]"
+                )
+            } else {
+                engineLog(msg = "initMenuParsed ch=${channel.name} links=${discovered.dynamicLinks.size}")
+            }
             menuCache[channel] = discovered
             lastVerifiedAt[channel] = System.currentTimeMillis()
             lastReadyChannel = channel
             cookieStore.flushAsync()
+            engineLog(msg = "verifyEnd ch=${channel.name} Ready(${elapsed}ms) links=${discovered.dynamicLinks.size} ${cookieFlagsSummary()}")
             return@withContext SessionCheckResult.Ready(channel, discovered, elapsed)
         }
+        engineLog(warn = true, msg = "verifyEnd ch=${channel.name} HTTP_${resp.statusCode}(${elapsed}ms) bodyLen=${resp.body.length}")
         SessionCheckResult.NetworkError(
             channel = channel,
             message = "教务服务响应异常（HTTP ${resp.statusCode}），请稍后重试"
         )
+    }
+
+    private suspend fun trySilentCasRenew(channel: SyncChannel): SessionCheckResult? {
+        if (!casBridgeEnabled() || !hasDirectCasTgc()) return null
+        engineLog(msg = "silentCasRenew start ch=${channel.name}")
+        invalidateSessionCache(channel)
+        return establishOrVerifySession(channel, forceReverify = true, allowAutoWfwFailover = false)
+    }
+
+    private suspend fun <T> withSilentCasRetry(
+        channel: SyncChannel,
+        isRetryableAuthExpired: (T) -> Boolean,
+        block: suspend () -> T
+    ): T {
+        val first = block()
+        if (!isRetryableAuthExpired(first)) return first
+        val renewed = trySilentCasRenew(channel) ?: return first
+        return if (renewed is SessionCheckResult.Ready) block() else first
     }
 
     /**
@@ -710,7 +814,12 @@ class GdouNativeSyncEngine(
     suspend fun fetchAcademicOptions(
         channel: SyncChannel,
         forceRefresh: Boolean = false
-    ): NativeCallResult<TermOptionsPayload> =
+    ): NativeCallResult<TermOptionsPayload> = withSilentCasRetry(
+        channel = channel,
+        isRetryableAuthExpired = { res ->
+            res is NativeCallResult.AuthExpired && !res.isMfa && !res.isWebVpnDenied
+        }
+    ) {
         withContext(Dispatchers.IO) {
             if (!forceRefresh) {
                 val cached = termOptionsCache[channel]
@@ -807,6 +916,7 @@ class GdouNativeSyncEngine(
                 )
             )
         }
+    }
 
     /**
      * 后台静默预热学年学期选项，点击「一键全同步」时 0ms 瞬开学期选择器
@@ -829,7 +939,16 @@ class GdouNativeSyncEngine(
         semesterCode: String,
         termLabel: String,
         onProgress: (String) -> Unit = {}
-    ): FullSyncNativeOutcome = withContext(Dispatchers.IO) {
+    ): FullSyncNativeOutcome = withSilentCasRetry(
+        channel = channel,
+        isRetryableAuthExpired = { out ->
+            out.authExpired != null &&
+                out.summaryText.isBlank() &&
+                !out.authExpired.isMfa &&
+                !out.authExpired.isWebVpnDenied
+        }
+    ) {
+        withContext(Dispatchers.IO) {
         if (mode == "all") {
             onProgress("正在并发同步课表、成绩与考试...")
             ensureMenuEndpoints(channel)
@@ -981,6 +1100,7 @@ class GdouNativeSyncEngine(
                 }
             }
         }
+        }
     }
 
     /**
@@ -997,9 +1117,7 @@ class GdouNativeSyncEngine(
         preferLegacyWfw: Boolean = false,
         onProgress: (String) -> Unit = {}
     ): QuickRefreshNativeOutcome = withContext(Dispatchers.IO) {
-        val offCampusTarget = SyncChannel.preferredOffCampus(
-            preferLegacyWfw || (casBridgeEnabled() && hasWfwSessionCookie() && !hasWebVpnTicketCookie())
-        )
+        val offCampusTarget = SyncChannel.preferredOffCampus(preferLegacyWfw)
         var activeChannel = when {
             preferredChannel == SyncChannel.WEBVPN && preferLegacyWfw -> SyncChannel.WFW_LEGACY
             preferredChannel == SyncChannel.ON_CAMPUS &&
@@ -1018,6 +1136,23 @@ class GdouNativeSyncEngine(
             if (probe.state == CampusNetworkState.OFF_CAMPUS_ONLY) {
                 activeChannel = offCampusTarget
                 session = establishOrVerifySession(activeChannel, forceReverify = true)
+            } else if (probe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
+                return@withContext QuickRefreshNativeOutcome.Error("当前网络暂未连通学校服务器，请检查流量或先连接校园网")
+            }
+        }
+
+        // Prevent popping dead ON_CAMPUS login sheet on external non-campus Wi-Fi / VPN when cookies are empty
+        if (
+            session is SessionCheckResult.NeedsAuth &&
+            session.channel == SyncChannel.ON_CAMPUS &&
+            context != null &&
+            customBaseUrlOverride.isNullOrBlank()
+        ) {
+            val probe = NetworkChannelProbe.probeCached(context)
+            if (probe.state == CampusNetworkState.OFF_CAMPUS_ONLY) {
+                onProgress("已识别校外网络，正在切换至 WebVPN 通道...")
+                activeChannel = offCampusTarget
+                session = establishOrVerifySession(activeChannel, forceReverify = false)
             } else if (probe.state == CampusNetworkState.OFFLINE_OR_BLOCKED) {
                 return@withContext QuickRefreshNativeOutcome.Error("当前网络暂未连通学校服务器，请检查流量或先连接校园网")
             }
@@ -1514,7 +1649,13 @@ class GdouNativeSyncEngine(
         buildingKeyword: String,
         fallbackAcademicYear: String = "",
         fallbackSemesterCode: String = ""
-    ): NativeCallResult<EmptyClassroomQueryNativeResult> = withContext(Dispatchers.IO) {
+    ): NativeCallResult<EmptyClassroomQueryNativeResult> = withSilentCasRetry(
+        channel = channel,
+        isRetryableAuthExpired = { res ->
+            res is NativeCallResult.AuthExpired && !res.isMfa && !res.isWebVpnDenied
+        }
+    ) {
+        withContext(Dispatchers.IO) {
         val w = weekNumber.coerceIn(1, 25)
         val d = dayOfWeek.coerceIn(1, 7)
         val s1 = startSection.coerceIn(1, 12)
@@ -1584,6 +1725,7 @@ class GdouNativeSyncEngine(
                 summary = "${campusKeyword}校区 · 共 $primeCount 间自习教室（全校区共 ${rooms.size} 间 · 覆盖 $buildingCount 栋教学楼）"
             )
         )
+        }
     }
 
     /**
@@ -1598,7 +1740,13 @@ class GdouNativeSyncEngine(
         roomName: String,
         fallbackAcademicYear: String = "",
         fallbackSemesterCode: String = ""
-    ): NativeCallResult<RoomDayScheduleNativeResult> = withContext(Dispatchers.IO) {
+    ): NativeCallResult<RoomDayScheduleNativeResult> = withSilentCasRetry(
+        channel = channel,
+        isRetryableAuthExpired = { res ->
+            res is NativeCallResult.AuthExpired && !res.isMfa && !res.isWebVpnDenied
+        }
+    ) {
+        withContext(Dispatchers.IO) {
         val w = weekNumber.coerceIn(1, 25)
         val d = dayOfWeek.coerceIn(1, 7)
         val targetRaw = roomName.trim()
@@ -1704,6 +1852,7 @@ class GdouNativeSyncEngine(
                 slots = slots
             )
         )
+        }
     }
 
     // ==================== 内部协议实现与解析 ====================
@@ -1988,15 +2137,28 @@ class GdouNativeSyncEngine(
         channel: SyncChannel,
         formBody: String? = null,
         expectJson: Boolean = false,
-        timeoutMs: Int = 11_000
+        timeoutMs: Int = 11_000,
+        maxAttempts: Int = 3
     ): HttpOutcome {
         var lastOutcome: HttpOutcome? = null
-        for (attempt in 0 until 3) {
+        val cap = maxAttempts.coerceIn(1, 3)
+        for (attempt in 0 until cap) {
             val outcome = executeHttpOnce(urlStr, method, channel, formBody, expectJson, timeoutMs)
             lastOutcome = outcome
-            val transient5xx = outcome.statusCode in listOf(502, 503, 504)
+            val transient5xx = outcome.statusCode in listOf(502, 503, 504) ||
+                (outcome.statusCode == 500 && urlStr.contains("/sso/jziotlogin", ignoreCase = true))
             if (!transient5xx && !outcome.networkError) return outcome
-            if (attempt < 2) {
+            if (outcome.nonRetriableNetwork) {
+                engineLog(warn = true, msg = "httpAbortNonRetriable ch=${channel.name} url=${sanitizeUrlForLog(urlStr)} err=${outcome.errorDetail}")
+                return outcome
+            }
+            // Off-campus / VPN blackhole: TCP SYN never reached campus gateway within 3.5s, fail fast instead of looping 30s
+            if (channel == SyncChannel.ON_CAMPUS && outcome.tcpConnectTimedOut) {
+                engineLog(warn = true, msg = "httpFailFastConnectTimeout ch=${channel.name} url=${sanitizeUrlForLog(urlStr)}")
+                return outcome
+            }
+            if (attempt < cap - 1) {
+                engineLog(warn = true, msg = "httpRetry#${attempt + 1} ch=${channel.name} code=${outcome.statusCode} url=${sanitizeUrlForLog(urlStr)} err=${outcome.errorDetail}")
                 if (channel == SyncChannel.ON_CAMPUS) {
                     cookieStore.clearCookieByPrefix("https://jw.gdou.edu.cn/", "ADCCookie")
                 } else if (channel == SyncChannel.WFW_LEGACY) {
@@ -2019,17 +2181,52 @@ class GdouNativeSyncEngine(
         var currentUrl = startUrl
         var currentMethod = initialMethod
         var currentBody = formBody
+        val isWfwRootTicketFlow = channel == SyncChannel.WFW_LEGACY && startUrl.contains("/?ticket=")
+        val effectiveConnectTimeoutMs = if (channel == SyncChannel.ON_CAMPUS) minOf(timeoutMs, 3_500) else timeoutMs
+
+        data class HopCookie(val host: String, val path: String, val name: String, val value: String)
+        val hopCookies = mutableListOf<HopCookie>()
+
+        fun parseSetCookieToHop(urlStr: String, raw: String): HopCookie? {
+            val parts = raw.split(";")
+            val nv = parts.firstOrNull()?.trim() ?: return null
+            val eq = nv.indexOf('=')
+            if (eq <= 0) return null
+            val name = nv.substring(0, eq).trim()
+            val value = nv.substring(eq + 1).trim()
+            val uri = try { URI(urlStr) } catch (_: Exception) { return null }
+            val host = uri.host?.lowercase(Locale.US) ?: return null
+            val reqPath = uri.rawPath.orEmpty().ifEmpty { "/" }
+            var cookiePath = if (reqPath.endsWith("/")) reqPath else reqPath.substringBeforeLast("/", "") + "/"
+            for (i in 1 until parts.size) {
+                val attr = parts[i].trim()
+                if (attr.startsWith("path=", ignoreCase = true)) {
+                    val p = attr.substringAfter("=").trim()
+                    if (p.isNotEmpty()) cookiePath = p
+                }
+            }
+            return HopCookie(host, cookiePath, name, value)
+        }
+
+        fun pathMatchesCookie(reqPath: String, cookiePath: String): Boolean {
+            if (cookiePath == "/") return true
+            if (!reqPath.startsWith(cookiePath)) return false
+            if (reqPath.length == cookiePath.length || cookiePath.endsWith("/")) return true
+            return reqPath[cookiePath.length] == '/'
+        }
 
         for (hop in 0 until 12) {
             if (!isAllowedRequestUrl(currentUrl)) {
                 return HttpOutcome(0, currentUrl, "", "", networkError = true, errorDetail = "拦截了非广海官方域名的跳转")
             }
             var conn: HttpURLConnection? = null
+            var connectCompleted = false
+            var sentCookieNames = ""
             try {
                 conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                     requestMethod = currentMethod
                     instanceFollowRedirects = false
-                    connectTimeout = timeoutMs
+                    connectTimeout = effectiveConnectTimeoutMs
                     readTimeout = timeoutMs
                     useCaches = false
                     setRequestProperty("User-Agent", MOBILE_CHROME_UA)
@@ -2042,9 +2239,42 @@ class GdouNativeSyncEngine(
                     if (expectJson) {
                         setRequestProperty("X-Requested-With", "XMLHttpRequest")
                     }
-                    val cookieHeader = cookieStore.getCookieHeader(currentUrl)
-                    if (!cookieHeader.isNullOrBlank()) {
-                        setRequestProperty("Cookie", cookieHeader)
+                    val baseCookieHeader = cookieStore.getCookieHeader(currentUrl).orEmpty()
+                    val curUri = try { URI(currentUrl) } catch (_: Exception) { null }
+                    val curHost = curUri?.host?.lowercase(Locale.US).orEmpty()
+                    val curPath = curUri?.rawPath.orEmpty().ifEmpty { "/" }
+                    val matchingHops = hopCookies
+                        .filter { it.host == curHost && pathMatchesCookie(curPath, it.path) }
+                        .sortedByDescending { it.path.length }
+                    val effectivePairs = mutableListOf<String>()
+                    val seenHopKeys = HashSet<String>()
+                    for (hc in matchingHops) {
+                        val k = hc.name.lowercase(Locale.US)
+                        if (seenHopKeys.add(k)) {
+                            effectivePairs.add("${hc.name}=${hc.value}")
+                        }
+                    }
+                    val isWfwPreSeed = channel == SyncChannel.WFW_LEGACY && startUrl.contains("/xtgl/login_getPublicKey.html")
+                    val isWfwCasRedeem = channel == SyncChannel.WFW_LEGACY && startUrl.contains("/sso/jziotlogin")
+                    if (baseCookieHeader.isNotBlank()) {
+                        baseCookieHeader.split(";").forEach { part ->
+                            val trimmed = part.trim()
+                            val k = trimmed.substringBefore("=").trim().lowercase(Locale.US)
+                            val skipWfwStale = channel == SyncChannel.WFW_LEGACY && (
+                                k == "urlss_file" ||
+                                    (k == "urlss" && !trimmed.contains("jw.gdou.edu.cn", ignoreCase = true)) ||
+                                    (isWfwPreSeed && k in setOf("wfwsessid", "db_agent_token", "_path", "jsessionid")) ||
+                                    (isWfwCasRedeem && k in setOf("db_agent_token", "_path"))
+                                )
+                            if (trimmed.isNotEmpty() && !seenHopKeys.contains(k) && !skipWfwStale) {
+                                effectivePairs.add(trimmed)
+                            }
+                        }
+                    }
+                    val mergedCookieHeader = effectivePairs.joinToString("; ")
+                    sentCookieNames = effectivePairs.joinToString(",") { it.substringBefore("=").trim() }
+                    if (mergedCookieHeader.isNotBlank()) {
+                        setRequestProperty("Cookie", mergedCookieHeader)
                     }
                     if (currentMethod == "POST" && currentBody != null) {
                         doOutput = true
@@ -2054,11 +2284,30 @@ class GdouNativeSyncEngine(
                         outputStream.use { it.write(bytes) }
                     }
                 }
+                conn.connect()
+                connectCompleted = true
 
                 val code = conn.responseCode
                 val setCookies = extractSetCookieHeaders(conn)
                 if (setCookies.isNotEmpty()) {
                     cookieStore.saveResponseCookies(currentUrl, setCookies)
+                    for (raw in setCookies) {
+                        parseSetCookieToHop(currentUrl, raw)?.let { hc ->
+                            hopCookies.removeAll { it.host == hc.host && it.path == hc.path && it.name.equals(hc.name, ignoreCase = true) }
+                            hopCookies.add(hc)
+                        }
+                    }
+                    // Keep wfw's urlss pinned to jw.gdou.edu.cn so redirects don't hijack proxy target to file.gdou.edu.cn
+                    if (channel == SyncChannel.WFW_LEGACY &&
+                        !isWfwRootTicketFlow &&
+                        setCookies.any { it.startsWith("urlss=", ignoreCase = true) && !it.contains("jw.gdou.edu.cn", ignoreCase = true) }
+                    ) {
+                        ensureWfwJwProxyCookies()
+                    }
+                }
+                val recvCookieSummary = setCookies.joinToString(",") { raw ->
+                    val parsed = parseSetCookieToHop(currentUrl, raw)
+                    if (parsed != null) "${parsed.name}(${parsed.path})" else raw.substringBefore("=").trim()
                 }
 
                 if (code in 300..399) {
@@ -2070,6 +2319,10 @@ class GdouNativeSyncEngine(
                     }
                     var nextUrl = resolveRedirectUrl(currentUrl, loc)
                     nextUrl = normalizeGdouRedirectUrl(nextUrl, channel)
+                    engineLog(
+                        warn = channel == SyncChannel.WFW_LEGACY,
+                        msg = "httpHop#$hop ch=${channel.name} $code ${sanitizeUrlForLog(currentUrl)} -> ${sanitizeUrlForLog(nextUrl)} sent=[$sentCookieNames] recv=[$recvCookieSummary]"
+                    )
 
                     val lowerNext = nextUrl.lowercase(Locale.US)
                     if (lowerNext.contains("/wengine-vpn/denied") || lowerNext.contains("/wengine-vpn/failed")) {
@@ -2089,6 +2342,13 @@ class GdouNativeSyncEngine(
 
                 val body = readResponseBody(conn, code)
                 val ct = conn.contentType.orEmpty()
+                if (channel == SyncChannel.WFW_LEGACY) {
+                    val finalTitle = TITLE_RE.find(body)?.groupValues?.getOrNull(1)?.replace(WS_RE, " ")?.trim().orEmpty().take(40)
+                    engineLog(
+                        warn = true,
+                        msg = "httpFinal#$hop ch=WFW_LEGACY $code ${sanitizeUrlForLog(currentUrl)} sent=[$sentCookieNames] recv=[$recvCookieSummary] title=[$finalTitle] len=${body.length}"
+                    )
+                }
 
                 val lowerFinal = currentUrl.lowercase(Locale.US)
                 if (lowerFinal.contains("/wengine-vpn/denied") || lowerFinal.contains("/wengine-vpn/failed") ||
@@ -2107,9 +2367,22 @@ class GdouNativeSyncEngine(
                     return HttpOutcome(code, currentUrl, body, ct, authExpired = true)
                 }
                 return HttpOutcome(code, currentUrl, body, ct)
+            } catch (e: UnknownHostException) {
+                try { conn?.disconnect() } catch (_: Throwable) {}
+                return HttpOutcome(
+                    0, currentUrl, "", "",
+                    networkError = true,
+                    errorDetail = "域名解析失败：${e.message ?: "UnknownHost"}",
+                    nonRetriableNetwork = true
+                )
             } catch (e: SocketTimeoutException) {
                 try { conn?.disconnect() } catch (_: Throwable) {}
-                return HttpOutcome(0, currentUrl, "", "", networkError = true, errorDetail = "连接超时，请检查网络或切换通道")
+                return HttpOutcome(
+                    0, currentUrl, "", "",
+                    networkError = true,
+                    errorDetail = if (connectCompleted) "服务器响应超时，请检查网络或切换通道" else "连接超时，请检查网络或切换通道",
+                    tcpConnectTimedOut = !connectCompleted
+                )
             } catch (e: IOException) {
                 try { conn?.disconnect() } catch (_: Throwable) {}
                 return HttpOutcome(0, currentUrl, "", "", networkError = true, errorDetail = "网络中断：${e.message ?: e.javaClass.simpleName}")
@@ -2225,9 +2498,13 @@ class GdouNativeSyncEngine(
         val trimmed = finalUrl.trim()
         if (trimmed.isNotEmpty() && isAllowedRequestUrl(trimmed)) {
             val lower = trimmed.lowercase(Locale.US)
+            val isProxiedWebVpnAuth = channel == SyncChannel.WEBVPN &&
+                GdouSyncScript.extractHostLower(trimmed) == GdouSyncScript.extractHostLower(webVpnRootUrl()) &&
+                lower.contains("/authserver/")
             if (GdouSyncScript.isMfaUrl(lower) ||
                 lower.contains("/wengine-vpn/denied") ||
-                lower.contains("/wengine-vpn/failed")
+                lower.contains("/wengine-vpn/failed") ||
+                isProxiedWebVpnAuth
             ) {
                 return trimmed
             }

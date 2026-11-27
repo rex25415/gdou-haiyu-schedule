@@ -61,7 +61,9 @@ class AndroidWebViewCookieStore : GdouCookieStore {
             existing.split(";").forEach { part ->
                 val cname = part.trim().substringBefore("=").trim()
                 if (cname.startsWith(namePrefix, ignoreCase = true)) {
-                    cm.setCookie(url, "$cname=; Max-Age=0; Path=/")
+                    for (p in listOf("/", "/sso", "/sso/")) {
+                        cm.setCookie(url, "$cname=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=$p")
+                    }
                 }
             }
         } catch (_: Throwable) {

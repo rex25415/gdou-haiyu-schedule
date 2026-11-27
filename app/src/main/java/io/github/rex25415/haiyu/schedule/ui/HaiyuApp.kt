@@ -361,11 +361,11 @@ fun HaiyuApp(
         isJwSyncing = true
         showToast("正在快速刷新课表...")
         val snap = snapshot
-        val offCampusPreferred = SyncChannel.preferredOffCampus(
-            snap.settings.preferLegacyWfw || (nativeEngine.hasWfwSessionCookie() && !nativeEngine.hasWebVpnTicketCookie())
-        )
-        val preferred = nativeEngine.lastReadyChannel
-            ?: if (snap.settings.preferOffCampusChannel) offCampusPreferred else SyncChannel.ON_CAMPUS
+        val preferred = when (nativeEngine.lastReadyChannel) {
+            SyncChannel.ON_CAMPUS -> SyncChannel.ON_CAMPUS
+            SyncChannel.WEBVPN -> SyncChannel.WEBVPN
+            else -> if (snap.settings.preferOffCampusChannel) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+        }
         scope.launch {
             val outcome = nativeEngine.quickRefreshCourses(
                 context = context,
@@ -373,16 +373,14 @@ fun HaiyuApp(
                 savedYear = snap.settings.lastSyncYearCode,
                 savedSem = snap.settings.lastSyncSemesterCode,
                 savedTermLabel = snap.settings.academicYearLabel,
-                preferLegacyWfw = snap.settings.preferLegacyWfw
+                preferLegacyWfw = false
             )
             isJwSyncing = false
             when (outcome) {
                 is QuickRefreshNativeOutcome.Success -> {
                     isJwLoggedIn = true
-                    if (outcome.channel == SyncChannel.WFW_LEGACY && !snap.settings.preferLegacyWfw) {
-                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = true) }
-                    } else if (outcome.channel == SyncChannel.WEBVPN && snap.settings.preferLegacyWfw) {
-                        repo.updateSettings { it.copy(preferLegacyWfw = false) }
+                    if (outcome.channel == SyncChannel.WEBVPN && (!snap.settings.preferOffCampusChannel || snap.settings.preferLegacyWfw)) {
+                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = false) }
                     }
                     val diff = GdouNativeSyncEngine.summarizeCourseRefreshDiff(
                         previousCourses = snap.courses,
@@ -408,8 +406,8 @@ fun HaiyuApp(
                 }
                 is QuickRefreshNativeOutcome.NeedsLogin -> {
                     isJwLoggedIn = false
-                    if (outcome.isWebVpnDenied && !snap.settings.preferLegacyWfw) {
-                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = true) }
+                    if (outcome.isWebVpnDenied) {
+                        repo.updateSettings { it.copy(preferOffCampusChannel = true, preferLegacyWfw = false) }
                     }
                     externalAuthTrigger = ExternalAuthTrigger(
                         nonce = externalAuthTrigger.nonce + 1,

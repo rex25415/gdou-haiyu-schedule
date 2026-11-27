@@ -443,4 +443,97 @@ class GdouSyncScriptTest {
         assertFalse(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://authserver.gdou.edu.cn/authserver/reauthCheck.html"))
         assertFalse(GdouSyncScript.isAuthenticatedCasFallbackUrl("https://i.gdou.edu.cn/login"))
     }
+
+    @Test
+    fun webVpnPortalLandingActionForwardsGatewayOnlyWeComScanWithoutClosing() {
+        // 1. WeCom QR unlocked WebVPN ticket only (cas=false) -> forward inside same WebView to proxied JW/CAS
+        assertEquals(
+            GdouSyncScript.WebVpnPortalLandingAction.FORWARD_TO_PROXIED_JW,
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = "https://webvpn.gdou.edu.cn/",
+                hasDirectCasTgc = false,
+                hasWebVpnTicket = true,
+                hasForwardedIntoVpnJw = false
+            )
+        )
+        // 2. Normal CAS->WebVPN login (cas=true) -> immediate native handoff
+        assertEquals(
+            GdouSyncScript.WebVpnPortalLandingAction.HANDOFF,
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = "https://webvpn.gdou.edu.cn/",
+                hasDirectCasTgc = true,
+                hasWebVpnTicket = true,
+                hasForwardedIntoVpnJw = false
+            )
+        )
+        // 3. After already forwarding once, avoid reload loop -> hand off cleanly
+        assertEquals(
+            GdouSyncScript.WebVpnPortalLandingAction.HANDOFF,
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = "https://webvpn.gdou.edu.cn/",
+                hasDirectCasTgc = false,
+                hasWebVpnTicket = true,
+                hasForwardedIntoVpnJw = true
+            )
+        )
+        // 4. Proxied /https/... paths or missing ticket -> ignore
+        assertEquals(
+            GdouSyncScript.WebVpnPortalLandingAction.IGNORE,
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = "https://webvpn.gdou.edu.cn/https/${GdouSyncScript.WEBVPN_JW_HEX}/xtgl/index_initMenu.html?jsdm=xs",
+                hasDirectCasTgc = false,
+                hasWebVpnTicket = true,
+                hasForwardedIntoVpnJw = false
+            )
+        )
+        assertEquals(
+            GdouSyncScript.WebVpnPortalLandingAction.IGNORE,
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = "https://webvpn.gdou.edu.cn/",
+                hasDirectCasTgc = false,
+                hasWebVpnTicket = false,
+                hasForwardedIntoVpnJw = false
+            )
+        )
+    }
+
+    @Test
+    fun probeCacheInvalidatesImmediatelyWhenNetworkSignatureChanges() {
+        val campusSig = NetworkChannelProbe.formatNetworkSignature("101", hasWifiOrEthernet = true, hasCellular = false, hasVpn = false)
+        val cellularSig = NetworkChannelProbe.formatNetworkSignature("102", hasWifiOrEthernet = false, hasCellular = true, hasVpn = false)
+        val campusRes = io.github.rex25415.haiyu.schedule.sync.NetworkProbeResult(
+            state = io.github.rex25415.haiyu.schedule.sync.CampusNetworkState.ON_CAMPUS_DIRECT_READY,
+            isOnWifi = true,
+            jwLatencyMs = 35L
+        )
+        assertTrue(
+            NetworkChannelProbe.isCacheValidForNetwork(
+                cachedResult = campusRes,
+                cachedAtMs = 1_000L,
+                cachedSignature = campusSig,
+                currentSignature = campusSig,
+                nowMs = 10_000L
+            )
+        )
+        assertFalse(
+            NetworkChannelProbe.isCacheValidForNetwork(
+                cachedResult = campusRes,
+                cachedAtMs = 1_000L,
+                cachedSignature = campusSig,
+                currentSignature = cellularSig,
+                nowMs = 2_000L
+            )
+        )
+        val blockedRes = campusRes.copy(state = io.github.rex25415.haiyu.schedule.sync.CampusNetworkState.OFFLINE_OR_BLOCKED)
+        assertFalse(
+            NetworkChannelProbe.isCacheValidForNetwork(
+                cachedResult = blockedRes,
+                cachedAtMs = 1_000L,
+                cachedSignature = campusSig,
+                currentSignature = campusSig,
+                nowMs = 2_000L,
+                ignoreBlocked = true
+            )
+        )
+    }
 }

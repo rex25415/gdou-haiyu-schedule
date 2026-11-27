@@ -2,6 +2,17 @@
 
 本文件记录「海屿空间（原名海屿课表）」各个公开版本的主要功能与维护变更；包名自 `v2.8.0` 起统一为 `io.github.rex25415.haiyu.schedule`。
 
+## [v3.5.2] - 2026-11-27（双入口精简重构 · 极简交互与校外全场景闭环）
+- **致各位海大同学**：海屿空间坚持完全免费、零广告、不上传学号密码，只是想把顺手好用的工具真诚分享给有需要的海大同学，覆盖安装自动保留全部本地课表、成绩与设置。
+- **登录入口重塑为清晰的「双模式 + 白话引导」**：
+  - [SyncPortalScreen.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/screens/SyncPortalScreen.kt) 将未登录卡片收口为 **「校外免校园网」｜「校园网直连」二选一分段开关** + 动态白话引导说明 + 单一主登录按钮，一眼看懂校外无需自己开梯子/代理；首页迎新卡同步实时提示当前网络模式（[ScheduleViewComponents.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/ScheduleViewComponents.kt)）；
+  - 下线长期实测受限于服务端重定向的 `wfw` 误导入口与日常常驻扫码按钮，仅在极少数账号被学校 WebVPN 提示「未在本地用户库注册」时才按需展示「企业微信扫码打通 WebVPN 网关」作为应急入口。
+- **修复多轮纯 5G 真机实测抓出的 4 项关键体验问题**：
+  - **探活缓存绑定网络指纹 & 外网 Wi-Fi 未登录防踩坑**：[NetworkChannelProbe.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/NetworkChannelProbe.kt) 绑定网络指纹（切换 Wi-Fi / 蜂窝 / VPN 即时重探），[GdouNativeSyncEngine.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouNativeSyncEngine.kt) 在非纯蜂窝准备弹窗前先探活确认可达性，杜绝外网 Wi-Fi 下误弹死链校园网认证；
+  - **纯 5G 防误切保护**：无论未登录或已连接状态下尝试切换「校园网直连」，都会先即时探活；校外网络直接弹窗保留「校外 WebVPN」，不再意外掉回「未登录」；
+  - **首页 `↻` 刷新闭环回跳**：从课表首页右上角 `↻` 触发统一认证并同步课表后，自动切回课表页展示最新课程（不再停留在教务中心）；
+  - **WebVPN 网关扫码同弹窗二段续跳**：[EphemeralGdouWebSheet.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/ui/components/EphemeralGdouWebSheet.kt) 与 [GdouSyncScript.kt](app/src/main/java/io/github/rex25415/haiyu/schedule/sync/GdouSyncScript.kt) 识别仅过网关未带 `CASTGC` 的落地场景，保持弹窗不关闭直接续跳反代统一认证页，打通一步衔接闭环。
+
 ## [v3.5.1] - 2026-11-27（校外兼容通道协议打通 · 根治 WebVPN 拒登与老会话失效）
 - **从底层彻底解决「校外 WebVPN 提示『未在本地用户库注册』」与「备用通道重启失忆」**：
   - 校外认证升级为直连广海公网第一方统一身份认证（`authserver.gdou.edu.cn`），免下 WebVPN 374KB 代理脚本、彻底告别“您正在使用VPN”浮窗，且一次登录即可持有全通道通用的第一方 `CASTGC`（支持校园网 ↔ 5G 切网静默续期）；

@@ -23,8 +23,8 @@ android {
         applicationId = "io.github.rex25415.haiyu.schedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 356
-        versionName = "3.5.1"
+        versionCode = 357
+        versionName = "3.5.2"
 
         vectorDrawables {
             useSupportLibrary = true

@@ -2356,6 +2356,32 @@ object GdouSyncScript {
         return true
     }
 
+    enum class WebVpnPortalLandingAction {
+        /** Completed CAS + WebVPN (or post-forwarding portal fallback): immediately hand off to native engine. */
+        HANDOFF,
+        /** Authenticated WebVPN gateway only (e.g., WeCom QR) without CASTGC: forward in-place to proxied JW/CAS. */
+        FORWARD_TO_PROXIED_JW,
+        /** Missing gateway ticket: ignore intermediate redirect and wait for settlement. */
+        IGNORE
+    }
+
+    /** 判定落地 WebVPN 网关门户根路径时的下一步动作，消除企业微信扫码后无 CASTGC 却提前关窗掉回未登录的断层。 */
+    fun resolveWebVpnPortalLandingAction(
+        url: String?,
+        hasDirectCasTgc: Boolean,
+        hasWebVpnTicket: Boolean,
+        hasForwardedIntoVpnJw: Boolean
+    ): WebVpnPortalLandingAction {
+        if (!isAuthenticatedWebVpnPortalUrl(url)) return WebVpnPortalLandingAction.IGNORE
+        if (hasDirectCasTgc) return WebVpnPortalLandingAction.HANDOFF
+        if (!hasWebVpnTicket) return WebVpnPortalLandingAction.IGNORE
+        return if (hasForwardedIntoVpnJw) {
+            WebVpnPortalLandingAction.HANDOFF
+        } else {
+            WebVpnPortalLandingAction.FORWARD_TO_PROXIED_JW
+        }
+    }
+
     /** 判断 URL 是否是统一认证因 service 参数丢失而落入的已登录个人中心/融合门户页（此时 CASTGC 已生效，可立即交还原生引擎签票）。 */
     fun isAuthenticatedCasFallbackUrl(url: String?): Boolean {
         val raw = url?.trim().orEmpty()

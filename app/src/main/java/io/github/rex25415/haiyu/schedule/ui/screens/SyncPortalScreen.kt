@@ -166,21 +166,17 @@ fun SyncPortalScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val preferredOffCampusChannel = SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
-
     var activeChannel by remember {
         mutableStateOf(
             when {
-                nativeEngine.lastReadyChannel != null -> nativeEngine.lastReadyChannel!!
-                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) ->
-                    SyncChannel.preferredOffCampus(
-                        settings.preferLegacyWfw || (nativeEngine.hasWfwSessionCookie() && !nativeEngine.hasWebVpnTicketCookie())
-                    )
-                settings.preferOffCampusChannel -> preferredOffCampusChannel
+                nativeEngine.lastReadyChannel == SyncChannel.ON_CAMPUS -> SyncChannel.ON_CAMPUS
+                nativeEngine.lastReadyChannel == SyncChannel.WEBVPN -> SyncChannel.WEBVPN
+                NetworkChannelProbe.shouldPreferOffCampusImmediately(context) || settings.preferOffCampusChannel -> SyncChannel.WEBVPN
                 else -> SyncChannel.ON_CAMPUS
             }
         )
     }
+    var manualChannelSelected by remember { mutableStateOf(false) }
     var activePortalMode by remember { mutableIntStateOf(requestedMode.coerceIn(0, 1)) }
     LaunchedEffect(modeRequestNonce) {
         if (modeRequestNonce > 0) activePortalMode = requestedMode.coerceIn(0, 1)
@@ -202,6 +198,7 @@ fun SyncPortalScreen(
     var syncStatusText by remember { mutableStateOf<String?>(null) }
     var pendingSyncMode by remember { mutableStateOf("all") }
     var pendingAutoActionAfterAuth by remember { mutableStateOf<String?>(null) } // "quick" | "all" | "courses" | "exams" | "empty_room" | null
+    var returnScheduleAfterQuickRefresh by remember { mutableStateOf(false) }
     var termOptionsDialog by remember { mutableStateOf<TermOptionsPayload?>(null) }
     var syncSuccessSummary by remember { mutableStateOf<String?>(null) }
     var evalInterceptBanner by remember { mutableStateOf<String?>(null) }
@@ -250,6 +247,13 @@ fun SyncPortalScreen(
         checkingHint: String
     ) -> Unit
 
+    fun recordWebVpnDenied(isDenied: Boolean) {
+        lastWebVpnDenied = isDenied
+        if (isDenied) {
+            onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
+        }
+    }
+
     fun openAuthSheet(
         channel: SyncChannel,
         resumeUrl: String = channel.authStartUrl(),
@@ -275,7 +279,8 @@ fun SyncPortalScreen(
                 titleHint = title,
                 preferDesktopUa = isMfa || activateWeComTab,
                 activateWeComTab = activateWeComTab,
-                holdOnWebVpnLogin = holdOnWebVpnLogin
+                holdOnWebVpnLogin = holdOnWebVpnLogin,
+                preferLegacyWfw = settings.preferLegacyWfw
             ),
             { authedChannel ->
                 activeChannel = authedChannel
@@ -284,7 +289,10 @@ fun SyncPortalScreen(
                 sessionStatusHint = "正在建立教务连接..."
                 verifySessionNow(authedChannel, true, true, false, "正在建立教务连接...")
             },
-            { _ -> }
+            { _ ->
+                pendingAutoActionAfterAuth = null
+                returnScheduleAfterQuickRefresh = false
+            }
         )
     }
 
@@ -302,7 +310,8 @@ fun SyncPortalScreen(
                 startUrl = targetUrl,
                 titleHint = title,
                 // wfw proxy redirects Desktop UA to direct jw.gdou.edu.cn, so keep Mobile UA on WFW_LEGACY
-                preferDesktopUa = if (activeChannel == SyncChannel.WFW_LEGACY) false else settings.preferDesktopUa
+                preferDesktopUa = if (activeChannel == SyncChannel.WFW_LEGACY) false else settings.preferDesktopUa,
+                preferLegacyWfw = settings.preferLegacyWfw
             ),
             {},
             { wasFullBrowser ->
@@ -337,7 +346,7 @@ fun SyncPortalScreen(
                 savedYear = settings.lastSyncYearCode,
                 savedSem = settings.lastSyncSemesterCode,
                 savedTermLabel = settings.academicYearLabel,
-                preferLegacyWfw = settings.preferLegacyWfw,
+                preferLegacyWfw = false,
                 onProgress = { msg -> syncStatusText = msg }
             )
             isSyncing = false
@@ -345,9 +354,7 @@ fun SyncPortalScreen(
             when (outcome) {
                 is QuickRefreshNativeOutcome.Success -> {
                     activeChannel = outcome.channel
-                    if (outcome.channel == SyncChannel.WFW_LEGACY && !settings.preferLegacyWfw) {
-                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
-                    } else if (outcome.channel == SyncChannel.WEBVPN && settings.preferLegacyWfw) {
+                    if (outcome.channel == SyncChannel.WEBVPN && (!settings.preferOffCampusChannel || settings.preferLegacyWfw)) {
                         onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
                     }
                     sessionState = PortalSessionUiState.READY
@@ -372,11 +379,15 @@ fun SyncPortalScreen(
                         if (campusChanged) "${diff.message} · 已切换「${detected!!.label}」作息"
                         else diff.message
                     )
+                    if (returnScheduleAfterQuickRefresh) {
+                        returnScheduleAfterQuickRefresh = false
+                        onSyncFinishedJumpSchedule()
+                    }
                 }
                 is QuickRefreshNativeOutcome.NeedsLogin -> {
                     activeChannel = outcome.channel
                     sessionState = PortalSessionUiState.NEEDS_AUTH
-                    lastWebVpnDenied = outcome.isWebVpnDenied
+                    recordWebVpnDenied(outcome.isWebVpnDenied)
                     lastAuthResumeUrl = outcome.resumeUrl
                     sessionStatusHint = outcome.reason
                     openAuthSheet(
@@ -387,6 +398,7 @@ fun SyncPortalScreen(
                     )
                 }
                 is QuickRefreshNativeOutcome.Error -> {
+                    returnScheduleAfterQuickRefresh = false
                     if (outcome.isEvalIntercept) evalInterceptBanner = outcome.message
                     onShowMessage(outcome.message)
                 }
@@ -406,7 +418,7 @@ fun SyncPortalScreen(
                 syncStatusText = null
                 if (res.authExpired != null) {
                     sessionState = PortalSessionUiState.NEEDS_AUTH
-                    lastWebVpnDenied = res.authExpired.isWebVpnDenied
+                    recordWebVpnDenied(res.authExpired.isWebVpnDenied)
                     openAuthSheet(activeChannel, res.authExpired.resumeUrl, isMfa = res.authExpired.isMfa)
                     return@launch
                 }
@@ -435,7 +447,7 @@ fun SyncPortalScreen(
                     isSyncing = false
                     syncStatusText = null
                     sessionState = PortalSessionUiState.NEEDS_AUTH
-                    lastWebVpnDenied = opts.isWebVpnDenied
+                    recordWebVpnDenied(opts.isWebVpnDenied)
                     lastAuthResumeUrl = opts.resumeUrl
                     sessionStatusHint = opts.message
                     openAuthSheet(activeChannel, opts.resumeUrl, isMfa = opts.isMfa, autoActionAfter = mode)
@@ -467,9 +479,7 @@ fun SyncPortalScreen(
             when (result) {
                 is SessionCheckResult.Ready -> {
                     activeChannel = result.channel
-                    if (result.channel == SyncChannel.WFW_LEGACY && !settings.preferLegacyWfw) {
-                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
-                    } else if (result.channel == SyncChannel.WEBVPN && settings.preferLegacyWfw) {
+                    if (result.channel == SyncChannel.WEBVPN && (!settings.preferOffCampusChannel || settings.preferLegacyWfw)) {
                         onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
                     }
                     sessionState = PortalSessionUiState.READY
@@ -494,23 +504,32 @@ fun SyncPortalScreen(
                     activeChannel = result.channel
                     sessionState = PortalSessionUiState.NEEDS_AUTH
                     lastAuthResumeUrl = result.resumeUrl
-                    lastWebVpnDenied = result.isWebVpnDenied
-                    if (result.isWebVpnDenied && !settings.preferLegacyWfw) {
-                        onUpdateChannelPrefs(true, settings.preferDesktopUa, true)
-                    }
+                    recordWebVpnDenied(result.isWebVpnDenied)
                     sessionStatusHint = result.reason
-                    if (openAuthIfNeeded || (autoTriggerAction && (result.isMfa || result.isWebVpnDenied))) {
+                    val shouldContinueAuthFlow = openAuthIfNeeded || (
+                        autoTriggerAction && (
+                            result.isMfa ||
+                                result.isWebVpnDenied ||
+                                (result.channel == SyncChannel.WEBVPN &&
+                                    nativeEngine.hasWebVpnTicketCookie() &&
+                                    !nativeEngine.hasDirectCasTgc())
+                            )
+                        )
+                    if (shouldContinueAuthFlow) {
                         openAuthSheet(
                             channel = result.channel,
                             resumeUrl = result.resumeUrl,
                             isMfa = result.isMfa,
                             autoActionAfter = pendingAutoActionAfterAuth ?: "all"
                         )
+                    } else {
+                        returnScheduleAfterQuickRefresh = false
                     }
                 }
                 is SessionCheckResult.NetworkError -> {
                     sessionState = PortalSessionUiState.NETWORK_ERROR
                     sessionStatusHint = result.message
+                    returnScheduleAfterQuickRefresh = false
                     if (channel == SyncChannel.ON_CAMPUS) {
                         probeTrigger++
                     }
@@ -527,6 +546,7 @@ fun SyncPortalScreen(
             activeChannel = trig.channel
             lastWebVpnDenied = trig.isWebVpnDenied
             lastAuthResumeUrl = trig.resumeUrl
+            returnScheduleAfterQuickRefresh = trig.autoQuickRefreshAfterLogin
             sessionState = PortalSessionUiState.NEEDS_AUTH
             if (trig.reason.isNotBlank()) {
                 sessionStatusHint = trig.reason
@@ -553,7 +573,7 @@ fun SyncPortalScreen(
         }
     }
 
-    // Lightweight background network probe (cached 45s; skips dead campus socket on pure 4G/5G!)
+    // Lightweight background network probe (invalidates instantly when Wi-Fi / Cellular / VPN changes)
     LaunchedEffect(probeTrigger) {
         val probe = NetworkChannelProbe.probeCached(
             context = context,
@@ -563,52 +583,77 @@ fun SyncPortalScreen(
         networkProbe = probe
         if (sessionState != PortalSessionUiState.READY) {
             if (NetworkChannelProbe.shouldAutoFallbackToOffCampus(activeChannel.isOffCampus, probe.state)) {
-                val offTarget = SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
-                activeChannel = offTarget
-                verifySessionNow(offTarget, true, false, false, "正在连接校外通道...")
+                activeChannel = SyncChannel.WEBVPN
+                lastAuthResumeUrl = SyncChannel.WEBVPN.authStartUrl()
+                onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
+                verifySessionNow(SyncChannel.WEBVPN, true, false, false, "正在连接校外通道...")
             } else if (
-                NetworkChannelProbe.shouldAutoRestoreOnCampus(
-                    userPrefersOffCampus = settings.preferOffCampusChannel,
-                    currentlyOffCampus = activeChannel.isOffCampus,
-                    state = probe.state,
-                    isLoggedIntoJw = false
-                )
+                probe.state == CampusNetworkState.ON_CAMPUS_DIRECT_READY &&
+                activeChannel.isOffCampus &&
+                !manualChannelSelected &&
+                !lastWebVpnDenied
             ) {
                 activeChannel = SyncChannel.ON_CAMPUS
+                lastAuthResumeUrl = SyncChannel.ON_CAMPUS.authStartUrl()
+                onUpdateChannelPrefs(false, settings.preferDesktopUa, false)
                 verifySessionNow(SyncChannel.ON_CAMPUS, true, false, false, "正在连接校园网教务...")
             }
         }
     }
 
     fun switchChannel(target: SyncChannel, persistChoice: Boolean = true) {
-        activeChannel = target
+        if (target == SyncChannel.ON_CAMPUS) {
+            scope.launch {
+                val probe = NetworkChannelProbe.probeCached(context, forceRefresh = true)
+                networkProbe = probe
+                when (probe.state) {
+                    CampusNetworkState.OFF_CAMPUS_ONLY -> {
+                        manualChannelSelected = false
+                        activeChannel = SyncChannel.WEBVPN
+                        if (persistChoice) {
+                            onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
+                        }
+                        onShowMessage("当前未接入校园网（仍为校外网络），已为你保留「校外 WebVPN」通道")
+                    }
+                    CampusNetworkState.OFFLINE_OR_BLOCKED, CampusNetworkState.PROBING -> {
+                        onShowMessage("当前暂未连通校园网，请检查 Wi-Fi 或网络状态")
+                    }
+                    CampusNetworkState.ON_CAMPUS_DIRECT_READY -> {
+                        manualChannelSelected = true
+                        activeChannel = SyncChannel.ON_CAMPUS
+                        lastWebVpnDenied = false
+                        evalInterceptBanner = null
+                        lastAuthResumeUrl = SyncChannel.ON_CAMPUS.authStartUrl()
+                        if (persistChoice) {
+                            onUpdateChannelPrefs(false, settings.preferDesktopUa, false)
+                        }
+                        verifySessionNow(SyncChannel.ON_CAMPUS, true, false, false, "正在切换至校园网直连...")
+                    }
+                }
+            }
+            return
+        }
+        manualChannelSelected = true
+        activeChannel = SyncChannel.WEBVPN
         lastWebVpnDenied = false
         evalInterceptBanner = null
+        lastAuthResumeUrl = SyncChannel.WEBVPN.authStartUrl()
         if (persistChoice) {
-            val nextLegacyWfw = when (target) {
-                SyncChannel.WFW_LEGACY -> true
-                SyncChannel.WEBVPN -> false
-                SyncChannel.ON_CAMPUS -> settings.preferLegacyWfw
-            }
-            onUpdateChannelPrefs(target.isOffCampus, settings.preferDesktopUa, nextLegacyWfw)
+            onUpdateChannelPrefs(true, settings.preferDesktopUa, false)
         }
-        verifySessionNow(target, true, false, false, "正在切换至${target.label}...")
+        verifySessionNow(SyncChannel.WEBVPN, true, false, false, "正在切换至${SyncChannel.WEBVPN.label}...")
     }
 
     fun togglePrimaryChannel() {
         val target = if (activeChannel == SyncChannel.ON_CAMPUS) {
-            SyncChannel.preferredOffCampus(settings.preferLegacyWfw)
+            SyncChannel.WEBVPN
         } else {
             SyncChannel.ON_CAMPUS
         }
         switchChannel(target)
     }
 
-    val shortChannelLabel = when (activeChannel) {
-        SyncChannel.ON_CAMPUS -> "校园网直连"
-        SyncChannel.WEBVPN -> "校外免校园网"
-        SyncChannel.WFW_LEGACY -> "校外兼容(wfw)"
-    }
+    val shortChannelLabel = if (activeChannel == SyncChannel.ON_CAMPUS) "校园网直连" else "校外免校园网"
 
     Box(
         modifier = Modifier
@@ -699,7 +744,7 @@ fun SyncPortalScreen(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            if (activeChannel == SyncChannel.ON_CAMPUS) "切换至校外免校园网"
+                                            if (activeChannel == SyncChannel.ON_CAMPUS) "切换至校外网络 (WebVPN)"
                                             else "切换至校园网直连"
                                         )
                                     },
@@ -710,28 +755,11 @@ fun SyncPortalScreen(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (activeChannel == SyncChannel.WFW_LEGACY) "校外改用 WebVPN"
-                                            else "校外改用兼容通道(wfw)"
-                                        )
-                                    },
-                                    leadingIcon = { Icon(Icons.Rounded.Public, contentDescription = null) },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        val nextGateway = if (activeChannel == SyncChannel.WFW_LEGACY) {
-                                            SyncChannel.WEBVPN
-                                        } else {
-                                            SyncChannel.WFW_LEGACY
-                                        }
-                                        switchChannel(nextGateway)
-                                    }
-                                )
-                                DropdownMenuItem(
                                     text = { Text("重新检测连接") },
                                     leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
                                     onClick = {
                                         showOverflowMenu = false
+                                        manualChannelSelected = false
                                         probeTrigger++
                                         verifySessionNow(activeChannel, true, false, false, "正在重新校验连接...")
                                     }
@@ -762,9 +790,14 @@ fun SyncPortalScreen(
                                     onClick = {
                                         showOverflowMenu = false
                                         nativeEngine.clearAllCookiesAndCache()
+                                        try { android.webkit.WebStorage.getInstance().deleteAllData() } catch (_: Throwable) {}
                                         sessionState = PortalSessionUiState.NEEDS_AUTH
                                         lastWebVpnDenied = false
                                         evalInterceptBanner = null
+                                        pendingAutoActionAfterAuth = null
+                                        returnScheduleAfterQuickRefresh = false
+                                        manualChannelSelected = false
+                                        lastAuthResumeUrl = activeChannel.authStartUrl()
                                         sessionStatusHint = "已清除登录缓存，请重新认证"
                                         onShowMessage("已清除教务会话与登录缓存")
                                     }
@@ -844,6 +877,7 @@ fun SyncPortalScreen(
                                 }
                                 is NativeCallResult.AuthExpired -> {
                                     sessionState = PortalSessionUiState.NEEDS_AUTH
+                                    recordWebVpnDenied(res.isWebVpnDenied)
                                     onShowMessage(res.message)
                                     openAuthSheet(activeChannel, res.resumeUrl, isMfa = res.isMfa, autoActionAfter = "empty_room")
                                 }
@@ -899,6 +933,7 @@ fun SyncPortalScreen(
                                 is NativeCallResult.AuthExpired -> {
                                     inspectedClassroom = null
                                     sessionState = PortalSessionUiState.NEEDS_AUTH
+                                    recordWebVpnDenied(res.isWebVpnDenied)
                                     onShowMessage(res.message)
                                     openAuthSheet(activeChannel, res.resumeUrl, isMfa = res.isMfa, autoActionAfter = "empty_room")
                                 }
@@ -985,7 +1020,6 @@ fun SyncPortalScreen(
                                 .clip(RoundedCornerShape(14.dp))
                                 .clickable {
                                     switchChannel(SyncChannel.ON_CAMPUS)
-                                    onShowMessage("已切至「校园网直连」")
                                 }
                         ) {
                             Row(
@@ -1102,36 +1136,86 @@ fun SyncPortalScreen(
                                         )
                                     }
 
-                                    // Compact auto-matched channel switcher pill (replaces heavy double-bar!)
+                                    // Clear 2-mode segmented switch (Off-campus WebVPN vs Campus Direct) + plain-language explainer
+                                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                        SegmentedButton(
+                                            selected = activeChannel != SyncChannel.ON_CAMPUS,
+                                            onClick = {
+                                                if (activeChannel == SyncChannel.ON_CAMPUS && !isSyncing) {
+                                                    switchChannel(SyncChannel.WEBVPN)
+                                                }
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Public,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "校外免校园网",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                        SegmentedButton(
+                                            selected = activeChannel == SyncChannel.ON_CAMPUS,
+                                            onClick = {
+                                                if (activeChannel != SyncChannel.ON_CAMPUS && !isSyncing) {
+                                                    switchChannel(SyncChannel.ON_CAMPUS)
+                                                }
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.School,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "校园网直连",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+
                                     Surface(
                                         color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                        shape = RoundedCornerShape(999.dp),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(999.dp))
-                                            .clickable(enabled = !isSyncing) { togglePrimaryChannel() }
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(7.dp)
-                                                    .clip(CircleShape)
-                                                    .background(MaterialTheme.colorScheme.primary)
+                                            Text(
+                                                text = if (activeChannel == SyncChannel.ON_CAMPUS) {
+                                                    "校园网直连 · 校内宿舍/教学区推荐"
+                                                } else {
+                                                    "什么是校外 WebVPN？（流量 / 校外 Wi-Fi）"
+                                                },
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
                                             )
                                             Text(
-                                                text = shortChannelLabel,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Icon(
-                                                imageVector = Icons.Rounded.SwapHoriz,
-                                                contentDescription = "切换网络通道",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(15.dp)
+                                                text = if (activeChannel == SyncChannel.ON_CAMPUS) {
+                                                    "直连校内正方教务服务器，不经校外网关中转，响应最快（离开校园网后会自动切回校外 WebVPN）。"
+                                                } else {
+                                                    "学校官方免费提供的校外安全网关，无需自己开梯子/代理。完成下方一次统一身份认证即可直接穿透网关同步课表与成绩。"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                lineHeight = 18.sp
                                             )
                                         }
                                     }
@@ -1139,15 +1223,39 @@ fun SyncPortalScreen(
                                     if (lastWebVpnDenied) {
                                         Surface(
                                             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
-                                            shape = RoundedCornerShape(12.dp),
+                                            shape = RoundedCornerShape(14.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Text(
-                                                text = "学校 WebVPN 提示「未在本地用户库注册」，请使用下方「企业微信扫码」或「备用入口(wfw)」登录。",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                                modifier = Modifier.padding(12.dp)
-                                            )
+                                            Column(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "学校 WebVPN 提示「未在本地用户库注册」：你的统一认证有效，但当前网关暂未同步该学号权限。可先用「企业微信扫码」打通网关，扫完将在同弹窗内自动继续统一认证：",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                                    lineHeight = 18.sp
+                                                )
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        openAuthSheet(
+                                                            channel = SyncChannel.WEBVPN,
+                                                            resumeUrl = "https://webvpn.gdou.edu.cn/login",
+                                                            activateWeComTab = true,
+                                                            holdOnWebVpnLogin = true,
+                                                            autoActionAfter = "all"
+                                                        )
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(40.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("先用企业微信扫码打通 WebVPN 网关", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            }
                                         }
                                     } else if (sessionState == PortalSessionUiState.NETWORK_ERROR) {
                                         Surface(
@@ -1169,9 +1277,10 @@ fun SyncPortalScreen(
                                     // Single prominent primary login CTA
                                     Button(
                                         onClick = {
+                                            val targetCh = if (activeChannel == SyncChannel.ON_CAMPUS) SyncChannel.ON_CAMPUS else SyncChannel.WEBVPN
                                             openAuthSheet(
-                                                channel = activeChannel,
-                                                resumeUrl = lastAuthResumeUrl.ifBlank { activeChannel.authStartUrl() },
+                                                channel = targetCh,
+                                                resumeUrl = lastAuthResumeUrl.ifBlank { targetCh.authStartUrl() },
                                                 autoActionAfter = "all"
                                             )
                                         },
@@ -1184,96 +1293,10 @@ fun SyncPortalScreen(
                                         Icon(Icons.AutoMirrored.Rounded.Login, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = if (activeChannel == SyncChannel.ON_CAMPUS) "校园网统一身份认证登录" else "广海统一身份认证登录",
+                                            text = if (activeChannel == SyncChannel.ON_CAMPUS) "进入校园网统一身份认证" else "进入广海统一身份认证",
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold
                                         )
-                                    }
-
-                                    // Subtle secondary login links (auto-upgraded to tonal buttons when WebVPN denied)
-                                    if (lastWebVpnDenied) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            FilledTonalButton(
-                                                onClick = {
-                                                    openAuthSheet(
-                                                        channel = SyncChannel.WEBVPN,
-                                                        resumeUrl = "https://webvpn.gdou.edu.cn/login",
-                                                        activateWeComTab = true,
-                                                        holdOnWebVpnLogin = true,
-                                                        autoActionAfter = "all"
-                                                    )
-                                                },
-                                                shape = RoundedCornerShape(12.dp),
-                                                contentPadding = PaddingValues(horizontal = 8.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(40.dp)
-                                            ) {
-                                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(5.dp))
-                                                Text("企业微信扫码", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                            }
-                                            FilledTonalButton(
-                                                onClick = {
-                                                    openAuthSheet(
-                                                        channel = SyncChannel.WFW_LEGACY,
-                                                        resumeUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
-                                                        autoActionAfter = "all"
-                                                    )
-                                                },
-                                                shape = RoundedCornerShape(12.dp),
-                                                contentPadding = PaddingValues(horizontal = 8.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(40.dp)
-                                            ) {
-                                                Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(5.dp))
-                                                Text("兼容通道(wfw)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                            }
-                                        }
-                                    } else {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
-                                        ) {
-                                            TextButton(
-                                                onClick = {
-                                                    openAuthSheet(
-                                                        channel = SyncChannel.WEBVPN,
-                                                        resumeUrl = "https://webvpn.gdou.edu.cn/login",
-                                                        activateWeComTab = true,
-                                                        holdOnWebVpnLogin = true,
-                                                        autoActionAfter = "all"
-                                                    )
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                            ) {
-                                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("企业微信扫码", fontSize = 12.5.sp)
-                                            }
-                                            Text(
-                                                text = "·",
-                                                color = MaterialTheme.colorScheme.outlineVariant,
-                                                modifier = Modifier.padding(horizontal = 2.dp)
-                                            )
-                                            TextButton(
-                                                onClick = {
-                                                    openAuthSheet(
-                                                        channel = SyncChannel.WFW_LEGACY,
-                                                        resumeUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
-                                                        autoActionAfter = "all"
-                                                    )
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                            ) {
-                                                Text("兼容通道(wfw)", fontSize = 12.5.sp)
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -1296,7 +1319,7 @@ fun SyncPortalScreen(
                                         modifier = Modifier.size(12.dp)
                                     )
                                     Text(
-                                        text = "仅在广海官方页面认证，本地不保存学号与密码",
+                                        text = "支持学号密码或手机验证码 · 仅广海官网认证，不存密码",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
                                     )
@@ -1811,7 +1834,7 @@ fun SyncPortalScreen(
 
                                 if (outcome.authExpired != null && outcome.summaryText.isBlank()) {
                                     sessionState = PortalSessionUiState.NEEDS_AUTH
-                                    lastWebVpnDenied = outcome.authExpired.isWebVpnDenied
+                                    recordWebVpnDenied(outcome.authExpired.isWebVpnDenied)
                                     openAuthSheet(
                                         channel = activeChannel,
                                         resumeUrl = outcome.authExpired.resumeUrl,

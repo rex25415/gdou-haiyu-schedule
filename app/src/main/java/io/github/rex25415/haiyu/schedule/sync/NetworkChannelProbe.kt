@@ -37,6 +37,35 @@ object NetworkChannelProbe {
     private var cachedProbeResult: NetworkProbeResult? = null
     @Volatile
     private var cachedProbeAtMs: Long = 0L
+    @Volatile
+    private var cachedNetworkSignature: String? = null
+
+    fun formatNetworkSignature(
+        networkHandle: String?,
+        hasWifiOrEthernet: Boolean,
+        hasCellular: Boolean,
+        hasVpn: Boolean
+    ): String = "${networkHandle.orEmpty()}|w=$hasWifiOrEthernet|c=$hasCellular|v=$hasVpn"
+
+    fun isCacheValidForNetwork(
+        cachedResult: NetworkProbeResult?,
+        cachedAtMs: Long,
+        cachedSignature: String?,
+        currentSignature: String,
+        nowMs: Long,
+        maxAgeMs: Long = 45_000L,
+        ignoreBlocked: Boolean = true
+    ): Boolean {
+        if (cachedResult == null || cachedSignature != currentSignature) return false
+        if (ignoreBlocked && cachedResult.state == CampusNetworkState.OFFLINE_OR_BLOCKED) return false
+        return nowMs - cachedAtMs < maxAgeMs
+    }
+
+    private fun updateCache(result: NetworkProbeResult, signature: String) {
+        cachedNetworkSignature = signature
+        cachedProbeAtMs = System.currentTimeMillis()
+        cachedProbeResult = result
+    }
 
     suspend fun probeCached(
         context: Context,
@@ -45,17 +74,23 @@ object NetworkChannelProbe {
     ): NetworkProbeResult {
         val now = System.currentTimeMillis()
         val prev = cachedProbeResult
+        val currentSig = currentNetworkSignature(context)
         if (
             !forceRefresh &&
-            prev != null &&
-            prev.state != CampusNetworkState.OFFLINE_OR_BLOCKED &&
-            now - cachedProbeAtMs < maxAgeMs
+            isCacheValidForNetwork(
+                cachedResult = prev,
+                cachedAtMs = cachedProbeAtMs,
+                cachedSignature = cachedNetworkSignature,
+                currentSignature = currentSig,
+                nowMs = now,
+                maxAgeMs = maxAgeMs,
+                ignoreBlocked = true
+            )
         ) {
-            return prev
+            return prev!!
         }
         val fresh = probe(context)
-        cachedProbeResult = fresh
-        cachedProbeAtMs = System.currentTimeMillis()
+        updateCache(fresh, currentNetworkSignature(context))
         return fresh
     }
 
@@ -185,7 +220,7 @@ object NetworkChannelProbe {
         val jwMs = jwFirst.latencyMs ?: jwRetryDeferred?.await()
         val authMs = authFirst.latencyMs ?: authRetryDeferred?.await()
 
-        NetworkProbeResult(
+        val result = NetworkProbeResult(
             state = classifyState(
                 jwReachable = jwMs != null,
                 wfwReachable = wfwMs != null,
@@ -196,6 +231,8 @@ object NetworkChannelProbe {
             wfwLatencyMs = wfwMs,
             authLatencyMs = authMs
         )
+        updateCache(result, currentNetworkSignature(context))
+        result
     }
 
     /**
@@ -226,9 +263,35 @@ object NetworkChannelProbe {
     fun shouldPreferOffCampusImmediately(context: Context): Boolean {
         if (isCellularOnly(context)) return true
         val prev = cachedProbeResult
-        return prev != null &&
-            prev.state == CampusNetworkState.OFF_CAMPUS_ONLY &&
-            System.currentTimeMillis() - cachedProbeAtMs < 45_000L
+        val currentSig = currentNetworkSignature(context)
+        return isCacheValidForNetwork(
+            cachedResult = prev,
+            cachedAtMs = cachedProbeAtMs,
+            cachedSignature = cachedNetworkSignature,
+            currentSignature = currentSig,
+            nowMs = System.currentTimeMillis(),
+            maxAgeMs = 45_000L,
+            ignoreBlocked = false
+        ) && prev?.state == CampusNetworkState.OFF_CAMPUS_ONLY
+    }
+
+    private fun currentNetworkSignature(context: Context): String {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return formatNetworkSignature(null, hasWifiOrEthernet = false, hasCellular = false, hasVpn = false)
+            val activeNet = cm.activeNetwork
+            val caps = cm.getNetworkCapabilities(activeNet)
+                ?: return formatNetworkSignature(activeNet?.toString(), hasWifiOrEthernet = false, hasCellular = false, hasVpn = false)
+            formatNetworkSignature(
+                networkHandle = activeNet?.toString(),
+                hasWifiOrEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                hasCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                hasVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            )
+        } catch (_: Exception) {
+            formatNetworkSignature(null, hasWifiOrEthernet = false, hasCellular = false, hasVpn = false)
+        }
     }
 
     private fun isWifiConnected(context: Context): Boolean {

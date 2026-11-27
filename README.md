@@ -1,16 +1,16 @@
 # 🌊 海屿空间（原名海屿课表）· 广海全校区纯净开源学业与课表工具
 
-[![Release](https://img.shields.io/badge/Release-v3.5.1-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
+[![Release](https://img.shields.io/badge/Release-v3.5.2-0C7D72)](https://github.com/rex25415/gdou-haiyu-schedule/releases/latest)
 [![Android CI](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml/badge.svg)](https://github.com/rex25415/gdou-haiyu-schedule/actions/workflows/android-ci.yml)
 [![Android](https://img.shields.io/badge/Android-8.0%20~%2017%20(targetSdk%2036)-3DDC84?logo=android&logoColor=white)](https://rex25415.github.io/gdou-haiyu-schedule/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-0C7D72)](LICENSE)
 
-专为 **广东海洋大学三校区（湖光主校区 · 海滨校区 · 阳江校区）** 适配的纯原生 **Kotlin + Jetpack Compose + Material 3** 安卓课表与学业空间（免校园网教务同步、分楼精准错峰、官网公告校历直达、成绩 GPA 去重与反推、空教室自习查询及四款桌面小组件）。
+专为 **广东海洋大学三校区（湖光主校区 · 海滨校区 · 阳江校区）** 适配的纯原生 **Kotlin + Jetpack Compose + Material 3** 安卓课表与学业空间（完全免费、零广告、免校园网教务同步、分楼精准错峰、官网公告校历直达、成绩 GPA 去重与反推、空教室自习查询及四款桌面小组件）。
 
 - 🌐 **中文高速下载主页（推荐 · 手机浏览器/QQ 直达，微信请复制进浏览器）**：https://rex25415.github.io/gdou-haiyu-schedule/
 - 📦 **GitHub Releases 发布页**：https://github.com/rex25415/gdou-haiyu-schedule/releases/latest
 
-> **非校方官方 & 非商业开源声明**：本项目由个人开发者 [@rex25415](https://github.com/rex25415) 基于兴趣开源维护（内置广海三校区公开作息模板），与任何高校官方无隶属关系。应用 **零自建后端、零账号密码中转、零广告统计、零后台自动爬虫/选课/抢课**，采用 [PolyForm Noncommercial 1.0.0](LICENSE) 开源协议（禁止商用与冒充重打包）。详见 [安全与合规白皮书 (SECURITY.md)](SECURITY.md) 与 [NOTICE](NOTICE)。
+> **非校方官方 & 免费分享声明**：本项目由个人开发者 [@rex25415](https://github.com/rex25415) 维护并完全免费、零广告分享给广海同学使用，与任何高校官方无隶属关系。应用 **零自建后端、零账号密码中转、零广告统计、零后台自动爬虫/选课/抢课**，采用 [PolyForm Noncommercial 1.0.0](LICENSE) 开源协议（禁止商用与冒充重打包）。详见 [安全与合规白皮书 (SECURITY.md)](SECURITY.md) 与 [NOTICE](NOTICE)。
 
 ---
 
@@ -35,7 +35,7 @@
 
 ### 1. 纯原生零 WebView 引擎一键同步广海教务（纯本地 · 只读）
 - **纯 Kotlin 原生 HTTPS 并发引擎（0 常驻 WebView）**：认证仅在按需弹出的广海官方页面完成（拦截 3.7MB 无用装饰大图、拿到票据立即销毁网页释放内存），随后课表、校历、成绩、考试与空教室 100% 走原生 HTTPS 并发拉取，彻底告别内嵌网页加载慢、掉帧卡顿与过期误报；
-- **智能双通道 & 跨网无感续期**：4G/5G 蜂窝流量 0ms 秒判校外免校园网（WebVPN / 备用 wfw），校内 Wi-Fi 自动探测直连，支持 `CASTGC → WebVPN` 静默换票与 HTTP Keep-Alive 连接复用，全链路强制 HTTPS 并兼容企业微信扫码与二次验证；
+- **智能双通道 & 跨网无感续期**：4G/5G 蜂窝流量 0ms 秒判校外免校园网（WebVPN），校内 Wi-Fi 自动探测直连，支持 `CASTGC → WebVPN` 静默换票与 HTTP Keep-Alive 连接复用，全链路强制 HTTPS 并支持异常时企业微信扫码二段续跳；
 - **刷新课表自动检查调课 & 查空教室 2.0**：首页右上角与教务中心均支持 1 秒静默刷课表，自动比对本地课表精准播报是否发生调课/换教室变动（保留手动调课/笔记）；内置三校区空闲教室与单室全天 5 大节时间轴查询，登录后自动回跳；
 - **唯一清爽的官网直连入口**：教务中心提供按需全屏「访问广海正方教务官网」直连入口，方便办理教学评价、自主选课与培养方案查询，关闭即自动释放内存。
 

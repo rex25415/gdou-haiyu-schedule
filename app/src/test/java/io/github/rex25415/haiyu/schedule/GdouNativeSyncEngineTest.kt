@@ -2,6 +2,7 @@ package io.github.rex25415.haiyu.schedule
 
 import io.github.rex25415.haiyu.schedule.model.CourseItem
 import io.github.rex25415.haiyu.schedule.sync.GdouNativeSyncEngine
+import io.github.rex25415.haiyu.schedule.sync.GdouSyncScript
 import io.github.rex25415.haiyu.schedule.sync.InMemoryGdouCookieStore
 import io.github.rex25415.haiyu.schedule.sync.NativeCallResult
 import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
@@ -555,6 +556,7 @@ class GdouNativeSyncEngineTest {
                             MockHttpResp(
                                 302,
                                 headers = listOf(
+                                    "Set-Cookie" to "WFWSESSID=WFW-PROXY-ANON; Path=/; HttpOnly",
                                     "Set-Cookie" to "JSESSIONID=SSO-STEP1; Path=/sso; HttpOnly",
                                     // Real Zhengfang redirects to absolute https://jw.gdou.edu.cn/sso/jziotlogin!
                                     "Location" to "https://jw.gdou.edu.cn/sso/jziotlogin"
@@ -681,6 +683,243 @@ class GdouNativeSyncEngineTest {
             val res = engine.establishOrVerifySession(SyncChannel.WEBVPN, forceReverify = true)
             assertTrue("Expected NeedsAuth for aged expired ticket, got $res", res is SessionCheckResult.NeedsAuth)
             assertFalse("Stale/guest wengine_vpn_ticket must be cleared before interactive re-auth", engine.hasWebVpnTicketCookie())
+        }
+    }
+
+    @Test
+    fun proxiedWebVpnAuthServerPreservesWeComTicketAndResumeUrl() = runBlocking {
+        LocalMiniHttpServer { req ->
+            when {
+                req.path.startsWith("/https/${GdouSyncScript.WEBVPN_JW_HEX}/") -> MockHttpResp(
+                    302,
+                    headers = listOf("Location" to "/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/login?service=jw")
+                )
+                req.path.startsWith("/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/") -> MockHttpResp(
+                    200,
+                    body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>"
+                )
+                else -> MockHttpResp(404)
+            }
+        }.use { webVpnServer ->
+            val store = InMemoryGdouCookieStore()
+            store.saveResponseCookies(
+                "${webVpnServer.baseUrl}/",
+                listOf("wengine_vpn_ticket=wrdvpn1-WECOM-QR-VALID; Path=/; HttpOnly")
+            )
+            val engine = GdouNativeSyncEngine(
+                cookieStore = store,
+                allowLoopbackForTest = true,
+                casLoginBaseOverride = "${webVpnServer.baseUrl}/direct-cas/login",
+                webVpnHostOverride = webVpnServer.baseUrl
+            )
+            val res = engine.establishOrVerifySession(SyncChannel.WEBVPN, forceReverify = true)
+            assertTrue("Expected NeedsAuth when proxied authserver requires verification, got $res", res is SessionCheckResult.NeedsAuth)
+            val needs = res as SessionCheckResult.NeedsAuth
+            assertTrue("Valid Enterprise WeChat wengine_vpn_ticket must NOT be wiped on proxied authserver gate", engine.hasWebVpnTicketCookie())
+            assertTrue("Resume URL should preserve proxied /authserver/ path, got ${needs.resumeUrl}", needs.resumeUrl.contains("/https/${GdouSyncScript.WEBVPN_AUTH_HEX}/authserver/"))
+        }
+    }
+
+    @Test
+    fun fetchAcademicOptionsSilentlyRenewsExpiredJwSessionViaCasTgc() = runBlocking {
+        val casMinted = AtomicInteger(0)
+        val validJwSession = AtomicBoolean(false)
+        LocalMiniHttpServer { req ->
+            val cookie = req.headers["cookie"].orEmpty()
+            when {
+                req.path == "/authserver/login" && cookie.contains("CASTGC=TGT-RENEW-OK") -> {
+                    casMinted.incrementAndGet()
+                    MockHttpResp(302, headers = listOf("Location" to "https://jw.gdou.edu.cn/sso/jziotlogin?ticket=ST-RENEW-777"))
+                }
+                req.path == "/sso/jziotlogin" && req.query.contains("ticket=ST-RENEW-777") -> {
+                    validJwSession.set(true)
+                    MockHttpResp(
+                        302,
+                        headers = listOf(
+                            "Set-Cookie" to "JSESSIONID=JW-RENEWED; Path=/; HttpOnly",
+                            "Location" to "/xtgl/index_initMenu.html?jsdm=xs"
+                        )
+                    )
+                }
+                req.path == "/xtgl/index_initMenu.html" && cookie.contains("JSESSIONID=JW-RENEWED") -> MockHttpResp(
+                    200,
+                    body = """<html><title>教学管理信息服务平台</title><body><div id="cdNav"></div><a onclick="clickMenu('N2151','/kbcx/xskbcx_cxXskbcxIndex.html','课表查询')">课表</a></body></html>"""
+                )
+                req.path == "/kbcx/xskbcx_cxXskbcxIndex.html" && cookie.contains("JSESSIONID=JW-RENEWED") -> MockHttpResp(
+                    200,
+                    body = """
+                        <html><title>学生课表查询</title><body><div id="cdNav"></div>
+                        <select id="xnm"><option value="2026" selected>2026-2027</option></select>
+                        <select id="xqm"><option value="3" selected>1</option><option value="12">2</option></select>
+                        </body></html>
+                    """.trimIndent()
+                )
+                else -> MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+            }
+        }.use { server ->
+            val store = InMemoryGdouCookieStore()
+            store.saveResponseCookies("${server.baseUrl}/authserver/login", listOf("CASTGC=TGT-RENEW-OK; Path=/authserver; HttpOnly"))
+            val engine = GdouNativeSyncEngine(
+                cookieStore = store,
+                allowLoopbackForTest = true,
+                customBaseUrlOverride = server.baseUrl,
+                casLoginBaseOverride = "${server.baseUrl}/authserver/login"
+            )
+            // First fetch hits expired JSESSIONID on /kbcx/ -> withSilentCasRetry silently mints ST & retries cleanly!
+            val res = engine.fetchAcademicOptions(SyncChannel.ON_CAMPUS)
+            assertTrue("Expected silent CAS renewal inside fetchAcademicOptions, got $res", res is NativeCallResult.Success)
+            val opts = (res as NativeCallResult.Success).data
+            assertFalse("Expected real parsed term options after CAS renew, not fallback", opts.isFallback)
+            assertEquals("2026", opts.yearOptions.first().value)
+            assertTrue("CAS ticket mint should have been triggered", casMinted.get() >= 1)
+            assertTrue(validJwSession.get())
+        }
+    }
+
+    @Test
+    fun wfwRootTicketRedemptionClearsUrlssBeforeCasValidationAndRestoresForJw() = runBlocking {
+        val wfwPortalCookieLeaked = AtomicBoolean(false)
+        val fileUrlssLeaked = AtomicBoolean(false)
+        val jwRedeemedViaWfw = AtomicBoolean(false)
+        LocalMiniHttpServer { req ->
+            val cookie = req.headers["cookie"].orEmpty()
+            if (req.path == "/authserver/login" && cookie.contains("CASTGC=TGT-WFW-OK")) {
+                val rawService = req.query.substringAfter("service=", "").substringBefore("&")
+                val decoded = java.net.URLDecoder.decode(rawService, "UTF-8")
+                val sep = if (decoded.contains("?")) "&" else "?"
+                MockHttpResp(302, headers = listOf("Location" to "${decoded}${sep}ticket=ST-WFW-123"))
+            } else {
+                MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+            }
+        }.use { casServer ->
+            LocalMiniHttpServer { req ->
+                val cookie = req.headers["cookie"].orEmpty()
+                if (cookie.contains("urlss_file", ignoreCase = true) || cookie.contains("file.gdou.edu.cn")) {
+                    fileUrlssLeaked.set(true)
+                }
+                when {
+                    req.path == "/sso/jziotlogin" && req.query.contains("ticket=ST-WFW-123") -> {
+                        // Reproduce real wfw nginx trap: logged-in WFWSESSID/db_agent_token/_path triggers ?ticket= stripping!
+                        if (cookie.contains("WFWSESSID=WFW-LOGGEDIN") || cookie.contains("db_agent_token") || cookie.contains("_path=")) {
+                            wfwPortalCookieLeaked.set(true)
+                            MockHttpResp(302, headers = listOf("Location" to "/sso/jziotlogin"))
+                        } else if (cookie.contains("urlss=\"https://jw.gdou.edu.cn/\"")) {
+                            jwRedeemedViaWfw.set(true)
+                            MockHttpResp(
+                                302,
+                                headers = listOf(
+                                    "Set-Cookie" to "WFWSESSID=WFW-ANON-NEW; Path=/; HttpOnly",
+                                    "Set-Cookie" to "JSESSIONID=JW-WFW-READY; Path=/; HttpOnly",
+                                    "Location" to "https://jw.gdou.edu.cn/xtgl/index_initMenu.html?jsdm=xs"
+                                )
+                            )
+                        } else {
+                            MockHttpResp(403, body = "missing urlss")
+                        }
+                    }
+                    req.path == "/xtgl/index_initMenu.html" && cookie.contains("JSESSIONID=JW-WFW-READY") -> MockHttpResp(
+                        200,
+                        body = """<html><title>教学管理信息服务平台</title><body><div id="cdNav"></div><a onclick="clickMenu('N2151','/kbcx/xskbcx_cxXskbcxIndex.html','课表查询')">课表</a></body></html>"""
+                    )
+                    else -> MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+                }
+            }.use { wfwServer ->
+                val store = InMemoryGdouCookieStore()
+                store.saveResponseCookies("${casServer.baseUrl}/authserver/login", listOf("CASTGC=TGT-WFW-OK; Path=/authserver; HttpOnly"))
+                // Pre-seed polluted wfw portal & file.gdou.edu.cn cookies!
+                store.saveResponseCookies(
+                    "${wfwServer.baseUrl}/",
+                    listOf(
+                        "WFWSESSID=WFW-LOGGEDIN; Path=/; HttpOnly",
+                        "db_agent_token=PORTAL-TOK; Path=/",
+                        "_path=/portal; Path=/",
+                        "urlss_file=\"https://file.gdou.edu.cn/\"; Path=/; Secure",
+                        "urlss=\"https://file.gdou.edu.cn/\"; Path=/; Secure"
+                    )
+                )
+                val engine = GdouNativeSyncEngine(
+                    cookieStore = store,
+                    allowLoopbackForTest = true,
+                    casLoginBaseOverride = "${casServer.baseUrl}/authserver/login",
+                    wfwHostOverride = wfwServer.baseUrl
+                )
+                val res = engine.establishOrVerifySession(SyncChannel.WFW_LEGACY, forceReverify = true)
+                assertTrue("Expected WFW_LEGACY Ready, got $res", res is SessionCheckResult.Ready)
+                assertFalse("Logged-in wfw portal cookies must NOT reach /sso/jziotlogin?ticket=", wfwPortalCookieLeaked.get())
+                assertFalse("urlss_file / file.gdou.edu.cn must never leak on WFW_LEGACY", fileUrlssLeaked.get())
+                assertTrue("urlss must be restored to jw.gdou.edu.cn for /sso/jziotlogin", jwRedeemedViaWfw.get())
+            }
+        }
+    }
+
+    @Test
+    fun hopCookieOverlayOverridesStaleRootSessionAcrossSsoRedirects() = runBlocking {
+        LocalMiniHttpServer { req ->
+            val cookie = req.headers["cookie"].orEmpty()
+            when {
+                req.path == "/sso/jziotlogin" && req.query.contains("ticket=ST-HOP-1") -> MockHttpResp(
+                    302,
+                    headers = listOf(
+                        "Set-Cookie" to "JSESSIONID=FRESH-SSO-SESSION; Path=/sso; HttpOnly",
+                        "Location" to "/sso/jziotlogin"
+                    )
+                )
+                req.path == "/sso/jziotlogin" -> {
+                    // Simulate Tomcat reading the first JSESSIONID in Cookie header
+                    val firstJsession = Regex("JSESSIONID=([^;]+)").find(cookie)?.groupValues?.getOrNull(1).orEmpty()
+                    if (firstJsession == "FRESH-SSO-SESSION") {
+                        MockHttpResp(
+                            302,
+                            headers = listOf(
+                                "Set-Cookie" to "JSESSIONID=FRESH-JW-ROOT; Path=/; HttpOnly",
+                                "Location" to "/xtgl/index_initMenu.html?jsdm=xs"
+                            )
+                        )
+                    } else {
+                        MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+                    }
+                }
+                req.path == "/xtgl/index_initMenu.html" && cookie.contains("JSESSIONID=FRESH-JW-ROOT") -> MockHttpResp(
+                    200,
+                    body = """<html><title>教学管理信息服务平台</title><body><div id="cdNav"></div><a onclick="clickMenu('N2151','/kbcx/xskbcx_cxXskbcxIndex.html','课表查询')">课表</a></body></html>"""
+                )
+                else -> MockHttpResp(200, body = "<html><title>统一身份认证平台</title><form id='pwdFromId'></form></html>")
+            }
+        }.use { server ->
+            // Simulate buggy CookieManager returning STALE root JSESSIONID for /sso/* alongside saved root cookies
+            var savedRootJsession: String? = null
+            val buggyStore = object : io.github.rex25415.haiyu.schedule.sync.GdouCookieStore {
+                override fun getCookieHeader(url: String): String = when {
+                    url.contains("authserver") -> "CASTGC=TGT-OK"
+                    url.contains("/sso/") -> "JSESSIONID=STALE-ROOT-ID"
+                    else -> savedRootJsession ?: "JSESSIONID=STALE-ROOT-ID"
+                }
+                override fun saveResponseCookies(url: String, setCookieHeaders: List<String>) {
+                    for (raw in setCookieHeaders) {
+                        if (raw.contains("FRESH-JW-ROOT")) {
+                            savedRootJsession = "JSESSIONID=FRESH-JW-ROOT"
+                        }
+                    }
+                }
+                override fun clearCookieByPrefix(url: String, namePrefix: String) {}
+                override fun clearAll() {}
+                override fun flushAsync(minIntervalMs: Long) {}
+            }
+            LocalMiniHttpServer { req ->
+                val ck = req.headers["cookie"].orEmpty()
+                if (req.path == "/authserver/login" && ck.contains("CASTGC=TGT-OK")) {
+                    MockHttpResp(302, headers = listOf("Location" to "https://jw.gdou.edu.cn/sso/jziotlogin?ticket=ST-HOP-1"))
+                } else MockHttpResp(404)
+            }.use { cas ->
+                val hopEngine = GdouNativeSyncEngine(
+                    cookieStore = buggyStore,
+                    allowLoopbackForTest = true,
+                    customBaseUrlOverride = server.baseUrl,
+                    casLoginBaseOverride = "${cas.baseUrl}/authserver/login"
+                )
+                val verified = hopEngine.establishOrVerifySession(SyncChannel.ON_CAMPUS, forceReverify = true)
+                assertTrue("Expected hopCookie overlay to override stale JSESSIONID across 302s, got $verified", verified is SessionCheckResult.Ready)
+            }
         }
     }
 }

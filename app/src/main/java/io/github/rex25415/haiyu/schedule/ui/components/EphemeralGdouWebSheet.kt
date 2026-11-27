@@ -107,7 +107,8 @@ data class WebSheetRequest(
     val titleHint: String,
     val preferDesktopUa: Boolean = false,
     val activateWeComTab: Boolean = false,
-    val holdOnWebVpnLogin: Boolean = false
+    val holdOnWebVpnLogin: Boolean = false,
+    val preferLegacyWfw: Boolean = false
 )
 
 /**
@@ -139,12 +140,20 @@ fun EphemeralGdouWebSheet(
     var pageErrorMsg by remember(request) { mutableStateOf<String?>(null) }
     var domWebVpnDenied by remember(request) { mutableStateOf(false) }
     var pendingWeComTab by remember(request) { mutableStateOf(request.activateWeComTab) }
+    var hasForwardedIntoVpnJw by remember(request) { mutableStateOf(false) }
     var hasAutoTriggeredCas by remember(request) {
         mutableStateOf(request.holdOnWebVpnLogin || request.startUrl.contains("cas_login=true", ignoreCase = true))
     }
     var hasAutoSwitchedMfa by remember(request) { mutableStateOf(false) }
     var hasAutoRetriedReset by remember(request) { mutableStateOf(false) }
     var authHandoffDispatched by remember(request) { mutableStateOf(false) }
+    val defaultMobileUa = remember {
+        try {
+            WebSettings.getDefaultUserAgent(context)
+        } catch (_: Throwable) {
+            ""
+        }
+    }
     var jsAlertDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var jsConfirmDialog by remember { mutableStateOf<Pair<String, JsResult>?>(null) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -199,6 +208,15 @@ fun EphemeralGdouWebSheet(
         false
     }
 
+    fun hasWebVpnTicketCookie(): Boolean = try {
+        CookieManager.getInstance()
+            .getCookie("https://webvpn.gdou.edu.cn/")
+            .orEmpty()
+            .contains("wengine_vpn_ticket", ignoreCase = true)
+    } catch (_: Throwable) {
+        false
+    }
+
     fun clearStaleWebVpnTicketCookie() {
         try {
             val cm = CookieManager.getInstance()
@@ -233,13 +251,55 @@ fun EphemeralGdouWebSheet(
         }
     }
 
-    fun tryAutoFailoverWebVpnDenied(wv: WebView?): Boolean {
-        clearStaleWebVpnTicketCookie()
-        if (request.mode == WebSheetMode.AUTH_ONLY && hasDirectCasTgcCookie()) {
-            onShowMessage("统一认证已通过，检测到 WebVPN 未同步该学号，已自动无缝切至校外兼容通道")
-            triggerInstantAuthHandoff(wv, SyncChannel.WFW_LEGACY)
-            return true
+    /**
+     * 处理 WebVPN 门户根目录落地：
+     * - 正常经 CAS 登录成功（已带 CASTGC）时直接交还原生引擎签票；
+     * - 经企业微信扫码等仅打通网关却未登录 CAS 时，不关弹窗，直接在同弹窗内无感跳转反代教务以继续统一认证。
+     */
+    fun handleWebVpnPortalLanding(wv: WebView?, url: String?): Boolean {
+        if (request.mode != WebSheetMode.AUTH_ONLY || authHandoffDispatched || activeChannel != SyncChannel.WEBVPN) {
+            return false
         }
+        return when (
+            GdouSyncScript.resolveWebVpnPortalLandingAction(
+                url = url,
+                hasDirectCasTgc = hasDirectCasTgcCookie(),
+                hasWebVpnTicket = hasWebVpnTicketCookie(),
+                hasForwardedIntoVpnJw = hasForwardedIntoVpnJw
+            )
+        ) {
+            GdouSyncScript.WebVpnPortalLandingAction.HANDOFF -> {
+                triggerInstantAuthHandoff(wv, SyncChannel.WEBVPN)
+                true
+            }
+            GdouSyncScript.WebVpnPortalLandingAction.FORWARD_TO_PROXIED_JW -> {
+                hasForwardedIntoVpnJw = true
+                pendingWeComTab = false
+                mainHandler.post {
+                    try {
+                        if (desktopMode) {
+                            desktopMode = false
+                            wv?.settings?.apply {
+                                if (defaultMobileUa.isNotBlank()) userAgentString = defaultMobileUa
+                                useWideViewPort = false
+                                loadWithOverviewMode = false
+                            }
+                        }
+                        currentUrl = GdouSyncScript.URL_WEBVPN_JW_ENTRY
+                        trustedUrlRef.set(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
+                        wv?.stopLoading()
+                        wv?.loadUrl(GdouSyncScript.URL_WEBVPN_JW_ENTRY)
+                    } catch (_: Throwable) {}
+                    onShowMessage("WebVPN 网关扫码已通过，请继续完成统一身份认证")
+                }
+                true
+            }
+            GdouSyncScript.WebVpnPortalLandingAction.IGNORE -> false
+        }
+    }
+
+    fun tryAutoFailoverWebVpnDenied(@Suppress("UNUSED_PARAMETER") wv: WebView?): Boolean {
+        clearStaleWebVpnTicketCookie()
         return false
     }
 
@@ -391,7 +451,7 @@ fun EphemeralGdouWebSheet(
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "后退")
                             }
                         }
-                        if (request.mode == WebSheetMode.FULL_BROWSER || desktopMode) {
+                        if (activeChannel != SyncChannel.WFW_LEGACY && (request.mode == WebSheetMode.FULL_BROWSER || desktopMode)) {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                                 shape = RoundedCornerShape(8.dp),
@@ -466,7 +526,7 @@ fun EphemeralGdouWebSheet(
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
-                            text = "统一认证已通过，但学校新版 WebVPN 暂未同步你学号的权限。可一键改走备用校外入口(wfw)、企业微信扫码或校园网直连：",
+                            text = "统一认证账号已通过，但学校 WebVPN 本地库暂未同步你的学号权限。可先用「企业微信扫码」打通网关（扫完将自动继续统一认证），或连上校园网后切「校园网直连」：",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -476,32 +536,12 @@ fun EphemeralGdouWebSheet(
                         ) {
                             Button(
                                 onClick = {
-                                    if (!tryAutoFailoverWebVpnDenied(webViewRef)) {
-                                        onSwitchRequest(
-                                            WebSheetRequest(
-                                                mode = WebSheetMode.AUTH_ONLY,
-                                                channel = SyncChannel.WFW_LEGACY,
-                                                startUrl = GdouSyncScript.URL_DIRECT_CAS_WFW,
-                                                titleHint = "校外兼容通道登录",
-                                                preferDesktopUa = false
-                                            )
-                                        )
-                                    }
-                                },
-                                shape = RoundedCornerShape(9.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("切兼容通道(wfw)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = {
                                     onSwitchRequest(
                                         WebSheetRequest(
                                             mode = WebSheetMode.AUTH_ONLY,
                                             channel = SyncChannel.WEBVPN,
                                             startUrl = "https://webvpn.gdou.edu.cn/login",
-                                            titleHint = "企业微信扫码登录",
+                                            titleHint = "企业微信扫码打通网关",
                                             preferDesktopUa = true,
                                             activateWeComTab = true,
                                             holdOnWebVpnLogin = true
@@ -512,23 +552,26 @@ fun EphemeralGdouWebSheet(
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("企业微信扫码", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text("企业微信扫码过网关", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
-                        }
-                        TextButton(
-                            onClick = {
-                                onSwitchRequest(
-                                    WebSheetRequest(
-                                        mode = WebSheetMode.AUTH_ONLY,
-                                        channel = SyncChannel.ON_CAMPUS,
-                                        startUrl = GdouSyncScript.URL_ON_CAMPUS,
-                                        titleHint = "校园网直连认证",
-                                        preferDesktopUa = false
+                            OutlinedButton(
+                                onClick = {
+                                    onSwitchRequest(
+                                        WebSheetRequest(
+                                            mode = WebSheetMode.AUTH_ONLY,
+                                            channel = SyncChannel.ON_CAMPUS,
+                                            startUrl = GdouSyncScript.URL_ON_CAMPUS,
+                                            titleHint = "校园网直连认证",
+                                            preferDesktopUa = false
+                                        )
                                     )
-                                )
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("切校园网直连", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
-                        ) {
-                            Text("我在校园网 · 切校园网直连", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -704,11 +747,14 @@ fun EphemeralGdouWebSheet(
                                         ) {
                                             if (tryAutoFailoverWebVpnDenied(view)) return
                                         }
-                                        // 1) WebVPN CAS ticket succeeded and redirected to WebVPN portal or proxied JW -> HANDOFF INSTANTLY!
+                                        // 1) WebVPN portal root landing: CAS-backed hands off instantly; WeCom gateway-only forwards inside tunnel to proxied JW/CAS
+                                        if (handleWebVpnPortalLanding(view, url)) {
+                                            return
+                                        }
+                                        // 1b) Proxied JW page reached directly inside WebVPN -> HANDOFF INSTANTLY!
                                         if (
                                             activeChannel == SyncChannel.WEBVPN &&
-                                            (GdouSyncScript.isAuthenticatedWebVpnPortalUrl(url) ||
-                                                GdouSyncScript.resolveJwLoginState(url, pageTitle, null, domConfirmedLoggedIn = false))
+                                            GdouSyncScript.resolveJwLoginState(url, pageTitle, null, domConfirmedLoggedIn = false)
                                         ) {
                                             triggerInstantAuthHandoff(view, SyncChannel.WEBVPN)
                                             return
@@ -809,9 +855,8 @@ fun EphemeralGdouWebSheet(
 
                                     if (request.mode == WebSheetMode.AUTH_ONLY && !authHandoffDispatched) {
                                         val titleNow = wv.title ?: pageTitle
-                                        // Check WebVPN portal root / WFW root / server-forwarded login_slogin DOM
-                                        if (activeChannel == SyncChannel.WEBVPN && GdouSyncScript.isAuthenticatedWebVpnPortalUrl(finishedUrl)) {
-                                            triggerInstantAuthHandoff(wv, SyncChannel.WEBVPN)
+                                        // Check WebVPN portal root / personal portal / server-forwarded login_slogin DOM
+                                        if (handleWebVpnPortalLanding(wv, finishedUrl)) {
                                             return
                                         }
                                         if (GdouSyncScript.isAuthenticatedCasFallbackUrl(finishedUrl) && hasDirectCasTgcCookie()) {
@@ -824,10 +869,10 @@ fun EphemeralGdouWebSheet(
                                         if (
                                             activeChannel == SyncChannel.WFW_LEGACY &&
                                             host == "wfw.gdou.edu.cn" &&
-                                            !query.contains("ticket=") &&
                                             !titleNow.contains("跳转") &&
                                             !titleNow.contains("统一身份认证") &&
-                                            !titleNow.contains("登录")
+                                            !titleNow.contains("登录") &&
+                                            (hasDirectCasTgcCookie() || !query.contains("ticket="))
                                         ) {
                                             ensureWfwProxyCookiesInWebView()
                                             if (hasDirectCasTgcCookie()) {
@@ -878,6 +923,21 @@ fun EphemeralGdouWebSheet(
                                             )
                                     ) {
                                         hasAutoRetriedReset = true
+                                        try {
+                                            val cm = CookieManager.getInstance()
+                                            val reqHost = GdouSyncScript.extractHostLower(reqUrl)
+                                            val origin = if (reqHost == "jw.gdou.edu.cn" || reqHost == "wfw.gdou.edu.cn") {
+                                                "https://$reqHost/"
+                                            } else null
+                                            if (origin != null) {
+                                                cm.getCookie(origin).orEmpty().split(";").forEach { part ->
+                                                    val cname = part.trim().substringBefore("=").trim()
+                                                    if (cname.startsWith("ADCCookie", ignoreCase = true)) {
+                                                        cm.setCookie(origin, "$cname=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
+                                                    }
+                                                }
+                                            }
+                                        } catch (_: Throwable) {}
                                         mainHandler.postDelayed({ view?.loadUrl(reqUrl) }, 260L)
                                         return
                                     }
@@ -969,13 +1029,18 @@ fun EphemeralGdouWebSheet(
                                         webViewRef?.reload()
                                     }) { Text("重试") }
                                     Button(onClick = {
-                                        val nextCh = if (activeChannel == SyncChannel.ON_CAMPUS) SyncChannel.WEBVPN else SyncChannel.ON_CAMPUS
+                                        val nextCh = if (activeChannel == SyncChannel.ON_CAMPUS) {
+                                            SyncChannel.WEBVPN
+                                        } else {
+                                            SyncChannel.ON_CAMPUS
+                                        }
                                         onSwitchRequest(
                                             WebSheetRequest(
                                                 mode = request.mode,
                                                 channel = nextCh,
                                                 startUrl = nextCh.authStartUrl(),
-                                                titleHint = if (nextCh == SyncChannel.WEBVPN) "校外免校园网认证" else "校园网直连认证"
+                                                titleHint = if (nextCh == SyncChannel.ON_CAMPUS) "校园网直连认证" else "校外免校园网认证",
+                                                preferLegacyWfw = false
                                             )
                                         )
                                     }) {

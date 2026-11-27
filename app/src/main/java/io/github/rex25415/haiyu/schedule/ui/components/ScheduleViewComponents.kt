@@ -41,18 +41,25 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.rex25415.haiyu.schedule.sync.CampusNetworkState
+import io.github.rex25415.haiyu.schedule.sync.NetworkChannelProbe
 import io.github.rex25415.haiyu.schedule.data.CourseOccurrenceStatus
 import io.github.rex25415.haiyu.schedule.data.GdouTimeRules
 import io.github.rex25415.haiyu.schedule.data.OccurrenceState
@@ -108,6 +115,23 @@ fun EmptyScheduleOnboarding(
     onLoadDemoData: () -> Unit,
     onManualAdd: () -> Unit
 ) {
+    val context = LocalContext.current
+    var detectedProbe by remember { mutableStateOf<CampusNetworkState?>(null) }
+    val initialCellularOnly = remember { NetworkChannelProbe.isCellularOnly(context) }
+    LaunchedEffect(Unit) {
+        detectedProbe = NetworkChannelProbe.probeCached(context).state
+    }
+    val onboardingNetHint = when (detectedProbe) {
+        CampusNetworkState.ON_CAMPUS_DIRECT_READY -> "已接入校园网 · 将直接连接校内教务极速同步"
+        CampusNetworkState.OFF_CAMPUS_ONLY -> "已识别校外网络 · 将经广海官方 WebVPN 免代理登录"
+        CampusNetworkState.OFFLINE_OR_BLOCKED -> "暂未连通学校网络 · 请检查流量或校园网连接"
+        CampusNetworkState.PROBING, null -> if (initialCellularOnly) {
+            "当前为移动网络 · 将经广海官方 WebVPN 免代理同步"
+        } else {
+            "自动识别校园网与校外 WebVPN，无需额外配置代理"
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -206,6 +230,13 @@ fun EmptyScheduleOnboarding(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("连接广海教务 · 一键同步课表", fontWeight = FontWeight.Bold)
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = onboardingNetHint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.88f),
+                    textAlign = TextAlign.Center
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
