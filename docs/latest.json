@@ -1,16 +1,16 @@
 {
-  "tagName": "v3.5.1",
-  "versionName": "3.5.1",
-  "title": "海屿空间 v3.5.1",
-  "apkFileName": "HaiyuSchedule-GDOU-v3.5.1.apk",
+  "tagName": "v3.5.2",
+  "versionName": "3.5.2",
+  "title": "海屿空间 v3.5.2",
+  "apkFileName": "HaiyuSchedule-GDOU-v3.5.2.apk",
   "apkSizeBytes": 2131309,
-  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.1/HaiyuSchedule-GDOU-v3.5.1.apk",
-  "expectedSha256": "93096a8ff1a9e0c021bff2c0e957dc7cad8a8d58c2ac633a6f300b311ca11604",
-  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.1",
+  "apkDownloadUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/download/v3.5.2/HaiyuSchedule-GDOU-v3.5.2.apk",
+  "expectedSha256": "0998e2437b7079b75db20540684928b2bd9ca8857541a49ab4c56faeb748e2b4",
+  "htmlUrl": "https://github.com/rex25415/gdou-haiyu-schedule/releases/tag/v3.5.2",
   "mirrorPrefixes": [
     "https://ghfast.top/",
     "https://gh-proxy.com/",
     "https://ghproxy.net/"
   ],
-  "releaseNotes": "🛠️ 校外登录底层根治升级（建议全部同学更新，覆盖安装自动保留全部本地课表、成绩与设置）：\n\n- 🔐 校外认证升级为直连广海公网第一方统一身份认证（authserver.gdou.edu.cn）：免下 WebVPN 374KB 代理脚本、彻底告别“您正在使用VPN”浮窗，登录更快，并打通校园网 ↔ 5G 切网静默换票\n- 🚀 彻底打通校外兼容通道（wfw）并实现 WebVPN 拒登零密码自愈：若学号暂未同步至学校新版 WebVPN 本地用户库（提示「未在本地用户库注册」），系统将自动利用已通过的统一认证通行证在后台无缝切换「校外兼容通道 (wfw)」直通正方教务，无需二次输入密码\n- 💾 持久化记忆校外网关偏好：一旦走通兼容通道或触发 WebVPN 拒登即永久记住，手机后台重启或次日再点「刷新课表」绝不再弹回 WebVPN 撞红屏\n- 🧹 加固老会话过期与边缘场景：过期重登自动清理脏票据、补齐个人中心与官网浏览门户自动跳过，教务中心右上角菜单支持手动切换校外网关并常驻「清除登录缓存」"
+  "releaseNotes": "💬 致各位海大同学：海屿空间坚持完全免费、零广告、不上传学号密码，单纯希望能把顺手好用的工具真诚分享给更多有需要的同学。本版覆盖安装自动保留全部本地课表、成绩与设置：\n\n- 🧭 极简双入口与白话引导：登录页精简为「校外免校园网（WebVPN）」与「校园网直连」二选一，首页迎新卡与登录引导直白说明校外无需自备梯子或代理；移除失效的兼容通道（wfw）入口与常驻扫码误导，仅在极少数账号提示「未在本地用户库注册」时按需引导企微扫码过网关\n- 🛡️ 防误切与外网防卡死：探活缓存绑定网络指纹，切网或开关 Wi-Fi 即时刷新；纯 5G 或校外普通 Wi-Fi 下误点「校园网直连」或从首页刷新均自动兜底保留 WebVPN，不再掉回未登录或卡在不可达内网\n- 🔁 首页刷新闭环与企微续跳：从课表首页右上角 ↻ 登录并同步完成后自动切回课表页；WebVPN 扫码过网关后若尚未登录统一认证，同弹窗内无感续跳反代认证页一步完成连接\n- 🧹 会话与反代底层加固：修复跳转间 Path Cookie 隔离、保留企微扫码后的 WebVPN 网关票据、精简冗余请求，原生同步后 WebViews: 0 彻底释放内存"
 }
